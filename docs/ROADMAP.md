@@ -78,7 +78,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Swimming, drowning, lava / slime damage, underwater tints
 - [x] Ladders (exact test against ladder brushes; they are detail brushes that don't split leafs)
 - [x] Player-clip brushes as invisible walls (polygons built from the brush planes)
-- [ ] Box-shaped player collision
+- [x] Box-shaped player collision (Quake 2's 32 × 32 × 56 box via `WorldBoxCollision`, ledge support from the box corners)
 - [x] Monster steering around obstacles (±45° / ±90° detours) and ledge checks
 - [x] `path_corner` patrols and `point_combat` (hold) combat points; player-clip doesn't block monsters
 - [x] Attacks happen partway through the attack animation (wind-up; pain cancels the shot)

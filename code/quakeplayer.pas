@@ -37,6 +37,8 @@ type
     FWaterSpeed, FWaterFriction, FWaterSink: Single;
     FOnLandSound: TNotifyEvent;
     FOnLadder: Boolean;
+    FBoxCollision: Boolean;
+    FHalfWidth: Single;
     procedure CategorizeWater(const Pos: TVector3);
     { A ladder brush right in front of the player (PM_CatagorizePosition's
       ladder trace, done with point contents) }
@@ -44,7 +46,15 @@ type
     procedure LadderMove(const Pos: TVector3; const SecondsPassed: Single);
     procedure WaterMove(const Pos: TVector3; const SecondsPassed: Single);
     function EyeHeight: Single;
-    { Height of the eye above the ground below Pos (huge if no ground) }
+    { Box top above the eye: Quake 2 maxs.z 32 (ducked 4) above the origin }
+    function HeadRoom: Single;
+    { Player box at eye position Pos, its bottom raised by BottomLift }
+    function PlayerBox(const Pos: TVector3; const BottomLift: Single): TBox3D;
+    { Is there room to move the head from Pos up by Dy (> 0)? }
+    function RoomAbove(const Pos: TVector3; const Dy: Single): Boolean;
+    { Height of the eye above the ground below Pos (huge if no ground).
+      With box collision, the highest ground under the box centre or corners
+      (you stand on a ledge until the whole box is off it, like Quake 2). }
     function HeightAboveGround(const Pos: TVector3): Single;
     procedure Accelerate(const WishDir: TVector3; const WishSpeed, Accel, SecondsPassed: Single);
     procedure ApplyFriction(const SecondsPassed: Single);
@@ -90,7 +100,13 @@ type
     property GravityAcceleration: Single read FGravity write FGravity;
     property JumpSpeed: Single read FJumpSpeed write FJumpSpeed;
     property StepSize: Single read FStepSize write FStepSize;
+    { Sphere radius, used when BoxCollision is False }
     property Radius: Single read FRadius write FRadius;
+    { Collide with Quake 2's player box (32 x 32 x 56, ducked 32 high)
+      instead of a sphere at the eye }
+    property BoxCollision: Boolean read FBoxCollision write FBoxCollision default True;
+    { Half of the box width (Quake 2: 16) }
+    property HalfWidth: Single read FHalfWidth write FHalfWidth;
     property StandEyeHeight: Single read FEyeHeight write FEyeHeight;
     property CrouchEyeHeight: Single read FCrouchEyeHeight write FCrouchEyeHeight;
   end;
@@ -115,6 +131,8 @@ begin
   FJumpSpeed := 270;
   FStepSize := 18;
   FRadius := 14;
+  FBoxCollision := True;
+  FHalfWidth := 16;
   FEyeHeight := 46;       { origin 24 above the feet + viewheight 22 }
   FCrouchEyeHeight := 22; { ducked: origin 24 + viewheight -2 }
   FWaterSpeed := 400 * 0.5; { pm_waterspeed, halved by PM_WaterMove }
@@ -125,7 +143,7 @@ end;
 function TQuakePlayerMovement.PropertySections(const PropertyName: String): TPropertySections;
 begin
   if ArrayContainsString(PropertyName, ['Active', 'OnGround', 'Crouched', 'Noclip', 'RunSpeed',
-    'JumpSpeed', 'GravityAcceleration', 'StepSize']) then
+    'JumpSpeed', 'GravityAcceleration', 'StepSize', 'BoxCollision']) then
     Result := [psBasic]
   else
     Result := inherited PropertySections(PropertyName);
@@ -139,12 +157,63 @@ begin
     Result := FEyeHeight;
 end;
 
-function TQuakePlayerMovement.HeightAboveGround(const Pos: TVector3): Single;
-var
-  Ground: PTriangle;
+function TQuakePlayerMovement.HeadRoom: Single;
 begin
-  if (World = nil) or not World.WorldHeight(Pos, Result, Ground) then
-    Result := 100000;
+  if FCrouched then
+    Result := 6   { origin 24 + maxs 4 - eye 22 }
+  else
+    Result := 10; { origin 24 + maxs 32 - eye 46 }
+end;
+
+function TQuakePlayerMovement.PlayerBox(const Pos: TVector3; const BottomLift: Single): TBox3D;
+var
+  H: Single;
+begin
+  { A hair smaller than the Quake 2 box, so touching a wall isn't a collision
+    and 32-unit gaps stay passable }
+  H := FHalfWidth - 0.25;
+  Result := Box3D(
+    Pos + Vector3(-H, BottomLift - EyeHeight, -H),
+    Pos + Vector3( H, HeadRoom, H));
+end;
+
+function TQuakePlayerMovement.RoomAbove(const Pos: TVector3; const Dy: Single): Boolean;
+var
+  H: Single;
+begin
+  if not FBoxCollision then
+    Exit(not World.WorldSegmentCollision(Pos, Pos + Vector3(0, Dy + FRadius, 0)));
+  H := FHalfWidth - 0.25;
+  Result := not World.WorldBoxCollision(Box3D(
+    Pos + Vector3(-H, HeadRoom, -H),
+    Pos + Vector3( H, HeadRoom + Dy + 0.25, H)));
+end;
+
+function TQuakePlayerMovement.HeightAboveGround(const Pos: TVector3): Single;
+
+  function RayAbove(const P: TVector3): Single;
+  var
+    Ground: PTriangle;
+  begin
+    if not World.WorldHeight(P, Result, Ground) then
+      Result := 100000;
+  end;
+
+var
+  H: Single;
+begin
+  if World = nil then
+    Exit(100000);
+  Result := RayAbove(Pos);
+  { Corners only matter when the centre has no ground within a step }
+  if FBoxCollision and (Result > EyeHeight + FStepSize) then
+  begin
+    H := FHalfWidth - 1;
+    Result := Min(Result, RayAbove(Pos + Vector3(-H, 0, -H)));
+    Result := Min(Result, RayAbove(Pos + Vector3( H, 0, -H)));
+    Result := Min(Result, RayAbove(Pos + Vector3(-H, 0,  H)));
+    Result := Min(Result, RayAbove(Pos + Vector3( H, 0,  H)));
+  end;
 end;
 
 procedure TQuakePlayerMovement.ResetVelocity;
@@ -193,14 +262,20 @@ end;
 
 function TQuakePlayerMovement.TryHorizontalMove(const Pos: TVector3; const Delta: TVector3): TVector3;
 
-  { Move with wall sliding of the eye sphere; then refuse it if the ground at
-    the new place rises more than StepSize (a wall lower than the eye sphere) }
+  { Move the box (its bottom StepSize up, so it passes over stairs) or the
+    eye sphere (with wall sliding); then refuse it if the ground at the new
+    place rises more than StepSize }
   function Attempt(const D: TVector3; out NewPos: TVector3): Boolean;
   var
     Rise: Single;
   begin
-    Result := World.WorldMoveAllowed(Pos, Pos + D, NewPos, True, FRadius,
-      TBox3D.Empty, TBox3D.Empty, False);
+    if FBoxCollision then
+    begin
+      NewPos := Pos + D;
+      Result := not World.WorldBoxCollision(PlayerBox(NewPos, FStepSize));
+    end else
+      Result := World.WorldMoveAllowed(Pos, Pos + D, NewPos, True, FRadius,
+        TBox3D.Empty, TBox3D.Empty, False);
     if not Result then
       Exit;
     Rise := EyeHeight - HeightAboveGround(NewPos);
@@ -287,8 +362,7 @@ begin
     Accelerate(WishVel.Normalize, WishSpeed, FAccelerate, SecondsPassed);
 
   NewPos := TryHorizontalMove(Pos, Vector3(FVelocity.X, 0, FVelocity.Z) * SecondsPassed);
-  if not World.WorldSegmentCollision(NewPos, NewPos + Vector3(0, FVelocity.Y * SecondsPassed +
-    Sign(FVelocity.Y) * FRadius, 0)) then
+  if (FVelocity.Y <= 0) or RoomAbove(NewPos, FVelocity.Y * SecondsPassed) then
     NewPos.Y := NewPos.Y + FVelocity.Y * SecondsPassed
   else
     FVelocity.Y := 0;
@@ -368,7 +442,7 @@ begin
   NewPos := TryHorizontalMove(Pos, Vector3(FVelocity.X, 0, FVelocity.Z) * SecondsPassed);
   if FVelocity.Y > 0 then
   begin
-    if not World.WorldSegmentCollision(NewPos, NewPos + Vector3(0, FVelocity.Y * SecondsPassed + FRadius, 0)) then
+    if RoomAbove(NewPos, FVelocity.Y * SecondsPassed) then
       NewPos.Y := NewPos.Y + FVelocity.Y * SecondsPassed;
   end else
   if FVelocity.Y < 0 then
@@ -407,7 +481,7 @@ begin
   if InputCrouch then
     FCrouched := True
   else
-  if FCrouched and not World.WorldSegmentCollision(Pos, Pos + Vector3(0, FEyeHeight - FCrouchEyeHeight + 8, 0)) then
+  if FCrouched and RoomAbove(Pos, FEyeHeight - FCrouchEyeHeight + 4) then
     FCrouched := False;
 
   CategorizeWater(Pos);
@@ -473,7 +547,7 @@ begin
   if FVelocity.Y > 0 then
   begin
     { Going up: stop at ceilings }
-    if World.WorldSegmentCollision(NewPos, NewPos + Vector3(0, FVelocity.Y * Dt + FRadius, 0)) then
+    if not RoomAbove(NewPos, FVelocity.Y * Dt) then
       FVelocity.Y := 0
     else
       NewPos.Y := NewPos.Y + FVelocity.Y * Dt;
