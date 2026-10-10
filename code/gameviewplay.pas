@@ -624,6 +624,7 @@ begin
       MainViewport.Camera.Translation.Y, MainViewport.Camera.Translation.Z]));
     Obj.Add('direction', TJSONArray.Create([MainViewport.Camera.Direction.X,
       MainViewport.Camera.Direction.Y, MainViewport.Camera.Direction.Z]));
+    Obj.Add('unitLevels', FWorld.UnitLevelsToJson);
     Text := Obj.FormatJSON;
   finally
     Obj.Free;
@@ -680,6 +681,7 @@ begin
     if FWorld.Bsp = nil then
       Exit;
     FWorld.LoadState(Obj);
+    FWorld.UnitLevelsFromJson(Obj.Get('unitLevels', TJSONObject(nil)));
     Arr := Obj.Get('camera', TJSONArray(nil));
     if (Arr <> nil) and (Arr.Count = 3) then
     begin

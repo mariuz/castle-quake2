@@ -152,6 +152,9 @@ type
     { Savegame: the whole level state (the map must already be loaded for
       LoadState). The view adds the camera. }
     function SaveState: TJSONObject;
+    { Remembered states of the other levels of the current unit (for savegames) }
+    function UnitLevelsToJson: TJSONObject;
+    procedure UnitLevelsFromJson(const Obj: TJSONObject);
     { IncludePlayer = False restores only the level (revisiting a level of the unit) }
     procedure LoadState(const Obj: TJSONObject; const IncludePlayer: Boolean = True);
 
@@ -1880,6 +1883,20 @@ begin
   Result := TVector3.Zero;
   if (A <> nil) and (A.JSONType = jtArray) and (A.Count = 3) then
     Result := Vector3(A.Items[0].AsFloat, A.Items[1].AsFloat, A.Items[2].AsFloat);
+end;
+
+function TQuakeWorld.UnitLevelsToJson: TJSONObject;
+begin
+  Result := FLevelStates.Clone as TJSONObject;
+end;
+
+procedure TQuakeWorld.UnitLevelsFromJson(const Obj: TJSONObject);
+begin
+  FreeAndNil(FLevelStates);
+  if Obj <> nil then
+    FLevelStates := Obj.Clone as TJSONObject
+  else
+    FLevelStates := TJSONObject.Create;
 end;
 
 function TQuakeWorld.SaveState: TJSONObject;
