@@ -1,25 +1,41 @@
 { Quake 2 lighting: coordinate conversion, baked-light sampling for models,
-  and the weapon muzzle flash. }
+  light styles and dynamic lights (muzzle flashes, explosions, projectiles). }
 unit QuakeLight;
 
 {$mode objfpc}{$H+}
+{$modeswitch advancedrecords}
 
 interface
 
 uses
-  SysUtils, Math,
+  SysUtils, Math, Generics.Collections,
   CastleVectors,
   QuakeBsp;
 
+const
+  { Dynamic lights drawn on world surfaces at once (shader uniforms) }
+  MaxSurfaceLights = 4;
+
 type
+  { Quake 2 dlight_t: a point light added to the lightmaps }
+  TQuakeDynLight = record
+    Position: TVector3; { CGE coordinates }
+    Radius: Single;     { Quake units; intensity (Radius - distance) / 256 }
+    Color: TVector3;
+    { Seconds left / total. Duration 0 = only until the next EndFrame. }
+    Life, Duration: Single;
+    function CurrentRadius: Single;
+  end;
+  TQuakeDynLightList = specialize TList<TQuakeDynLight>;
+  TQuakeSurfaceLights = array[0..MaxSurfaceLights - 1] of TQuakeDynLight;
+
   { Lighting manager. World surfaces use baked RGB lightmaps (see QuakeGeometry);
     models (monsters, items, the view weapon) are tinted with the lightmap color
     sampled below them, like Quake 2's R_LightPoint. }
   TQuakeLighting = class
   private
     FBsp: TQuakeBsp;
-    FMuzzleTimer: Single;
-    FMuzzlePos: TVector3;
+    FLights: TQuakeDynLightList;
     FTime: Single;
     FStyles: array[0..255] of String;
     FValues: array[0..255] of Single;
@@ -30,14 +46,26 @@ type
     procedure UpdateStyleValues;
   public
     constructor Create;
+    destructor Destroy; override;
     { Set the current map (nil when no map is loaded). }
     procedure SetMap(const ABsp: TQuakeBsp);
 
     { Model tint (0..1 RGB) at a CGE position. }
     function SampleLight(const CgePos: TVector3): TVector3;
 
-    { Brighten models near Position for a short moment. }
+    { Weapon muzzle flash: a short light at Position. }
     procedure TriggerMuzzleFlash(const Position: TVector3);
+
+    { Add a dynamic light (CGE position, Quake radius). Timed lights shrink to
+      nothing over Duration (explosions); Duration 0 lasts until EndFrame
+      (lights carried by projectiles, added every frame). }
+    procedure AddLight(const Position: TVector3; const Radius: Single;
+      const Color: TVector3; const Duration: Single = 0);
+    { The lights closest to Pos (for the world shader); returns their count. }
+    function NearestLights(const Pos: TVector3; out Lights: TQuakeSurfaceLights): Integer;
+    { Forget the single-frame lights }
+    procedure EndFrame;
+    property Lights: TQuakeDynLightList read FLights;
 
     procedure Update(const SecondsPassed: Single);
 
@@ -85,10 +113,25 @@ begin
   Result := Vector3(Cos(Rad), 0, -Sin(Rad));
 end;
 
+function TQuakeDynLight.CurrentRadius: Single;
+begin
+  if Duration > 0 then
+    Result := Radius * Max(0, Life / Duration)
+  else
+    Result := Radius;
+end;
+
 constructor TQuakeLighting.Create;
 begin
   inherited Create;
+  FLights := TQuakeDynLightList.Create;
   ResetStyles;
+end;
+
+destructor TQuakeLighting.Destroy;
+begin
+  FreeAndNil(FLights);
+  inherited Destroy;
 end;
 
 procedure TQuakeLighting.ResetStyles;
@@ -191,14 +234,14 @@ end;
 procedure TQuakeLighting.SetMap(const ABsp: TQuakeBsp);
 begin
   FBsp := ABsp;
-  FMuzzleTimer := 0;
+  FLights.Clear;
   ResetStyles;
 end;
 
 function TQuakeLighting.SampleLight(const CgePos: TVector3): TVector3;
 var
   C: TVector3;
-  Flash: Single;
+  L: TQuakeDynLight;
 begin
   if (FBsp <> nil) and FBsp.LightPoint(CgeToQuake(CgePos), C) then
     { Same 2x "overbright" factor as the world lightmaps }
@@ -209,24 +252,80 @@ begin
   { Never fully black, so silhouettes stay readable }
   Result := Vector3(Max(Result.X, 0.18), Max(Result.Y, 0.18), Max(Result.Z, 0.18));
 
-  if FMuzzleTimer > 0 then
-  begin
-    Flash := (FMuzzleTimer / 0.1) * Max(0, 1 - PointsDistance(CgePos, FMuzzlePos) / 300);
-    Result := Result + Vector3(0.9, 0.7, 0.3) * Flash;
-  end;
+  { Same falloff as on the world surfaces (see TQuakeGeometry) }
+  for L in FLights do
+    Result := Result + L.Color *
+      (2.0 * Max(0, L.CurrentRadius - PointsDistance(CgePos, L.Position)) / 256);
 
   Result := Vector3(Min(Result.X, 1.6), Min(Result.Y, 1.6), Min(Result.Z, 1.6));
 end;
 
 procedure TQuakeLighting.TriggerMuzzleFlash(const Position: TVector3);
 begin
-  FMuzzlePos := Position;
-  FMuzzleTimer := 0.1;
+  { Quake 2 MZ_*: radius 200 + random 31, one frame (0.1 s) }
+  AddLight(Position, 200 + Random(32), Vector3(1, 1, 0), 0.1);
+end;
+
+procedure TQuakeLighting.AddLight(const Position: TVector3; const Radius: Single;
+  const Color: TVector3; const Duration: Single);
+var
+  L: TQuakeDynLight;
+begin
+  L.Position := Position;
+  L.Radius := Radius;
+  L.Color := Color;
+  L.Life := Duration;
+  L.Duration := Duration;
+  FLights.Add(L);
+end;
+
+function TQuakeLighting.NearestLights(const Pos: TVector3; out Lights: TQuakeSurfaceLights): Integer;
+var
+  L: TQuakeDynLight;
+  I, Worst: Integer;
+  Dist: array[0..MaxSurfaceLights - 1] of Single;
+  D: Single;
+begin
+  Result := 0;
+  for L in FLights do
+  begin
+    if L.CurrentRadius <= 0 then
+      Continue;
+    { Distance to the light's sphere: big lights far away still matter }
+    D := PointsDistance(Pos, L.Position) - L.CurrentRadius;
+    if Result < MaxSurfaceLights then
+    begin
+      Lights[Result] := L;
+      Dist[Result] := D;
+      Inc(Result);
+    end else
+    begin
+      Worst := 0;
+      for I := 1 to MaxSurfaceLights - 1 do
+        if Dist[I] > Dist[Worst] then
+          Worst := I;
+      if D < Dist[Worst] then
+      begin
+        Lights[Worst] := L;
+        Dist[Worst] := D;
+      end;
+    end;
+  end;
+end;
+
+procedure TQuakeLighting.EndFrame;
+var
+  I: Integer;
+begin
+  for I := FLights.Count - 1 downto 0 do
+    if FLights[I].Duration = 0 then
+      FLights.Delete(I);
 end;
 
 procedure TQuakeLighting.Update(const SecondsPassed: Single);
 var
   I: Integer;
+  L: TQuakeDynLight;
 begin
   FTime := FTime + SecondsPassed;
   for I := 0 to 255 do
@@ -240,8 +339,16 @@ begin
       end;
     end;
   UpdateStyleValues;
-  if FMuzzleTimer > 0 then
-    FMuzzleTimer := Max(0, FMuzzleTimer - SecondsPassed);
+  for I := FLights.Count - 1 downto 0 do
+    if FLights[I].Duration > 0 then
+    begin
+      L := FLights[I];
+      L.Life := L.Life - SecondsPassed;
+      if L.Life <= 0 then
+        FLights.Delete(I)
+      else
+        FLights[I] := L;
+    end;
 end;
 
 initialization

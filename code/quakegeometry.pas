@@ -58,6 +58,16 @@ type
 
   TQuakeDynamicLightmapList = specialize TObjectList<TQuakeDynamicLightmap>;
 
+  { Dynamic-light shader effect of one brush model and its uniforms }
+  TQuakeDLightEffect = class
+  public
+    Effect: TEffectNode;
+    Pos: array[0..MaxSurfaceLights - 1] of TSFVec4f;
+    Color: array[0..MaxSurfaceLights - 1] of TSFVec3f;
+    destructor Destroy; override;
+  end;
+  TQuakeDLightEffectList = specialize TObjectList<TQuakeDLightEffect>;
+
   { Packs per-face RGB lightmaps into one atlas texture. }
   TQuakeLightmapAtlas = class
   private
@@ -179,6 +189,10 @@ type
     { Shader effect warping liquid textures like Quake 2's EmitWaterPolys }
     FWarpEffect: TEffectNode;
     FWarpTime: TSFFloat;
+    { Shader effects on the lightmap textures adding dynamic lights
+      (Quake 2 R_AddDynamicLights), one per brush model because an X3D node
+      can't be shared by scenes; see SetSurfaceLights }
+    FDLightEffects: TQuakeDLightEffectList;
     FWorldTransform: TCastleTransform;
     FMovers: TQuakeMoverList;
     FAnimTextures: TQuakeAnimTexList;
@@ -193,6 +207,7 @@ type
     procedure SetupMovers(const Parent: TCastleTransform);
     procedure BuildPlayerClip;
     procedure RegisterAnimNode(const TexName: String; const Node: TImageTextureNode);
+    function CreateDLightEffect: TEffectNode;
   public
     constructor Create(const ABsp: TQuakeBsp);
     destructor Destroy; override;
@@ -202,6 +217,9 @@ type
 
     { Advance animated textures and movers }
     procedure Update(const SecondsPassed: Single);
+
+    { Dynamic lights shown on the lightmapped surfaces this frame }
+    procedure SetSurfaceLights(const Lights: TQuakeSurfaceLights; const Count: Integer);
 
     { Number of faces lit by animated / switchable light styles }
     function DynamicFaceCount: Integer;
@@ -1037,6 +1055,7 @@ begin
     '  tex_coord.y += 0.125 * sin(tc.x * 8.0 + time);' + LineEnding +
     '}';
   FWarpEffect.SetParts([WarpPart]);
+  FDLightEffects := TQuakeDLightEffectList.Create(True);
   FWorldTransform := TCastleTransform.Create(nil);
   FWorldTransform.Name := 'World';
   FWorldTransform.Add(FSceneWorld);
@@ -1063,6 +1082,7 @@ begin
   FWorldTransform.Free;
   { All scenes using the effect are gone now }
   FWarpEffect.FreeIfUnused;
+  FDLightEffects.Free;
   FAnimTextures.Free;
   FScrollNodes.Free;
   FDynLightmaps.Free;
@@ -1114,6 +1134,7 @@ var
   RawVert: TVector3;
   Atlas, DynAtlas: TQuakeLightmapAtlas;
   LightmapTex, DynTex: TPixelTextureNode;
+  DLightEffect: TEffectNode;
   Dyn: TQuakeDynamicLightmap;
   DynFace: TQuakeDynFace;
   IsDynamic: Boolean;
@@ -1249,11 +1270,14 @@ begin
       Batch.AddPolygon(PolyVerts, PolyUVs, PolyLMUVs);
     end;
 
+    DLightEffect := CreateDLightEffect;
     LightmapTex := Atlas.CreateTextureNode;
+    LightmapTex.SetEffects([DLightEffect]);
     DynTex := nil;
     if DynAtlas <> nil then
     begin
       DynTex := DynAtlas.CreateTextureNode;
+      DynTex.SetEffects([DLightEffect]);
       Dyn.Node := DynTex;
       Dyn.Compose(DynTex.FdImage.Value as TRGBImage, Lightmaps);
     end;
@@ -1474,6 +1498,81 @@ begin
   { SURF_FLOWING: same scroll as Quake 2 GL (-64 texture repeats per 40 seconds) }
   for Scroll in FScrollNodes do
     Scroll.Translation := Vector2(-64 * Frac(FTime / 40), 0);
+end;
+
+function TQuakeGeometry.CreateDLightEffect: TEffectNode;
+var
+  VertexPart, FragmentPart: TEffectPartNode;
+  I: Integer;
+  Code, Sum: String;
+  E: TQuakeDLightEffect;
+begin
+  E := TQuakeDLightEffect.Create;
+  FDLightEffects.Add(E);
+  Result := TEffectNode.Create;
+  Result.Language := slGLSL;
+  Result.WaitForRelease; { freed by TQuakeDLightEffect, after the scenes }
+  E.Effect := Result;
+  Code := 'varying highp vec3 q2_dlight_pos;' + LineEnding;
+  Sum := '';
+  for I := 0 to MaxSurfaceLights - 1 do
+  begin
+    { xyz = position, w = radius (0 = off) }
+    E.Pos[I] := TSFVec4f.Create(Result, True, Format('q2_dlight%d', [I]), TVector4.Zero);
+    Result.AddCustomField(E.Pos[I]);
+    E.Color[I] := TSFVec3f.Create(Result, True, Format('q2_dcolor%d', [I]), TVector3.Zero);
+    Result.AddCustomField(E.Color[I]);
+    Code := Code + Format('uniform vec4 q2_dlight%0:d;' + LineEnding + 'uniform vec3 q2_dcolor%0:d;' + LineEnding, [I]);
+    Sum := Sum + Format('  texture_color.rgb += q2_dcolor%0:d * ' +
+      'max(0.0, q2_dlight%0:d.w - distance(q2_dlight_pos, q2_dlight%0:d.xyz));' + LineEnding, [I]);
+  end;
+
+  { World geometry is at identity transform, so object space = world space
+    (moving brushes get the light a bit off, which is fine for a flash). }
+  VertexPart := TEffectPartNode.Create;
+  VertexPart.ShaderType := stVertex;
+  VertexPart.Contents :=
+    'varying highp vec3 q2_dlight_pos;' + LineEnding +
+    'void PLUG_vertex_object_space(const in vec4 vertex_object, const in vec3 normal_object)' + LineEnding +
+    '{' + LineEnding +
+    '  q2_dlight_pos = vertex_object.xyz;' + LineEnding +
+    '}';
+
+  { Added to the lightmap sample, before it modulates the wall texture.
+    Colors are pre-divided by 256: intensity (radius - distance) / 256 }
+  FragmentPart := TEffectPartNode.Create;
+  FragmentPart.ShaderType := stFragment;
+  FragmentPart.Contents := Code +
+    'void PLUG_texture_color(inout vec4 texture_color, in sampler2D tex, const in vec4 tex_coord)' + LineEnding +
+    '{' + LineEnding +
+    Sum +
+    '}';
+  Result.SetParts([VertexPart, FragmentPart]);
+end;
+
+procedure TQuakeGeometry.SetSurfaceLights(const Lights: TQuakeSurfaceLights; const Count: Integer);
+var
+  I: Integer;
+  L: TQuakeDynLight;
+  E: TQuakeDLightEffect;
+begin
+  for E in FDLightEffects do
+    for I := 0 to MaxSurfaceLights - 1 do
+      if I < Count then
+      begin
+        L := Lights[I];
+        E.Pos[I].Send(Vector4(L.Position, L.CurrentRadius));
+        E.Color[I].Send(L.Color / 256);
+      end else
+      if E.Pos[I].Value.W <> 0 then
+        E.Pos[I].Send(TVector4.Zero);
+end;
+
+destructor TQuakeDLightEffect.Destroy;
+begin
+  if Effect <> nil then
+    Effect.FreeIfUnused;
+  inherited Destroy;
 end;
 
 function TQuakeGeometry.FindMoverByModel(const AModel: String): TQuakeMover;

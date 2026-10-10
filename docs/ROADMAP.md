@@ -7,7 +7,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Subsystem | Original Quake 2 | Castle Quake 2 (now) | Gap |
 | :--- | :--- | :--- | :--- |
 | World geometry | IBSP v38, PVS / areaportal culling | X3D batches per texture, CGE frustum culling | PVS / area culling on big maps. |
-| Lighting | RGB lightmaps, 4 styles, dynamic lights | All 4 styles (animated, switchable, ramps), 2x overbright, LightPoint model tint | Dynamic lights on the world; light styles on model tint. |
+| Lighting | RGB lightmaps, 4 styles, dynamic lights | All 4 styles (animated, switchable, ramps), 2x overbright, LightPoint model tint, dynamic lights on the world and models | More than 4 surface lights at once; light styles on model tint. |
 | Sky | Skybox, `skyrotate`, `skyaxis` | Skybox via `TCastleBackground` | Sky rotation. |
 | Liquids | Warped water / lava (`SURF_WARP`), contents | Non-solid liquid surfaces, point contents from BSP leafs, swimming, drowning, lava / slime damage, underwater tints | Warp shader. |
 | Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp and skins | Powerup shells, glow, bobbing items. |
@@ -30,7 +30,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 
 ### 2. Look
 - ~~Light styles~~ — done on the CPU with a separate dynamic atlas; a shader version would avoid the re-uploads if very large maps need it.
-- **Dynamic lights** (muzzle flash, rockets, BFG) on world surfaces: add a light-accumulation term in the same shader effect.
+- ~~Dynamic lights~~ — done (muzzle flashes, explosions, rockets, blaster bolts, BFG): a `PLUG_texture_color` effect on the lightmap textures, the 4 lights nearest the player.
 - ~~Water warp~~ — done; an underwater wobble `TCastleScreenEffect` would complete it.
 - **Powerup shells** (quad blue, invulnerability yellow) as an extra MD2 shape with additive blending.
 - ~~SP2 sprites, gibs~~ — done.
@@ -59,7 +59,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] MD2 models with interpolation and lightmap tint
 - [x] Quake 2 HUD pics, crosshair, screen blends
 - [x] Light styles: flickering, switchable lights, `target_lightramp`
-- [ ] Dynamic lights on world surfaces (shader effect)
+- [x] Dynamic lights on world surfaces and models (lightmap texture shader effect)
 - [x] Underwater screen tints
 - [x] Water warp shader (`PLUG_texture_coord_shift` effect, like Quake 2's EmitWaterPolys)
 - [x] Explosion model, soft particles, splashes, lasers, props (barrels, banners, ships, dish, corpses)

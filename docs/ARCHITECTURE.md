@@ -78,6 +78,7 @@ Decoded images are cached and served as uncompressed TGA streams through the `qu
 - **Translucent / warp / flowing**: `SURF_TRANS33/66` become blended with 0.67 / 0.34 transparency; `SURF_FLOWING` gets a `TTextureTransformNode` scrolled like Quake 2 GL (`-64 * frac(t/40)`).
 - **Animated textures** follow WAL `animname` chains and are switched at 2 frames/second by changing `TImageTextureNode` URLs.
 - **Light styles**: a face stores up to 4 style indices and one RGB lightmap block per style. Faces whose styles are all 0 use the static atlas. Others go into a separate dynamic atlas (1024² for the world, 256² for brush models) with their own batches; `TQuakeDynamicLightmap.Compose` sums `block[i] * StyleValue(style[i])` per texel, applies the gamma and calls `FdImage.Changed` to re-upload. `TQuakeLighting` evaluates Quake 2's style strings (`'a'` = 0, `'m'` = 1, `'z'` ≈ 2) at 10 Hz, switchable lights (styles 32+) and `target_lightramp` ramps, and increments `Version` only when a value changes, so static frames cost nothing.
+- **Dynamic lights** (Quake 2 `dlight_t`): `TQuakeLighting.AddLight` keeps timed lights (muzzle flashes 0.1 s, explosions 0.5 s, shrinking) and single-frame lights (rockets, blaster bolts, BFG balls, re-added every frame and dropped by `EndFrame`). Every frame `TQuakeWorld.SetSurfaceLights` sends the 4 nearest (`NearestLights`) to `TQuakeGeometry.SetSurfaceLights`. Each brush model's lightmap textures carry an `Effect` (one per model, since X3D nodes can't be shared by scenes) whose vertex part passes the object-space position (= world space) and whose `PLUG_texture_color` adds `color * (radius - distance) / 256` to the lightmap sample before it modulates the wall texture, like `R_AddDynamicLights`. `SampleLight` adds the same term to model tints.
 
 ### Movers
 
@@ -105,7 +106,7 @@ Brush entities (`model "*N"`, classname `func_*`) are separate `TCastleScene`s i
 - MD2 indexes positions and texture coordinates separately; triangle corners are "unwelded" into unique (xyz, st) pairs so X3D can use one index list.
 - Every frame is decompressed into a `TVector3List` in CGE coordinates. Animations are grouped by frame name (`run3` → `run`, `attak105` → `attak1`).
 - `TQuakeMd2Instance` owns a scene, plays an animation by name with fallbacks (`'attak,attack,fire,...'`), and linearly interpolates between frames by rewriting the `TCoordinateNode` only when the frame / blend changes.
-- Lighting: models use an unlit material whose `EmissiveColor` is the lightmap color sampled under the model with `TQuakeBsp.LightPoint` (Quake 2's `RecursiveLightPoint` through the BSP nodes), ×2 overbright, plus muzzle flashes.
+- Lighting: models use an unlit material whose `EmissiveColor` is the lightmap color sampled under the model with `TQuakeBsp.LightPoint` (Quake 2's `RecursiveLightPoint` through the BSP nodes), ×2 overbright, plus the dynamic lights.
 
 ---
 

@@ -106,6 +106,10 @@ type
       const Speed: Single; const Damage: Integer; const FromPlayer: Boolean;
       const Owner: TQuakeMonster = nil);
     procedure UpdateProjectiles(const SecondsPassed: Single);
+    { Rockets, blaster bolts and BFG balls light their surroundings }
+    procedure AddProjectileLights;
+    { Send the dynamic lights nearest to the player to the world shader }
+    procedure SetSurfaceLights;
     procedure Explode(const Pos: TVector3; const Damage: Integer; const Radius: Single;
       const FromPlayer: Boolean);
     function MonsterByTransform(const T: TCastleTransform): TQuakeMonster;
@@ -1468,6 +1472,29 @@ begin
   end;
 end;
 
+procedure TQuakeWorld.AddProjectileLights;
+var
+  Proj: TQuakeProjectile;
+begin
+  { Quake 2 CL_AddPacketEntities: EF_ROCKET / EF_BLASTER / EF_HYPERBLASTER / EF_BFG }
+  for Proj in FProjectiles do
+    case Proj.Kind of
+      pkRocket, pkBlasterBolt:
+        Lighting.AddLight(Proj.Transform.Translation, 200, Vector3(1, 1, 0));
+      pkBfg:
+        Lighting.AddLight(Proj.Transform.Translation, 200, Vector3(0, 1, 0));
+    end;
+end;
+
+procedure TQuakeWorld.SetSurfaceLights;
+var
+  Lights: TQuakeSurfaceLights;
+  Count: Integer;
+begin
+  Count := Lighting.NearestLights(FPlayerPos, Lights);
+  FGeometry.SetSurfaceLights(Lights, Count);
+end;
+
 procedure TQuakeWorld.SpawnProjectile(const Kind: TProjectileKind; const Origin, Dir: TVector3;
   const Speed: Single; const Damage: Integer; const FromPlayer: Boolean; const Owner: TQuakeMonster);
 var
@@ -1513,7 +1540,8 @@ var
 begin
   Particles.SpawnExplosion(Pos);
   Sounds.Play('sound/weapons/rocklx1a.wav');
-  Lighting.TriggerMuzzleFlash(Pos);
+  { Quake 2 explosion light: radius 350, orange, fading with the fireball }
+  Lighting.AddLight(Pos, 350, Vector3(1, 0.5, 0.5), 0.5);
   if Damage <= 0 then
     Exit;
   for M in FMonsters do
@@ -1650,6 +1678,7 @@ begin
           pkBfg:
             begin
               Particles.SpawnBfgExplosion(NewPos);
+              Lighting.AddLight(NewPos, 350, Vector3(0, 1, 0), 0.5);
               Sounds.Play('sound/weapons/bfg__x1b.wav');
               Explode(NewPos, Proj.SplashDamage * DamageMultiplier, Proj.SplashRadius * 0.3, Proj.FromPlayer);
             end;
@@ -1682,7 +1711,8 @@ begin
   Target := FPlayerPos - Vector3(0, 12, 0);
   Dir := (Target - Eye).Normalize;
   Dist := PointsDistance(Eye, Target);
-  Lighting.TriggerMuzzleFlash(Eye);
+  if Monster.Def^.Attack <> akMelee then
+    Lighting.TriggerMuzzleFlash(Eye);
 
   case Monster.Def^.Attack of
     akMelee:
@@ -1795,6 +1825,8 @@ begin
   FStats.QuadTime := Max(0, FStats.QuadTime - SecondsPassed);
   FStats.InvulnTime := Max(0, FStats.InvulnTime - SecondsPassed);
   FPainSoundTimer := FPainSoundTimer - SecondsPassed;
+  { Projectile lights of the previous frame }
+  Lighting.EndFrame;
 
   if FDead then
   begin
@@ -1842,8 +1874,10 @@ begin
   UpdateLiquids(SecondsPassed);
   UpdateHeldFire(SecondsPassed);
   UpdateProjectiles(SecondsPassed);
+  AddProjectileLights;
   Particles.Update(SecondsPassed);
   Lighting.Update(SecondsPassed);
+  SetSurfaceLights;
 
   { View weapon: animation, kick and lighting }
   if FWeaponCooldown > 0 then

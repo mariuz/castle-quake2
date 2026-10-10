@@ -50,6 +50,7 @@ Demo script actions: `W:sec` wait, `S` screenshot (logs FPS + camera), `X` fire,
 - `TCastleBackground.TexturePositiveZ` is the X3D "front" drawn at **-Z** (and `TextureNegativeZ` at +Z).
 - Particles are data (`TQuakeParticle`) drawn by one batched scene in `TQuakeParticleManager.RebuildBatch`; set `Particles.Camera`. (If you use `TBillboardNode` elsewhere, it needs `Scene.ProcessEvents := True`.)
 - Don't use `MODULATE2X`/`MODULATE4X` multi-texture modes: CGE emits an int literal (`*= 2;`) that breaks WebGL shaders. Scale the unlit emissive colour instead. Check web logs for `GLSL: Fragment shader not compiled`.
+- Dynamic lights: `Lighting.AddLight(pos, radius, color, duration)` (duration 0 = this frame only, re-add every frame). World surfaces show the 4 nearest via the lightmap texture effect in `TQuakeGeometry.CreateDLightEffect`; create one effect per scene, never share X3D nodes between scenes.
 - Light styles: `TQuakeLighting` owns style patterns/values (`Version` bumps on change); `TQuakeDynamicLightmap` recomposes the light-style atlas and calls `Node.FdImage.Changed`. Lightmaps of a face are `styles` consecutive RGB blocks.
 - `TQuakeMd2Instance.PlayAnim('')` plays all frames (banners, effects).
 - Autotests disable mouse look (results must not depend on the desktop mouse). CI runs the same scripts on Linux under xvfb + Mesa (`.github/workflows/build.yml`, job `autotest`).
