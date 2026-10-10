@@ -37,7 +37,8 @@ type
     function SkinId(const SkinIndex: Integer): String;
 
     { Find animation by name (e.g. "stand", "run", "attak1", "death1").
-      Tries each comma-separated alternative; returns False if none exists. }
+      Tries each comma-separated alternative; returns False if none exists.
+      An empty name means all frames. }
     function FindAnim(const Names: String; out Anim: TMd2Anim): Boolean;
 
     { Interpolated vertex positions between frames A and B (0 <= T <= 1) }
@@ -54,6 +55,9 @@ type
     FModel: TQuakeMd2;
     FCoord: TCoordinateNode;
     FMaterial: TUnlitMaterialNode;
+    FAppearance: TAppearanceNode;
+    FTexture: TImageTextureNode;
+    FSkinIndex: Integer;
     FTemp: TVector3List;
     FAnim: TMd2Anim;
     FAnimTime: Single;
@@ -74,6 +78,10 @@ type
     procedure SetFrame(const Index: Integer);
     { Lighting tint (0..1+, see TQuakeLighting.SampleLight) }
     procedure SetTint(const Color: TVector3);
+    { Switch to another skin of the model (ignored if missing) }
+    procedure SetSkin(const SkinIndex: Integer);
+    { 0 = opaque, 1 = invisible (switches to alpha blending) }
+    procedure SetTransparency(const Value: Single);
     property Model: TQuakeMd2 read FModel;
     { True when a non-looping animation reached its last frame }
     property AnimDone: Boolean read FAnimDone;
@@ -312,6 +320,13 @@ var
   N: String;
   I: Integer;
 begin
+  { Empty name: the whole frame range (banners, dish, effects) }
+  if Trim(Names) = '' then
+  begin
+    Anim.First := 0;
+    Anim.Count := FFrames.Count;
+    Exit(True);
+  end;
   Parts := LowerCase(Names).Split([',']);
   for N in Parts do
   begin
@@ -379,6 +394,8 @@ begin
   FMaterial.EmissiveColor := Vector3(1, 1, 1);
   App := TAppearanceNode.Create;
   App.Material := FMaterial;
+  FAppearance := App;
+  FSkinIndex := SkinIndex;
 
   Skin := FModel.SkinId(SkinIndex);
   if Skin <> '' then
@@ -387,6 +404,7 @@ begin
     TexProps.MagnificationFilter := magNearest;
     TexProps.MinificationFilter := minNearestMipmapLinear;
     Tex := TImageTextureNode.Create;
+    FTexture := Tex;
     Tex.SetUrl(['quaketex:/' + Skin]);
     Tex.TextureProperties := TexProps;
     App.Texture := Tex;
@@ -464,6 +482,25 @@ begin
   FAnim.Count := 1;
   FAnimTime := 0;
   Update(0);
+end;
+
+procedure TQuakeMd2Instance.SetSkin(const SkinIndex: Integer);
+var
+  Skin: String;
+begin
+  if (SkinIndex = FSkinIndex) or (FTexture = nil) then
+    Exit;
+  FSkinIndex := SkinIndex;
+  Skin := FModel.SkinId(SkinIndex);
+  if Skin <> '' then
+    FTexture.SetUrl(['quaketex:/' + Skin]);
+end;
+
+procedure TQuakeMd2Instance.SetTransparency(const Value: Single);
+begin
+  FMaterial.Transparency := Value;
+  if Value > 0 then
+    FAppearance.AlphaMode := amBlend;
 end;
 
 procedure TQuakeMd2Instance.SetTint(const Color: TVector3);

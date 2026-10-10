@@ -121,6 +121,7 @@ begin
       'or pass -basedir <quake2 dir> / -pak <file>');
 
   Palette.LoadFromPak;
+  Sounds.ConfigureEngine;
   Sounds.PreloadCommonSounds;
 
   { Create views (see https://castle-engine.io/views ). }

@@ -7,7 +7,7 @@ interface
 
 uses
   SysUtils, Classes, Generics.Collections,
-  CastleVectors, CastleSoundEngine, CastleTransform, CastleBehaviors, CastleLog, CastleUriUtils,
+  CastleVectors, CastleSoundEngine, CastleSoundBase, CastleTransform, CastleBehaviors, CastleLog, CastleUriUtils,
   QuakePak;
 
 type
@@ -26,9 +26,17 @@ type
     { Play 2D non-positional sound (weapon fire, UI, player damage) }
     procedure Play(const APath: String; const Volume: Single = 1.0);
 
-    { Play 3D positional sound attached to a transform (door, monster, elevator) }
+    { Play 3D positional sound attached to a transform (door, monster, elevator).
+      Attenuation as in Quake 2: 1 = normal, 2 = idle, 3 = static (fades fastest). }
     procedure PlayAt(const APath: String; const ATransform: TCastleTransform;
-      const Volume: Single = 1.0; const RefDist: Single = 200.0; const MaxDist: Single = 1800.0);
+      const Volume: Single = 1.0; const Attenuation: Single = 1.0);
+
+    { Sound for a path with Quake 2 distance attenuation (<= 0: heard everywhere).
+      nil if the sound isn't in the PAK. Cached per path and attenuation. }
+    function SpatialSound(const APath: String; const Attenuation: Single): TCastleSound;
+
+    { Use Quake-like linear distance attenuation for all spatial sounds }
+    procedure ConfigureEngine;
 
     { Play background music from castle-data:/music/<TrackName> if it exists.
       Quake 2 music is CD audio, so place ripped tracks there as trackNN.ogg. }
@@ -113,8 +121,39 @@ begin
   end;
 end;
 
+function TQuakeSounds.SpatialSound(const APath: String; const Attenuation: Single): TCastleSound;
+var
+  Base: TCastleSound;
+  Key: String;
+begin
+  Result := nil;
+  Base := GetSound(APath);
+  if Base = nil then
+    Exit;
+  Key := LowerCase(APath) + '@' + FloatToStr(Attenuation);
+  if not FSoundCache.TryGetValue(Key, Result) then
+  begin
+    Result := TCastleSound.Create(nil);
+    Result.Url := Base.Url;
+    { Quake 2 S_SpatializeOrigin: full volume up to 80 units (SOUND_FULLVOLUME),
+      then linear falloff of 0.0005 * attenuation per unit }
+    Result.ReferenceDistance := 80;
+    if Attenuation > 0 then
+      Result.MaxDistance := 80 + 1 / (0.0005 * Attenuation)
+    else
+      Result.MaxDistance := 100000;
+    FSoundCache.Add(Key, Result);
+  end;
+end;
+
+procedure TQuakeSounds.ConfigureEngine;
+begin
+  if SoundEngine <> nil then
+    SoundEngine.DistanceModel := dmLinear;
+end;
+
 procedure TQuakeSounds.PlayAt(const APath: String; const ATransform: TCastleTransform;
-  const Volume: Single; const RefDist, MaxDist: Single);
+  const Volume: Single; const Attenuation: Single);
 var
   Snd: TCastleSound;
   Source: TCastleSoundSource;
@@ -123,12 +162,9 @@ begin
     Exit;
 
   try
-    Snd := GetSound(APath);
+    Snd := SpatialSound(APath, Attenuation);
     if Snd = nil then
       Exit;
-
-    Snd.ReferenceDistance := RefDist;
-    Snd.MaxDistance := MaxDist;
 
     Source := ATransform.FindBehavior(TCastleSoundSource) as TCastleSoundSource;
     if Source = nil then

@@ -8,6 +8,7 @@ interface
 uses
   SysUtils, Classes, Generics.Collections, Math,
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions, CastleUtils,
+  CastleSoundEngine, CastleBehaviors, CastleColors, CastleRenderOptions,
   QuakeBsp, QuakeMd2, QuakeLight, QuakeSound, QuakeHud;
 
 type
@@ -157,6 +158,90 @@ type
   end;
 
   TQuakeProjectileList = specialize TObjectList<TQuakeProjectile>;
+
+  { target_speaker: ambient loop or triggered one-shot sound at a position.
+    A TCastleBehavior next to the TCastleSoundSource on its Transform. }
+  TQuakeSpeaker = class(TCastleBehavior)
+  strict private
+    FNoise: String;
+    FLooped: Boolean;
+    FAttenuation: Single;
+    FSound: TCastleSound;
+    function GetPlaying: Boolean;
+  public
+    Entity: TQuakeEntity;
+    Transform: TCastleTransform;
+    Source: TCastleSoundSource;
+    constructor CreateSpeaker(const AParent: TCastleTransform; const AEntity: TQuakeEntity);
+    destructor Destroy; override;
+    { Toggle a looped speaker, or play a one-shot one }
+    procedure Activate;
+  published
+    property Noise: String read FNoise;
+    property Looped: Boolean read FLooped;
+    property Attenuation: Single read FAttenuation;
+    property Playing: Boolean read GetPlaying;
+  end;
+
+  TQuakeSpeakerList = specialize TObjectList<TQuakeSpeaker>;
+
+  TPropKind = (pkExplobox, pkBanner, pkDeadSoldier, pkSatelliteDish, pkStroggShip, pkGibHead);
+
+  { misc_* decorations: exploding barrels, banners, corpses, the satellite dish,
+    flying Strogg ships (follow path_corners when triggered), gib heads. }
+  TQuakeProp = class(TCastleBehavior)
+  strict private
+    function GetEntityClass: String;
+  public
+    Kind: TPropKind;
+    Entity: TQuakeEntity;
+    Transform: TCastleTransform;
+    Model: TQuakeMd2Instance;
+    Health: Integer;
+    Destroyed: Boolean;
+    { Strogg ship flight }
+    Flying: Boolean;
+    FlySpeed: Single;
+    FlyTarget: TVector3;
+    FlyCorner: TQuakeEntity;
+    constructor CreateProp(const AParent: TCastleTransform; const AKind: TPropKind;
+      const AEntity: TQuakeEntity);
+    destructor Destroy; override;
+    procedure UpdateProp(const SecondsPassed: Single);
+    function OwnsTransform(const T: TCastleTransform): Boolean;
+  published
+    property EntityClass: String read GetEntityClass;
+    property PropKind: TPropKind read Kind;
+    property HitPoints: Integer read Health;
+    property IsDestroyed: Boolean read Destroyed;
+    property IsFlying: Boolean read Flying;
+  end;
+
+  TQuakePropList = specialize TObjectList<TQuakeProp>;
+
+  { target_laser: a beam from its origin along its direction until it hits a wall. }
+  TQuakeLaser = class(TCastleBehavior)
+  strict private
+    FOn: Boolean;
+    FDamage: Integer;
+    procedure SetOn(const Value: Boolean);
+  public
+    Entity: TQuakeEntity;
+    Transform: TCastleTransform;
+    Beam: TCastleBox;
+    Origin, Direction: TVector3;
+    Length: Single;
+    constructor CreateLaser(const AParent: TCastleTransform; const AEntity: TQuakeEntity;
+      const ADirection: TVector3);
+    destructor Destroy; override;
+    { Stretch the beam to Len units }
+    procedure SetLength(const Len: Single);
+  published
+    property IsOn: Boolean read FOn write SetOn;
+    property Damage: Integer read FDamage;
+  end;
+
+  TQuakeLaserList = specialize TObjectList<TQuakeLaser>;
 
   { Trigger brush (trigger_multiple, trigger_once, trigger_push, ...) }
   TQuakeTrigger = class
@@ -685,6 +770,245 @@ begin
   Model.Free;
   Transform.Free;
   inherited Destroy;
+end;
+
+{ TQuakeSpeaker }
+
+constructor TQuakeSpeaker.CreateSpeaker(const AParent: TCastleTransform; const AEntity: TQuakeEntity);
+const
+  LOOPED_ON = 1;
+  LOOPED_OFF = 2;
+var
+  Path: String;
+begin
+  inherited Create(nil);
+  Entity := AEntity;
+  FNoise := LowerCase(AEntity.GetField('noise'));
+  FLooped := (AEntity.SpawnFlags and (LOOPED_ON or LOOPED_OFF)) <> 0;
+  { Quake 2: attenuation -1 = none (heard everywhere), 0 = default (normal) }
+  FAttenuation := AEntity.GetFloat('attenuation', 1);
+  if FAttenuation = 0 then
+    FAttenuation := 1;
+
+  Path := FNoise;
+  if ExtractFileExt(Path) = '' then
+    Path := Path + '.wav';
+  Path := 'sound/' + Path;
+  FSound := Sounds.SpatialSound(Path, FAttenuation);
+
+  Transform := TCastleTransform.Create(nil);
+  Transform.Name := Format('Speaker%.3d', [NextEntityNumber]);
+  Transform.Translation := QuakeToCge(AEntity.Origin);
+  Source := TCastleSoundSource.Create(nil);
+  Source.Spatial := FAttenuation > 0;
+  Source.Volume := AEntity.GetFloat('volume', 1);
+  Transform.AddBehavior(Source);
+  Transform.AddBehavior(Self);
+  if FLooped and (FSound <> nil) then
+  begin
+    Source.SoundPlaying := (AEntity.SpawnFlags and LOOPED_ON) <> 0;
+    Source.Sound := FSound;
+  end;
+  AParent.Add(Transform);
+end;
+
+destructor TQuakeSpeaker.Destroy;
+begin
+  { BeforeDestruction already detached this behavior from Transform }
+  if Source <> nil then
+    Source.Sound := nil;
+  FreeAndNil(Source);
+  FreeAndNil(Transform);
+  inherited Destroy;
+end;
+
+function TQuakeSpeaker.GetPlaying: Boolean;
+begin
+  Result := FLooped and (FSound <> nil) and Source.SoundPlaying;
+end;
+
+procedure TQuakeSpeaker.Activate;
+begin
+  if FSound = nil then
+    Exit;
+  if FLooped then
+    Source.SoundPlaying := not Source.SoundPlaying
+  else
+    Source.Play(FSound);
+end;
+
+{ TQuakeProp }
+
+constructor TQuakeProp.CreateProp(const AParent: TCastleTransform; const AKind: TPropKind;
+  const AEntity: TQuakeEntity);
+const
+  Models: array[TPropKind] of String = (
+    'models/objects/barrels/tris.md2', 'models/objects/banner/tris.md2',
+    'models/deadbods/dude/tris.md2', 'models/objects/satellite/tris.md2',
+    'models/ships/strogg1/tris.md2', 'models/objects/gibs/head2/tris.md2');
+var
+  Pos: TVector3;
+  Flags, Frame: Integer;
+begin
+  inherited Create(nil);
+  Kind := AKind;
+  Entity := AEntity;
+  Pos := QuakeToCge(AEntity.Origin);
+  Flags := AEntity.SpawnFlags;
+
+  Transform := TCastleTransform.Create(nil);
+  Transform.Name := Format('Prop%.3d_%s', [NextEntityNumber, AEntity.ClassName]);
+  Transform.Translation := Pos;
+  Transform.Rotation := Vector4(0, 1, 0, DegToRad(AEntity.Angle));
+  Model := Md2Manager.CreateInstance(Models[AKind]);
+  if Model <> nil then
+  begin
+    Model.Scene.Name := Transform.Name + '_Model';
+    Model.SetTint(Lighting.SampleLight(Pos + Vector3(0, 8, 0)));
+    { Barrels block the player and stop shots; other props are decoration }
+    Model.Scene.Collides := AKind = pkExplobox;
+    Model.Scene.Pickable := AKind = pkExplobox;
+    Transform.Add(Model.Scene);
+  end;
+
+  case AKind of
+    pkExplobox:
+      Health := AEntity.GetInt('health', 10);
+    pkBanner:
+      if Model <> nil then
+      begin
+        { Waving flag: loop all frames, random phase }
+        Model.PlayAnim('', True, 10);
+        Model.Update(Random * 2);
+      end;
+    pkDeadSoldier:
+      if Model <> nil then
+      begin
+        { Quake 2 picks the corpse pose from the spawnflags }
+        if (Flags and 2) <> 0 then Frame := 1
+        else if (Flags and 4) <> 0 then Frame := 2
+        else if (Flags and 8) <> 0 then Frame := 3
+        else if (Flags and 16) <> 0 then Frame := 4
+        else if (Flags and 32) <> 0 then Frame := 5
+        else Frame := 0;
+        Model.SetFrame(Frame);
+      end;
+    pkStroggShip:
+      begin
+        { Invisible until triggered, then flies along its path_corners }
+        Transform.Exists := False;
+        FlySpeed := AEntity.Speed(300);
+      end;
+  end;
+
+  Transform.AddBehavior(Self);
+  AParent.Add(Transform);
+end;
+
+destructor TQuakeProp.Destroy;
+begin
+  { BeforeDestruction already detached this behavior from Transform }
+  FreeAndNil(Model);
+  FreeAndNil(Transform);
+  inherited Destroy;
+end;
+
+function TQuakeProp.GetEntityClass: String;
+begin
+  Result := Entity.ClassName;
+end;
+
+function TQuakeProp.OwnsTransform(const T: TCastleTransform): Boolean;
+begin
+  Result := (T <> nil) and ((T = Transform) or ((Model <> nil) and (T = Model.Scene)));
+end;
+
+procedure TQuakeProp.UpdateProp(const SecondsPassed: Single);
+var
+  Delta: TVector3;
+  Dist, Step: Single;
+begin
+  if Destroyed then
+    Exit;
+  if (Model <> nil) and (Kind in [pkBanner, pkSatelliteDish]) then
+    Model.Update(SecondsPassed);
+  if Flying then
+  begin
+    Delta := FlyTarget - Transform.Translation;
+    Dist := Delta.Length;
+    Step := FlySpeed * SecondsPassed;
+    if Dist > 0.01 then
+    begin
+      Transform.Rotation := Vector4(0, 1, 0, ArcTan2(-Delta.Z, Delta.X));
+      if Step < Dist then
+        Transform.Translation := Transform.Translation + Delta * (Step / Dist)
+      else
+        Transform.Translation := FlyTarget;
+    end;
+  end;
+end;
+
+{ TQuakeLaser }
+
+constructor TQuakeLaser.CreateLaser(const AParent: TCastleTransform; const AEntity: TQuakeEntity;
+  const ADirection: TVector3);
+const
+  LASER_ON = 1;
+var
+  Flags: Integer;
+  Col: TCastleColor;
+begin
+  inherited Create(nil);
+  Entity := AEntity;
+  Origin := QuakeToCge(AEntity.Origin);
+  Direction := ADirection;
+  FDamage := AEntity.GetInt('dmg', 100);
+  Flags := AEntity.SpawnFlags;
+  { spawnflags: 2 red, 4 green, 8 blue, 16 yellow, 32 orange }
+  if (Flags and 2) <> 0 then Col := Vector4(1, 0.1, 0.1, 1)
+  else if (Flags and 4) <> 0 then Col := Vector4(0.1, 1, 0.1, 1)
+  else if (Flags and 8) <> 0 then Col := Vector4(0.2, 0.3, 1, 1)
+  else if (Flags and 16) <> 0 then Col := Vector4(1, 1, 0.2, 1)
+  else if (Flags and 32) <> 0 then Col := Vector4(1, 0.6, 0.1, 1)
+  else Col := Vector4(1, 0.1, 0.1, 1);
+
+  Transform := TCastleTransform.Create(nil);
+  Transform.Name := Format('Laser%.3d', [NextEntityNumber]);
+  Transform.Translation := Origin;
+  { The beam box is built along +X; rotate +X onto the direction }
+  Transform.Rotation := (QuatFromAxisAngle(Vector3(0, 1, 0), ArcTan2(-Direction.Z, Direction.X)) *
+    QuatFromAxisAngle(Vector3(0, 0, 1), ArcSin(EnsureRange(Direction.Y, -1, 1)))).ToAxisAngle;
+  Beam := TCastleBox.Create(nil);
+  Beam.Name := Transform.Name + '_Beam';
+  Beam.Material := pmUnlit;
+  Beam.Color := Col;
+  Beam.Collides := False;
+  Beam.Pickable := False;
+  Transform.Add(Beam);
+  Transform.AddBehavior(Self);
+  AParent.Add(Transform);
+  SetLength(16);
+  SetOn((Flags and LASER_ON) <> 0);
+end;
+
+destructor TQuakeLaser.Destroy;
+begin
+  FreeAndNil(Beam);
+  FreeAndNil(Transform);
+  inherited Destroy;
+end;
+
+procedure TQuakeLaser.SetLength(const Len: Single);
+begin
+  Length := Max(1, Len);
+  Beam.Size := Vector3(Length, 1.5, 1.5);
+  Beam.Translation := Vector3(Length / 2, 0, 0);
+end;
+
+procedure TQuakeLaser.SetOn(const Value: Boolean);
+begin
+  FOn := Value;
+  Transform.Exists := Value;
 end;
 
 { TQuakeTrigger }

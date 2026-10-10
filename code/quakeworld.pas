@@ -34,6 +34,10 @@ type
     FMonsters: TQuakeMonsterList;
     FProjectiles: TQuakeProjectileList;
     FTriggers: TQuakeTriggerList;
+    FSpeakers: TQuakeSpeakerList;
+    FProps: TQuakePropList;
+    FLasers: TQuakeLaserList;
+    FTimers: specialize TDictionary<TQuakeEntity, Single>; { func_timer -> next fire time (<0: off) }
     FDelayed: specialize TList<TDelayedTarget>;
     FCounters: specialize TDictionary<TQuakeEntity, Integer>;
     FStats: TQuakePlayerStats;
@@ -84,6 +88,14 @@ type
     function MonsterByTransform(const T: TCastleTransform): TQuakeMonster;
     function MoverByTransform(const T: TCastleTransform): TQuakeMover;
     procedure UseEntity(const Ent: TQuakeEntity);
+    function TimerInterval(const Ent: TQuakeEntity): Single;
+    function EntityMoveDir(const Ent: TQuakeEntity): TVector3;
+    { A transform at the entity origin, for positional one-shot sounds }
+    function FPlayerTransformFor(const Ent: TQuakeEntity): TCastleTransform;
+    procedure ActivateProp(const Prop: TQuakeProp);
+    procedure DamageProp(const Prop: TQuakeProp; const Damage: Integer);
+    function PropByTransform(const T: TCastleTransform): TQuakeProp;
+    procedure UpdateTimersAndLasers(const SecondsPassed: Single);
     { Shootable brushes: func_explosive, doors / buttons with "health" }
     procedure DamageMover(const Mover: TQuakeMover; const Damage: Integer);
     procedure KillPlayer;
@@ -136,6 +148,8 @@ type
     property Dead: Boolean read FDead;
     property Monsters: TQuakeMonsterList read FMonsters;
     property Pickups: TQuakePickupList read FPickups;
+    property Props: TQuakePropList read FProps;
+    property Lasers: TQuakeLaserList read FLasers;
     property WeaponTransform: TCastleTransform read FWeaponTransform;
     property Geometry: TQuakeGeometry read FGeometry;
     property Bsp: TQuakeBsp read FBsp;
@@ -186,6 +200,10 @@ begin
   FMonsters := TQuakeMonsterList.Create(True);
   FProjectiles := TQuakeProjectileList.Create(True);
   FTriggers := TQuakeTriggerList.Create(True);
+  FSpeakers := TQuakeSpeakerList.Create(True);
+  FProps := TQuakePropList.Create(True);
+  FLasers := TQuakeLaserList.Create(True);
+  FTimers := specialize TDictionary<TQuakeEntity, Single>.Create;
   FDelayed := specialize TList<TDelayedTarget>.Create;
   FCounters := specialize TDictionary<TQuakeEntity, Integer>.Create;
   FKeyIcons := TStringList.Create;
@@ -203,6 +221,10 @@ begin
   FMonsters.Free;
   FProjectiles.Free;
   FTriggers.Free;
+  FSpeakers.Free;
+  FProps.Free;
+  FLasers.Free;
+  FTimers.Free;
   FDelayed.Free;
   FCounters.Free;
   FKeyIcons.Free;
@@ -230,6 +252,10 @@ begin
   FMonsters.Clear;
   FProjectiles.Clear;
   FTriggers.Clear;
+  FSpeakers.Clear;
+  FProps.Clear;
+  FLasers.Clear;
+  FTimers.Clear;
   FDelayed.Clear;
   FCounters.Clear;
   Particles.Clear;
@@ -385,6 +411,42 @@ begin
       Continue;
     end;
 
+    if CName = 'target_speaker' then
+    begin
+      FSpeakers.Add(TQuakeSpeaker.CreateSpeaker(FMap, Ent));
+      Continue;
+    end;
+
+    if CName = 'misc_explobox' then
+      FProps.Add(TQuakeProp.CreateProp(FMap, pkExplobox, Ent))
+    else
+    if CName = 'misc_banner' then
+      FProps.Add(TQuakeProp.CreateProp(FMap, pkBanner, Ent))
+    else
+    if CName = 'misc_deadsoldier' then
+      FProps.Add(TQuakeProp.CreateProp(FMap, pkDeadSoldier, Ent))
+    else
+    if CName = 'misc_satellite_dish' then
+      FProps.Add(TQuakeProp.CreateProp(FMap, pkSatelliteDish, Ent))
+    else
+    if CName = 'misc_strogg_ship' then
+      FProps.Add(TQuakeProp.CreateProp(FMap, pkStroggShip, Ent))
+    else
+    if CName = 'misc_gib_head' then
+      FProps.Add(TQuakeProp.CreateProp(FMap, pkGibHead, Ent))
+    else
+    if CName = 'target_laser' then
+      FLasers.Add(TQuakeLaser.CreateLaser(FMap, Ent, EntityMoveDir(Ent)))
+    else
+    if CName = 'func_timer' then
+    begin
+      { spawnflags 1 = START_ON }
+      if (SpawnFlags and 1) <> 0 then
+        FTimers.AddOrSetValue(Ent, FTime + 1 + Ent.GetFloat('delay', 0) + TimerInterval(Ent))
+      else
+        FTimers.AddOrSetValue(Ent, -1);
+    end;
+
     if CName = 'target_secret' then
       Inc(FStats.TotalSecrets)
     else
@@ -398,8 +460,9 @@ begin
       UseEntity(Ent);
   end;
 
-  WritelnLog('QuakeWorld', 'Spawned %d pickups, %d monsters, %d triggers, %d movers',
-    [FPickups.Count, FMonsters.Count, FTriggers.Count, FGeometry.Movers.Count]);
+  WritelnLog('QuakeWorld', 'Spawned %d pickups, %d monsters, %d triggers, %d movers, %d speakers, %d props, %d lasers, %d timers',
+    [FPickups.Count, FMonsters.Count, FTriggers.Count, FGeometry.Movers.Count, FSpeakers.Count,
+     FProps.Count, FLasers.Count, FTimers.Count]);
 end;
 
 function TQuakeWorld.LoadMap(const AMapName: String): Boolean;
@@ -620,6 +683,9 @@ var
   M: TQuakeMonster;
   Trig: TQuakeTrigger;
   D: TDelayedTarget;
+  Speaker: TQuakeSpeaker;
+  Laser: TQuakeLaser;
+  Prop: TQuakeProp;
 begin
   CName := Ent.ClassName;
   Msg := Ent.MessageText;
@@ -685,8 +751,40 @@ begin
   end else
   if CName = 'target_speaker' then
   begin
-    if Ent.GetField('noise') <> '' then
-      Sounds.Play('sound/' + LowerCase(Ent.GetField('noise')));
+    for Speaker in FSpeakers do
+      if Speaker.Entity = Ent then
+        Speaker.Activate;
+  end else
+  if CName = 'func_timer' then
+  begin
+    { Using a timer toggles it }
+    if FTimers.ContainsKey(Ent) then
+    begin
+      if FTimers[Ent] < 0 then
+        FTimers[Ent] := FTime + Ent.GetFloat('delay', 0) + TimerInterval(Ent)
+      else
+        FTimers[Ent] := -1;
+    end;
+    Exit;
+  end else
+  if CName = 'target_splash' then
+  begin
+    Particles.SpawnSplash(QuakeToCge(Ent.Origin), EntityMoveDir(Ent), Ent.Sounds,
+      Ent.GetInt('count', 32));
+    if Ent.Sounds = 1 then
+      Sounds.PlayAt('sound/world/spark' + IntToStr(5 + Random(3)) + '.wav', FPlayerTransformFor(Ent));
+  end else
+  if CName = 'target_laser' then
+  begin
+    for Laser in FLasers do
+      if Laser.Entity = Ent then
+        Laser.IsOn := not Laser.IsOn;
+  end else
+  if Copy(CName, 1, 5) = 'misc_' then
+  begin
+    for Prop in FProps do
+      if Prop.Entity = Ent then
+        ActivateProp(Prop);
   end else
   if CName = 'target_explosion' then
   begin
@@ -767,6 +865,175 @@ begin
     Mover.Use;
     if Mover.Kind <> mkButton then
       UseTargets(Mover.Target);
+  end;
+end;
+
+function TQuakeWorld.TimerInterval(const Ent: TQuakeEntity): Single;
+begin
+  { Quake 2 func_timer: wait + crandom() * random }
+  Result := Max(0.1, Ent.GetFloat('wait', 1) + (Random * 2 - 1) * Ent.GetFloat('random', 0));
+end;
+
+function TQuakeWorld.EntityMoveDir(const Ent: TQuakeEntity): TVector3;
+var
+  A: TVector3;
+  Pitch, Yaw: Single;
+begin
+  { G_SetMovedir: "angle" -1 = up, -2 = down, else angles (pitch yaw roll) }
+  if Ent.HasField('angle') then
+  begin
+    if SameValue(Ent.Angle, -1) then
+      Exit(Vector3(0, 1, 0));
+    if SameValue(Ent.Angle, -2) then
+      Exit(Vector3(0, -1, 0));
+    Exit(YawToCgeDir(Ent.Angle));
+  end;
+  A := Ent.GetVector('angles', Vector3(0, 0, 0));
+  Pitch := DegToRad(A.X);
+  Yaw := DegToRad(A.Y);
+  { Quake pitch is positive looking down }
+  Result := Vector3(Cos(Yaw) * Cos(Pitch), -Sin(Pitch), -Sin(Yaw) * Cos(Pitch));
+end;
+
+function TQuakeWorld.FPlayerTransformFor(const Ent: TQuakeEntity): TCastleTransform;
+var
+  Speaker: TQuakeSpeaker;
+begin
+  { Reuse any speaker transform close to the entity, else play at the map root }
+  for Speaker in FSpeakers do
+    if PointsDistance(Speaker.Transform.Translation, QuakeToCge(Ent.Origin)) < 64 then
+      Exit(Speaker.Transform);
+  Result := FMap;
+end;
+
+function TQuakeWorld.PropByTransform(const T: TCastleTransform): TQuakeProp;
+var
+  Prop: TQuakeProp;
+begin
+  for Prop in FProps do
+    if Prop.OwnsTransform(T) then
+      Exit(Prop);
+  Result := nil;
+end;
+
+procedure TQuakeWorld.ActivateProp(const Prop: TQuakeProp);
+var
+  List: TQuakeEntityList;
+begin
+  case Prop.Kind of
+    pkSatelliteDish:
+      if Prop.Model <> nil then
+        Prop.Model.PlayAnim('', False, 10);
+    pkStroggShip:
+      begin
+        List := FBsp.FindByTargetName(Prop.Entity.Target);
+        try
+          if List.Count > 0 then
+          begin
+            Prop.Transform.Exists := True;
+            Prop.FlyCorner := List[0];
+            Prop.FlyTarget := QuakeToCge(List[0].Origin);
+            Prop.Flying := True;
+          end;
+        finally
+          List.Free;
+        end;
+      end;
+    pkExplobox:
+      DamageProp(Prop, 1000);
+  end;
+end;
+
+procedure TQuakeWorld.DamageProp(const Prop: TQuakeProp; const Damage: Integer);
+var
+  Dmg: Integer;
+begin
+  if (Prop.Kind <> pkExplobox) or Prop.Destroyed then
+    Exit;
+  Prop.Health := Prop.Health - Damage;
+  if Prop.Health > 0 then
+    Exit;
+  { Barrel explosion: Quake 2 barrel_explode, radius damage dmg (default 150) }
+  Prop.Destroyed := True;
+  Prop.Transform.Exists := False;
+  Dmg := Prop.Entity.GetInt('dmg', 150);
+  Explode(Prop.Transform.Translation + Vector3(0, 16, 0), Dmg, Dmg + 40, False);
+  UseTargets(Prop.Entity.Target);
+end;
+
+procedure TQuakeWorld.UpdateTimersAndLasers(const SecondsPassed: Single);
+var
+  Pair: specialize TPair<TQuakeEntity, Single>;
+  Fire: TQuakeEntityList;
+  Ent: TQuakeEntity;
+  Laser: TQuakeLaser;
+  Prop: TQuakeProp;
+  List: TQuakeEntityList;
+  Dist: Single;
+  Hit: TCastleTransform;
+  ToPlayer: TVector3;
+  Along: Single;
+begin
+  { func_timer }
+  Fire := TQuakeEntityList.Create(False);
+  try
+    for Pair in FTimers do
+      if (Pair.Value >= 0) and (Pair.Value <= FTime) then
+        Fire.Add(Pair.Key);
+    for Ent in Fire do
+    begin
+      FTimers[Ent] := FTime + TimerInterval(Ent);
+      UseTargets(Ent.Target);
+    end;
+  finally
+    Fire.Free;
+  end;
+
+  { target_laser: beam until the first wall, damages the player in it }
+  for Laser in FLasers do
+  begin
+    if not Laser.IsOn then
+      Continue;
+    Hit := FItems.WorldRayCast(Laser.Origin, Laser.Direction, Dist);
+    if (Hit = nil) or (Dist > 2048) then
+      Dist := 2048;
+    Laser.SetLength(Dist);
+    ToPlayer := (FPlayerPos - Vector3(0, 22, 0)) - Laser.Origin;
+    Along := TVector3.DotProduct(ToPlayer, Laser.Direction);
+    if (Along > 0) and (Along < Dist) and
+       ((ToPlayer - Laser.Direction * Along).Length < 20) then
+    begin
+      FHurtTimer := FHurtTimer - SecondsPassed;
+      if FHurtTimer <= 0 then
+      begin
+        FHurtTimer := 0.1;
+        DamagePlayer(Laser.Damage div 10, Laser.Origin);
+      end;
+    end;
+  end;
+
+  { Props: animation, ships following their path_corners }
+  for Prop in FProps do
+  begin
+    Prop.UpdateProp(SecondsPassed);
+    if Prop.Flying and (PointsDistance(Prop.Transform.Translation, Prop.FlyTarget) < 1) then
+    begin
+      UseTargets(Prop.FlyCorner.GetField('pathtarget'));
+      List := FBsp.FindByTargetName(Prop.FlyCorner.Target);
+      try
+        if (Prop.FlyCorner.Target <> '') and (List.Count > 0) then
+        begin
+          Prop.FlyCorner := List[0];
+          Prop.FlyTarget := QuakeToCge(List[0].Origin);
+        end else
+        begin
+          Prop.Flying := False;
+          Prop.Transform.Exists := False;
+        end;
+      finally
+        List.Free;
+      end;
+    end;
   end;
 end;
 
@@ -983,6 +1250,8 @@ begin
     Mover := MoverByTransform(Hit);
     if Mover <> nil then
       DamageMover(Mover, Damage);
+    if PropByTransform(Hit) <> nil then
+      DamageProp(PropByTransform(Hit), Damage);
     if Rail then
       Particles.SpawnRailTrail(Muzzle, HitPos)
     else
@@ -1024,6 +1293,7 @@ procedure TQuakeWorld.Explode(const Pos: TVector3; const Damage: Integer; const 
 var
   M: TQuakeMonster;
   Mover: TQuakeMover;
+  Prop: TQuakeProp;
   Dist: Single;
   Points: Integer;
 begin
@@ -1042,7 +1312,7 @@ begin
         M.TakeDamage(Points);
     end;
   end;
-  { Splash damage also sets off explosive brushes (chain reactions) }
+  { Splash damage also sets off explosive brushes and barrels (chain reactions) }
   if (FGeometry <> nil) and (FUseDepth < 8) then
   begin
     Inc(FUseDepth);
@@ -1051,6 +1321,10 @@ begin
         if (Mover.Health > 0) and Mover.Transform.Exists and
            (PointsDistance(Mover.Center, Pos) < Radius + 32) then
           DamageMover(Mover, Damage div 2);
+      for Prop in FProps do
+        if (Prop.Kind = pkExplobox) and not Prop.Destroyed and
+           (PointsDistance(Prop.Transform.Translation, Pos) < Radius) then
+          DamageProp(Prop, Damage div 2);
     finally
       Dec(FUseDepth);
     end;
@@ -1148,7 +1422,10 @@ begin
           Particles.SpawnBlood(NewPos, -Dir);
         end else
         if MoverByTransform(Hit) <> nil then
-          DamageMover(MoverByTransform(Hit), Proj.Damage);
+          DamageMover(MoverByTransform(Hit), Proj.Damage)
+        else
+        if PropByTransform(Hit) <> nil then
+          DamageProp(PropByTransform(Hit), Proj.Damage);
         case Proj.Kind of
           pkRocket: Explode(NewPos, Proj.SplashDamage * DamageMultiplier, Proj.SplashRadius, Proj.FromPlayer);
           pkBfg:
@@ -1342,6 +1619,7 @@ begin
     end;
   end;
 
+  UpdateTimersAndLasers(SecondsPassed);
   UpdateProjectiles(SecondsPassed);
   Particles.Update(SecondsPassed);
   Lighting.Update(SecondsPassed);
@@ -1379,7 +1657,6 @@ begin
   FStats.CurrentWeapon := Slot;
   UpdateWeaponModel;
   FWeaponCooldown := 0.3;
-  Sounds.Play('sound/weapons/change.wav');
 end;
 
 procedure TQuakeWorld.FireWeapon(const Origin, Dir: TVector3);

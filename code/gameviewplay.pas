@@ -356,7 +356,7 @@ begin
     if Dir.Length > 0 then
       MainViewport.Camera.Translation := MainViewport.Camera.Translation + Dir.Normalize * Val;
   end else
-  if (Action = 'N') or (Action = 'I') or (Action = 'D') then
+  if (Action = 'N') or (Action = 'I') or (Action = 'D') or (Action = 'R') then
   begin
     { Go near monster / item / mover number Param, standing on a floor, facing it }
     P := StrToIntDef(Param, 0);
@@ -371,7 +371,13 @@ begin
       Target := FWorld.Pickups[P].Origin
     else
     if (Action = 'D') and (P < FWorld.Geometry.Movers.Count) then
-      Target := FWorld.Geometry.Movers[P].Center;
+      Target := FWorld.Geometry.Movers[P].Center
+    else
+    if (Action = 'R') and (P < FWorld.Props.Count) then
+    begin
+      Target := FWorld.Props[P].Transform.Translation + Vector3(0, 16, 0);
+      Ignore := FWorld.Props[P].Transform;
+    end;
     { The target itself must not block the line of sight probes }
     if Ignore <> nil then
       Ignore.Exists := False;
@@ -396,6 +402,14 @@ begin
       WritelnLog('Demo', 'Mover %d %s state %d progress %.2f exists %s', [J,
         FWorld.Geometry.Movers[J].Entity.ClassName, Ord(FWorld.Geometry.Movers[J].State),
         FWorld.Geometry.Movers[J].Progress, BoolToStr(FWorld.Geometry.Movers[J].Transform.Exists, True)]);
+    for J := 0 to FWorld.Props.Count - 1 do
+      WritelnLog('Demo', 'Prop %d %s health %d destroyed %s flying %s exists %s', [J,
+        FWorld.Props[J].Entity.ClassName, FWorld.Props[J].Health,
+        BoolToStr(FWorld.Props[J].Destroyed, True), BoolToStr(FWorld.Props[J].Flying, True),
+        BoolToStr(FWorld.Props[J].Transform.Exists, True)]);
+    for J := 0 to FWorld.Lasers.Count - 1 do
+      WritelnLog('Demo', 'Laser %d on %s length %.0f', [J,
+        BoolToStr(FWorld.Lasers[J].IsOn, True), FWorld.Lasers[J].Length]);
   end else
   if Action = 'G' then { Go to "x y z" (Quake coordinates) }
   begin
