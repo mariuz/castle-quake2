@@ -15,7 +15,7 @@ A port of **Quake 2** to the **Castle Game Engine** (Object Pascal / Free Pascal
 - **Quake 2 BSP (IBSP v38) world geometry**
   - All 19 lumps parsed; faces batched per texture + surface flags into X3D `TIndexedTriangleSetNode`s loaded into `TCastleScene` with `PreciseCollisions` for walking and ray casts.
   - **WAL wall textures** decoded with the `pics/colormap.pcx` palette and served through the `quaketex:` URL protocol.
-  - **Baked RGB lightmaps** packed into one atlas per model and applied with `TMultiTextureNode` (`MODULATE` + `MODULATE2X`), like Quake 2's GL renderer.
+  - **Baked RGB lightmaps** packed into one atlas per model and applied with `TMultiTextureNode` (`MODULATE` × 2, the overbright factor in the unlit material's emissive colour, which also works in WebGL), like Quake 2's GL renderer.
   - Surface flags: `SURF_SKY` (invisible but solid), `SURF_NODRAW`, `SURF_WARP` (animated with a GLSL `PLUG_texture_coord_shift` shader effect, non-solid), `SURF_TRANS33/66` (blended), `SURF_FLOWING` (scrolling `TTextureTransformNode`).
   - **Animated textures** following the WAL `animname` chains at 2 frames/second.
   - **Light styles**: flickering, pulsing and switchable lights. Faces lit by animated styles live in a separate lightmap atlas that is recomposed from their up to 4 style layers (10 Hz, only when a style changes) and re-uploaded; `light` entities with a `targetname` switch on/off, `target_lightramp` fades them.

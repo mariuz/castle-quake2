@@ -388,7 +388,12 @@ begin
     MultiTex.FdTexture.Add(LightmapTex);
     MultiTex.FdMode.Items.Clear;
     MultiTex.FdMode.Items.Add('MODULATE');
-    MultiTex.FdMode.Items.Add('MODULATE2X');
+    { Lightmaps are 2x "overbright". Not MODULATE2X: CGE generates
+      "fragment_color *= 2;" for it, an int literal that WebGL's GLSL ES
+      rejects (castlerendererinternalshader_texture.inc). Scaling the unlit
+      material's emissive colour gives the same emissive * texture * lightmap * 2. }
+    MultiTex.FdMode.Items.Add('MODULATE');
+    UnlitMat.EmissiveColor := Vector3(2, 2, 2);
     Appearance.Texture := MultiTex;
 
     LMCoordNode := TTextureCoordinateNode.Create;
@@ -441,7 +446,7 @@ begin
   FHeight := AHeight;
   FImage := TRGBImage.Create(FWidth, FHeight);
   FImage.Clear(Vector4Byte(0, 0, 0, 255));
-  { Reserve a 4x4 block at (0,0) filled with 128 (= 1.0 with MODULATE2X)
+  { Reserve a 4x4 block at (0,0) filled with 128 (= 1.0 with the 2x overbright)
     for faces without lightmap data. }
   for Y := 0 to 3 do
     for X := 0 to 3 do

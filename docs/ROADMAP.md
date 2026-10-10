@@ -7,7 +7,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Subsystem | Original Quake 2 | Castle Quake 2 (now) | Gap |
 | :--- | :--- | :--- | :--- |
 | World geometry | IBSP v38, PVS / areaportal culling | X3D batches per texture, CGE frustum culling | PVS / area culling on big maps. |
-| Lighting | RGB lightmaps, 4 styles, dynamic lights | All 4 styles (animated, switchable, ramps), `MODULATE2X`, LightPoint model tint | Dynamic lights on the world; light styles on model tint. |
+| Lighting | RGB lightmaps, 4 styles, dynamic lights | All 4 styles (animated, switchable, ramps), 2x overbright, LightPoint model tint | Dynamic lights on the world; light styles on model tint. |
 | Sky | Skybox, `skyrotate`, `skyaxis` | Skybox via `TCastleBackground` | Sky rotation. |
 | Liquids | Warped water / lava (`SURF_WARP`), contents | Non-solid liquid surfaces, point contents from BSP leafs, swimming, drowning, lava / slime damage, underwater tints | Warp shader. |
 | Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp and skins | Powerup shells, glow, bobbing items. |

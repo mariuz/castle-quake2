@@ -83,6 +83,9 @@ jobs:
             if [ "$status" -ne 0 ]; then
               echo "::error::autotest $map exited with $status"; exit 1
             fi
+            if grep -q "shader not compiled" "test_output/$map.log"; then
+              echo "::error::GLSL shader compile error in autotest $map"; exit 1
+            fi
             if grep -q "Exception" "test_output/$map.log"; then
               echo "::error::Exception in autotest $map"; exit 1
             fi
