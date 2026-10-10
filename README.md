@@ -104,7 +104,7 @@ castle-engine compile
 .\castle-quake2-tests.exe   # parser unit tests (PAK, PCX, WAL, BSP, MD2, SP2) against the demo PAK
 ```
 
-CI also runs the `--autotest` demo scripts on Linux (xvfb + Mesa) and uploads their screenshots.
+CI also runs the `--autotest` demo scripts on Linux (xvfb + Mesa), uploads their screenshots, and compares an early screenshot of each demo map with `tests/reference/*.png` (`castle-quake2-tests --compare`, 64x36 block averages), so rendering regressions fail the build.
 
 ### Command line
 

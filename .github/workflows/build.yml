@@ -102,6 +102,24 @@ jobs:
           ls -l test_output
           test "$(ls test_output/*.png | wc -l)" -ge 9
 
+      - name: Compare screenshots with references
+        run: |
+          set -eu
+          # One early screenshot per map, compared (as 64x36 block averages) with
+          # tests/reference/<map>.png. A missing reference is created and uploaded
+          # with the artifacts, to be committed.
+          mkdir -p test_output/compare
+          status=0
+          for map in demo1 demo2 demo3; do
+            timeout 300 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest "$map" "test_output/compare/$map" --demo "W:0.5,S,Q" > "test_output/compare/$map.log" 2>&1
+            (cd tests && ./castle-quake2-tests --compare "reference/$map.png" "../test_output/compare/${map}_1.png" "../test_output/compare/${map}_diff.png") || status=1
+          done
+          cp -r tests/reference test_output/compare/reference
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Screenshots differ from tests/reference (see test_output/compare/*_diff.png in the artifact)"
+          fi
+          exit $status
+
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4

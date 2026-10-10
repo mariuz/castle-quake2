@@ -1,6 +1,13 @@
 { Unit tests for Castle Quake 2's Quake 2 file parsers, using the bundled
   shareware demo PAK. Exit code 0 = all passed. Run from this directory:
-    castle-engine compile && ./castle-quake2-tests }
+    castle-engine compile && ./castle-quake2-tests
+
+  Also compares autotest screenshots with reference images (used by CI):
+    ./castle-quake2-tests --compare reference.png screenshot.png diff.png [max-mean-diff]
+  Both images are averaged into 64x36 blocks (robust to tiny camera shifts
+  and flicker); exit code 1 when the mean absolute channel difference
+  (0..255) is above the limit (default 3). A missing reference is created
+  from the screenshot (64x36, the blocks themselves). }
 program castle_quake2_tests;
 
 {$apptype console}
@@ -9,7 +16,7 @@ program castle_quake2_tests;
 uses
   {$ifdef UNIX} CThreads, {$endif}
   SysUtils, Math,
-  CastleVectors, CastleLog,
+  CastleVectors, CastleLog, CastleImages,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight;
 
 var
@@ -141,8 +148,124 @@ begin
 end;
 
 const
+  CompareWidth = 64;
+  CompareHeight = 36;
+
+type
+  TBlockColors = array[0..CompareWidth * CompareHeight - 1] of TVector3;
+
+{ Average colour of each block of the image (a box-filter downscale, so a
+  tiny camera shift or flickering texel barely changes the result) }
+procedure BlockAverages(const Image: TCastleImage; out Blocks: TBlockColors);
+var
+  X, Y, BX, BY, I: Integer;
+  Counts: array[0..CompareWidth * CompareHeight - 1] of Integer;
+  P: PVector3Byte;
+begin
+  for I := 0 to High(Blocks) do
+  begin
+    Blocks[I] := TVector3.Zero;
+    Counts[I] := 0;
+  end;
+  for Y := 0 to Image.Height - 1 do
+  begin
+    BY := Y * CompareHeight div Image.Height;
+    for X := 0 to Image.Width - 1 do
+    begin
+      BX := X * CompareWidth div Image.Width;
+      I := BY * CompareWidth + BX;
+      P := Image.PixelPtr(X, Y);
+      Blocks[I] := Blocks[I] + Vector3(P^.X, P^.Y, P^.Z);
+      Inc(Counts[I]);
+    end;
+  end;
+  for I := 0 to High(Blocks) do
+    if Counts[I] > 0 then
+      Blocks[I] := Blocks[I] / Counts[I];
+end;
+
+{ Mean absolute RGB difference (0..255) of the block averages of two images;
+  writes the amplified difference as an image. }
+function CompareImages(const ReferencePath, ShotPath, DiffPath: String): Single;
+var
+  Ref, Shot: TCastleImage;
+  RefBlocks, ShotBlocks: TBlockColors;
+  Diff: TRGBImage;
+  I: Integer;
+  D: TVector3;
+  Sum: Single;
+begin
+  Shot := LoadImage(ShotPath, [TRGBImage]);
+  try
+    BlockAverages(Shot, ShotBlocks);
+  finally
+    Shot.Free;
+  end;
+
+  { No reference yet: the shot's blocks become it }
+  if not FileExists(ReferencePath) then
+  begin
+    Diff := TRGBImage.Create(CompareWidth, CompareHeight);
+    try
+      for I := 0 to High(ShotBlocks) do
+        PVector3Byte(Diff.PixelPtr(I mod CompareWidth, I div CompareWidth))^ := Vector3Byte(
+          Round(ShotBlocks[I].X), Round(ShotBlocks[I].Y), Round(ShotBlocks[I].Z));
+      SaveImage(Diff, ReferencePath);
+    finally
+      Diff.Free;
+    end;
+    Writeln('Created reference ', ReferencePath);
+    Exit(0);
+  end;
+
+  Ref := LoadImage(ReferencePath, [TRGBImage]);
+  try
+    BlockAverages(Ref, RefBlocks);
+  finally
+    Ref.Free;
+  end;
+
+  Diff := TRGBImage.Create(CompareWidth, CompareHeight);
+  try
+    Sum := 0;
+    for I := 0 to High(RefBlocks) do
+    begin
+      D := RefBlocks[I] - ShotBlocks[I];
+      D := Vector3(Abs(D.X), Abs(D.Y), Abs(D.Z));
+      Sum := Sum + D.X + D.Y + D.Z;
+      PVector3Byte(Diff.PixelPtr(I mod CompareWidth, I div CompareWidth))^ := Vector3Byte(
+        Min(255, Round(D.X * 4)), Min(255, Round(D.Y * 4)), Min(255, Round(D.Z * 4)));
+    end;
+    if DiffPath <> '' then
+      SaveImage(Diff, DiffPath);
+  finally
+    Diff.Free;
+  end;
+  Result := Sum / (Length(RefBlocks) * 3);
+end;
+
+procedure RunCompare;
+var
+  MaxDiff, Mean: Single;
+begin
+  MaxDiff := 3;
+  if ParamCount >= 5 then
+    MaxDiff := StrToFloatDef(ParamStr(5), MaxDiff);
+  Mean := CompareImages(ParamStr(2), ParamStr(3), ParamStr(4));
+  Writeln(Format('%s vs %s: mean difference %.2f (limit %.2f)',
+    [ParamStr(2), ParamStr(3), Mean, MaxDiff]));
+  if Mean > MaxDiff then
+    Halt(1);
+end;
+
+const
   PakPath = '../data/paks/quake2_demo.pak';
 begin
+  if (ParamCount >= 4) and (ParamStr(1) = '--compare') then
+  begin
+    RunCompare;
+    Exit;
+  end;
   if not Pak.AddFile(PakPath) then
   begin
     Writeln('Cannot load ', PakPath, ' (run the tests from the tests/ directory)');

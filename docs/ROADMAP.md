@@ -101,5 +101,5 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [ ] Monster prefabs (`.castle-transform`) and named sounds
 - [x] CI autotests with screenshots (Linux, xvfb + Mesa)
 - [x] Parser unit tests (`tests/`, in CI)
-- [ ] Screenshot diffing
+- [x] Screenshot comparison in CI (64x36 block averages against `tests/reference`)
 - [x] WebAssembly build deployed to GitHub Pages
