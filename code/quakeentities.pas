@@ -9,7 +9,7 @@ uses
   SysUtils, Classes, Generics.Collections, Math,
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions, CastleUtils,
   CastleSoundEngine, CastleBehaviors, CastleColors, CastleRenderOptions,
-  QuakeBsp, QuakeMd2, QuakeLight, QuakeSound, QuakeHud, QuakeParticles, QuakeSprite;
+  QuakePak, QuakeBsp, QuakeMd2, QuakeLight, QuakeSound, QuakeHud, QuakeParticles, QuakeSprite;
 
 type
   TItemCategory = (icWeapon, icAmmo, icHealth, icArmor, icPowerup, icKey);
@@ -101,6 +101,7 @@ type
     FDetourTime: Single;
     FDetourSide: Single;
     FAttackFired: Boolean;
+    FIdleTimer: Single;
     { Fraction of the attack animation at which the attack happens }
     function AttackFirePoint: Single;
     { Move along Dir (with wall sliding) unless it walks off a ledge }
@@ -384,6 +385,8 @@ function FindMonsterDef(const AClassName: String): PQuakeMonsterDef;
 
 { Full sound path for a monster sound name }
 function MonsterSound(const Def: PQuakeMonsterDef; const Name: String): String;
+{ The monster's idle sound found in the PAK ('' if none) }
+function MonsterIdleSound(const Def: PQuakeMonsterDef): String;
 
 implementation
 
@@ -405,6 +408,38 @@ begin
     if MonsterDefs[I].ClassName = AClassName then
       Exit(@MonsterDefs[I]);
   Result := nil;
+end;
+
+var
+  IdleSounds: TStringList;
+
+function MonsterIdleSound(const Def: PQuakeMonsterDef): String;
+var
+  Files: TStringList;
+  I: Integer;
+begin
+  { First sound/<dir>/*idle*.wav in the PAKs, looked up once per directory }
+  if IdleSounds = nil then
+    IdleSounds := TStringList.Create;
+  I := IdleSounds.IndexOfName(Def^.SoundDir);
+  if I >= 0 then
+    Exit(IdleSounds.ValueFromIndex[I]);
+  Result := '';
+  Files := Pak.FindFiles('sound/' + Def^.SoundDir + '/', '.wav');
+  try
+    for I := 0 to Files.Count - 1 do
+      if Pos('idle', ExtractFileName(Files[I])) > 0 then
+      begin
+        Result := Files[I];
+        Break;
+      end;
+  finally
+    Files.Free;
+  end;
+  WritelnLog('QuakeEntities', 'Idle sound for "%s": "%s"', [Def^.SoundDir, Result]);
+  IdleSounds.Values[Def^.SoundDir] := Result;
+  if Result = '' then
+    IdleSounds.Add(Def^.SoundDir + '=');
 end;
 
 function MonsterSound(const Def: PQuakeMonsterDef; const Name: String): String;
@@ -500,6 +535,7 @@ begin
   FLightTimer := Random * 0.25;
   FSightTimer := Random * 0.2;
   FDetourSide := 1;
+  FIdleTimer := 3 + Random * 12;
 
   Transform := TCastleTransform.Create(nil);
   Transform.Name := Format('Monster%.3d_%s', [NextEntityNumber, Def^.ClassName]);
@@ -722,6 +758,14 @@ begin
 
   if not Alerted then
   begin
+    { Idle mutter now and then (ATTN_IDLE: fades out quickly) }
+    FIdleTimer := FIdleTimer - SecondsPassed;
+    if FIdleTimer <= 0 then
+    begin
+      FIdleTimer := 5 + Random * 15;
+      if MonsterIdleSound(Def) <> '' then
+        Sounds.PlayAt(MonsterIdleSound(Def), Transform, 1, 2);
+    end;
     StickToFloor(SecondsPassed);
     Exit;
   end;
@@ -1145,4 +1189,6 @@ begin
             (Pos.Z + Radius >= Box.Data[0].Z) and (Pos.Z - Radius <= Box.Data[1].Z);
 end;
 
+finalization
+  FreeAndNil(IdleSounds);
 end.
