@@ -4,6 +4,7 @@ A port of **Quake 2** to the **Castle Game Engine** (Object Pascal / Free Pascal
 
 ![demo1 start](docs/screenshot-demo1.png)
 
+- 🌐 **[Play in the browser (WebAssembly)](https://mariuz.github.io/castle-quake2/)**
 - 📖 **[Architecture & Engine Mapping](docs/ARCHITECTURE.md)**
 - 🗺️ **[Quake 2 Comparison & Roadmap](docs/ROADMAP.md)**
 
@@ -15,7 +16,7 @@ A port of **Quake 2** to the **Castle Game Engine** (Object Pascal / Free Pascal
   - All 19 lumps parsed; faces batched per texture + surface flags into X3D `TIndexedTriangleSetNode`s loaded into `TCastleScene` with `PreciseCollisions` for walking and ray casts.
   - **WAL wall textures** decoded with the `pics/colormap.pcx` palette and served through the `quaketex:` URL protocol.
   - **Baked RGB lightmaps** packed into one atlas per model and applied with `TMultiTextureNode` (`MODULATE` + `MODULATE2X`), like Quake 2's GL renderer.
-  - Surface flags: `SURF_SKY` (invisible but solid), `SURF_NODRAW`, `SURF_WARP`, `SURF_TRANS33/66` (blended), `SURF_FLOWING` (scrolling `TTextureTransformNode`).
+  - Surface flags: `SURF_SKY` (invisible but solid), `SURF_NODRAW`, `SURF_WARP` (animated with a GLSL `PLUG_texture_coord_shift` shader effect, non-solid), `SURF_TRANS33/66` (blended), `SURF_FLOWING` (scrolling `TTextureTransformNode`).
   - **Animated textures** following the WAL `animname` chains at 2 frames/second.
   - **Light styles**: flickering, pulsing and switchable lights. Faces lit by animated styles live in a separate lightmap atlas that is recomposed from their up to 4 style layers (10 Hz, only when a style changes) and re-uploaded; `light` entities with a `targetname` switch on/off, `target_lightramp` fades them.
 - **Skybox** from `env/<sky>{rt,lf,up,dn,bk,ft}.tga|pcx` via `TCastleBackground`.

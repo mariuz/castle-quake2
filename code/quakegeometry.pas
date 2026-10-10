@@ -9,7 +9,7 @@ interface
 uses
   SysUtils, Classes, Generics.Collections, Math,
   CastleVectors, CastleScene, CastleTransform, X3DNodes, CastleLog,
-  CastleImages, CastleUtils, CastleBoxes, CastleRenderOptions,
+  CastleImages, CastleUtils, CastleBoxes, CastleRenderOptions, X3DFields,
   QuakeBsp, QuakePalette, QuakeLight, QuakeSound;
 
 type
@@ -170,6 +170,9 @@ type
     { Warped liquid surfaces: visible, but you swim through them and shots
       pass them, so they neither collide nor are pickable }
     FSceneLiquids: TCastleScene;
+    { Shader effect warping liquid textures like Quake 2's EmitWaterPolys }
+    FWarpEffect: TEffectNode;
+    FWarpTime: TSFFloat;
     FWorldTransform: TCastleTransform;
     FMovers: TQuakeMoverList;
     FAnimTextures: TQuakeAnimTexList;
@@ -951,6 +954,7 @@ end;
 constructor TQuakeGeometry.Create(const ABsp: TQuakeBsp);
 var
   World: TQuakeEntity;
+  WarpPart: TEffectPartNode;
 begin
   inherited Create;
   FBsp := ABsp;
@@ -967,6 +971,24 @@ begin
   FSceneLiquids.Name := 'Liquids';
   FSceneLiquids.Collides := False;
   FSceneLiquids.Pickable := False;
+
+  FWarpEffect := TEffectNode.Create;
+  FWarpEffect.Language := slGLSL;
+  FWarpEffect.WaitForRelease; { shared by many shapes; freed in our destructor }
+  FWarpTime := TSFFloat.Create(FWarpEffect, True, 'time', 0);
+  FWarpEffect.AddCustomField(FWarpTime);
+  WarpPart := TEffectPartNode.Create;
+  WarpPart.ShaderType := stFragment;
+  { Quake 2: s += 8 texels * sin(t * 8 radians per 64 texels + time), same for t }
+  WarpPart.Contents :=
+    'uniform float time;' + LineEnding +
+    'void PLUG_texture_coord_shift(inout vec2 tex_coord)' + LineEnding +
+    '{' + LineEnding +
+    '  vec2 tc = tex_coord;' + LineEnding +
+    '  tex_coord.x += 0.125 * sin(tc.y * 8.0 + time);' + LineEnding +
+    '  tex_coord.y += 0.125 * sin(tc.x * 8.0 + time);' + LineEnding +
+    '}';
+  FWarpEffect.SetParts([WarpPart]);
   FWorldTransform := TCastleTransform.Create(nil);
   FWorldTransform.Name := 'World';
   FWorldTransform.Add(FSceneWorld);
@@ -989,6 +1011,8 @@ begin
   FSceneSkyClip.Free;
   FSceneLiquids.Free;
   FWorldTransform.Free;
+  { All scenes using the effect are gone now }
+  FWarpEffect.FreeIfUnused;
   FAnimTextures.Free;
   FScrollNodes.Free;
   FDynLightmaps.Free;
@@ -1192,6 +1216,8 @@ begin
         Batch.CreateNodes(LightmapTex);
       if Batch.Shape = nil then
         Continue;
+      if (Batch.Flags and SURF_WARP) <> 0 then
+        Batch.Shape.Appearance.SetEffects([FWarpEffect]);
       if (LiquidRoot <> nil) and ((Batch.Flags and SURF_WARP) <> 0) then
         LiquidRoot.AddChildren(Batch.Shape)
       else
@@ -1338,6 +1364,8 @@ begin
       for Node in Anim.Nodes do
         Node.SetUrl(['quaketex:/' + WalTextureId(Anim.Frames[Frame mod Anim.Frames.Count])]);
   end;
+
+  FWarpTime.Send(FTime);
 
   { SURF_FLOWING: same scroll as Quake 2 GL (-64 texture repeats per 40 seconds) }
   for Scroll in FScrollNodes do

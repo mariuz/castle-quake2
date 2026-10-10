@@ -31,7 +31,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 ### 2. Look
 - ~~Light styles~~ — done on the CPU with a separate dynamic atlas; a shader version would avoid the re-uploads if very large maps need it.
 - **Dynamic lights** (muzzle flash, rockets, BFG) on world surfaces: add a light-accumulation term in the same shader effect.
-- **Water / lava warp** shader for `SURF_WARP` surfaces and an underwater `TCastleScreenEffect` tint + wobble.
+- ~~Water warp~~ — done; an underwater wobble `TCastleScreenEffect` would complete it.
 - **Powerup shells** (quad blue, invulnerability yellow) as an extra MD2 shape with additive blending.
 - **SP2 sprites** for the BFG ball; **gib models** (`models/objects/gibs/*`) with simple physics. (Explosions already use the `r_explode` model.)
 - ~~Weapon in its own viewport~~ — done (`WeaponViewport` in the design).
@@ -61,7 +61,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Light styles: flickering, switchable lights, `target_lightramp`
 - [ ] Dynamic lights on world surfaces (shader effect)
 - [x] Underwater screen tints
-- [ ] Water warp shader
+- [x] Water warp shader (`PLUG_texture_coord_shift` effect, like Quake 2's EmitWaterPolys)
 - [x] Explosion model, soft particles, splashes, lasers, props (barrels, banners, ships, dish, corpses)
 - [x] Gibs and barrel debris with gravity and bounce
 - [ ] SP2 sprites, powerup shells
@@ -94,4 +94,4 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [ ] Monster prefabs (`.castle-transform`) and named sounds
 - [x] CI autotests with screenshots (Linux, xvfb + Mesa)
 - [ ] Parser unit tests, screenshot diffing
-- [ ] WebAssembly build verified
+- [x] WebAssembly build deployed to GitHub Pages
