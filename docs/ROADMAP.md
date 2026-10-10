@@ -48,7 +48,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - **Unit tests** for the parsers (BSP lumps, MD2 unwelding, PCX RLE, WAL) with small fixture files, using CGE's test framework (`castle-tester`).
 - ~~Savegames~~ — done as JSON (entities matched by spawn order); projectiles and pending delayed events are not saved.
 - **PVS culling**: decompress the visibility lump and toggle per-cluster shapes, important for the larger full-game maps.
-- **Performance**: batch particles into one scene (currently one `TCastleScene` per particle); cache `LineOfSight` results across monsters; merge mover scenes that never move (`func_wall`).
+- **Performance**: ~~batch particles~~ (done: one scene, camera-facing quads rebuilt per frame); cache `LineOfSight` results across monsters; merge mover scenes that never move (`func_wall`).
 - **Platforms**: verify the WebAssembly workflow end to end; Android / iOS with CGE's touch navigation; gamepad input via `Controllers`.
 
 ## Milestones

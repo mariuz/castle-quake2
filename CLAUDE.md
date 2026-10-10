@@ -44,7 +44,7 @@ Demo script actions: `W:sec` wait, `S` screenshot (logs FPS + camera), `X` fire,
 - BSP polygons and MD2 triangles are clockwise from the front: `Ccw := False`.
 - CGE images are bottom-to-top; PCX/WAL decoders flip rows, so UV `v = 1 - t/height`.
 - `TCastleBackground.TexturePositiveZ` is the X3D "front" drawn at **-Z** (and `TextureNegativeZ` at +Z).
-- Billboards need `Scene.ProcessEvents := True`.
+- Particles are data (`TQuakeParticle`) drawn by one batched scene in `TQuakeParticleManager.RebuildBatch`; set `Particles.Camera`. (If you use `TBillboardNode` elsewhere, it needs `Scene.ProcessEvents := True`.)
 - Don't use `MODULATE2X`/`MODULATE4X` multi-texture modes: CGE emits an int literal (`*= 2;`) that breaks WebGL shaders. Scale the unlit emissive colour instead. Check web logs for `GLSL: Fragment shader not compiled`.
 - Light styles: `TQuakeLighting` owns style patterns/values (`Version` bumps on change); `TQuakeDynamicLightmap` recomposes the light-style atlas and calls `Node.FdImage.Changed`. Lightmaps of a face are `styles` consecutive RGB blocks.
 - `TQuakeMd2Instance.PlayAnim('')` plays all frames (banners, effects).

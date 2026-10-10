@@ -226,6 +226,7 @@ begin
   FWorld.Hud := Hud;
   FWorld.Player := PlayerMovement;
   Particles.SetParent(MainViewport.Items);
+  Particles.Camera := MainViewport.Camera;
   Console.OnCommand := @HandleConsoleCommand;
   Menu.OnMenuAction := @HandleMenuAction;
   SetCameraMode(FCameraMode);
@@ -246,6 +247,7 @@ end;
 procedure TViewPlay.Stop;
 begin
   Sounds.StopMusic;
+  Particles.Camera := nil;
   Particles.SetParent(nil);
   { The world references design components, which are freed by inherited Stop }
   FreeAndNil(FWorld);

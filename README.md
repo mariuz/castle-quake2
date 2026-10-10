@@ -32,7 +32,7 @@ A port of **Quake 2** to the **Castle Game Engine** (Object Pascal / Free Pascal
 - **Spatial audio** from the PAK's WAVs via `TCastleSoundSource`, with Quake 2's distance attenuation mapped to OpenAL's linear model; **ambient `target_speaker` loops** (80–90 per demo map) and triggered sounds; optional CD-music replacement as `data/music/trackNN.ogg`.
 - **Props and effects**: exploding barrels (`misc_explobox`, chain reactions), waving banners, corpses, the satellite dish, flying Strogg ships along their `path_corner`s, `func_timer`, `target_splash` sparks, `target_laser` beams, and Quake 2's animated, skin-fading explosion model.
 - **Help computer (F1)** with the original `help.pcx`, level name, primary / secondary objectives and kills / goals / secrets, and an **intermission** at `info_player_intermission` before the next unit loads.
-- **Billboard particles** (`TBillboardNode`, soft round sprites): bullet impacts, blood, blaster sparks, splashes, rail trails, BFG blasts, teleport fountains.
+- **Particles** batched into one scene (camera-facing quads with per-vertex colour / alpha and a soft round sprite): bullet impacts, blood, blaster sparks, splashes, rail trails, BFG blasts, teleport fountains.
 - **Savegames** (F6 / F9 quick save / load, `save` / `load <name>` in the console): the whole level state as JSON in the user config directory (`castle-config:/saves/`) — player, inventory, monsters, items, doors / plats / trains, barrels, ships, triggers, counters, timers, lasers, speakers, switchable lights, objectives.
 - Drop-down **console**, **menu** with the map list read from the loaded PAKs, and a headless **autotest / demo-script harness**.
 
