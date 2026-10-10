@@ -85,6 +85,8 @@ type
     property Model: TQuakeMd2 read FModel;
     { True when a non-looping animation reached its last frame }
     property AnimDone: Boolean read FAnimDone;
+    { 0..1 position in the current animation (non-looping ones stop at 1) }
+    function AnimProgress: Single;
   end;
 
   { Model cache }
@@ -474,6 +476,13 @@ begin
   FLastT := T;
   FModel.LerpFrames(A, B, T, FTemp);
   FCoord.SetPoint(FTemp);
+end;
+
+function TQuakeMd2Instance.AnimProgress: Single;
+begin
+  if FAnim.Count <= 1 then
+    Exit(1);
+  Result := Min(1, FAnimTime * FFps / (FAnim.Count - 1));
 end;
 
 procedure TQuakeMd2Instance.SetFrame(const Index: Integer);

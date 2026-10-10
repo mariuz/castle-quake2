@@ -76,7 +76,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Swimming, drowning, lava / slime damage, underwater tints
 - [ ] Ladders, box-shaped player collision
 - [x] Monster steering around obstacles (±45° / ±90° detours) and ledge checks
-- [ ] Per-frame attack timing, medic revive, bosses, real pathfinding
+- [x] Attacks happen partway through the attack animation (wind-up; pain cancels the shot)
+- [ ] Medic revive, bosses, real pathfinding
 - [ ] Hand grenades, chaingun spin-up
 
 ### Phase 3 – Flow

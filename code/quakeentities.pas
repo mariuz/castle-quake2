@@ -100,6 +100,9 @@ type
     FDetourDir: TVector3;
     FDetourTime: Single;
     FDetourSide: Single;
+    FAttackFired: Boolean;
+    { Fraction of the attack animation at which the attack happens }
+    function AttackFirePoint: Single;
     { Move along Dir (with wall sliding) unless it walks off a ledge }
     function TryMove(const Dir: TVector3; const SecondsPassed: Single): Boolean;
     { Move towards WantDir, detouring around obstacles }
@@ -732,6 +735,16 @@ begin
 
   if State = msAttack then
   begin
+    { Like Quake 2's attack frames: the shot / hit happens partway through
+      the animation (melee later, when the swing lands), not when it starts }
+    if (not FAttackFired) and ((Model = nil) or (Model.AnimProgress >= AttackFirePoint) or
+       (StateTimer > 0.8)) then
+    begin
+      FAttackFired := True;
+      Sounds.PlayAt(MonsterSound(Def, Def^.AttackSound), Transform);
+      if Assigned(OnAttack) then
+        OnAttack(Self);
+    end;
     if (Model = nil) or Model.AnimDone or (StateTimer > 1.2) then
       SetState(msChase);
     StickToFloor(SecondsPassed);
@@ -741,10 +754,8 @@ begin
   if CanSeePlayer and (Dist <= Def^.AttackRange) and (AttackCooldown <= 0) then
   begin
     SetState(msAttack);
+    FAttackFired := False;
     AttackCooldown := Def^.AttackCooldown * (0.8 + Random * 0.4);
-    Sounds.PlayAt(MonsterSound(Def, Def^.AttackSound), Transform);
-    if Assigned(OnAttack) then
-      OnAttack(Self);
     Exit;
   end;
 
@@ -761,6 +772,14 @@ begin
       Steer(MoveVec.Normalize, SecondsPassed);
   end;
   StickToFloor(SecondsPassed);
+end;
+
+function TQuakeMonster.AttackFirePoint: Single;
+begin
+  if Def^.Attack = akMelee then
+    Result := 0.55
+  else
+    Result := 0.35;
 end;
 
 function TQuakeMonster.TryMove(const Dir: TVector3; const SecondsPassed: Single): Boolean;
