@@ -86,6 +86,8 @@ type
   TQuakePickupList = specialize TObjectList<TQuakePickup>;
 
   TMonsterState = (msIdle, msChase, msAttack, msPain, msDying, msDead);
+  { Quake 2 POWER_ARMOR_NONE / SCREEN / SHIELD }
+  TPowerArmorType = (paNone, paScreen, paShield);
 
   TQuakeMonster = class;
   TMonsterAttackEvent = procedure(const Monster: TQuakeMonster) of object;
@@ -108,6 +110,8 @@ type
     FLostSightTime: Single;
     FSearched: Boolean;
     FWalking: Boolean;
+    { Power armor absorbed a hit recently: show the green shell (powerarmor_time) }
+    FPowerArmorFlash: Single;
     { Seconds to stand at the current path_corner ("wait") }
     FPauseTime: Single;
     { Fraction of the attack animation at which the attack happens }
@@ -153,6 +157,9 @@ type
     GoalEntity: TQuakeEntity;
     { Reached a "hold" point_combat: attack from here, don't chase (AI_STAND_GROUND) }
     HoldGround: Boolean;
+    { Power armor (monster_brain: screen 100) and its remaining cells }
+    PowerArmorType: TPowerArmorType;
+    PowerArmorPower: Integer;
     OnAttack: TMonsterAttackEvent;
     OnPickTarget: TPickTargetEvent;
     OnUseTargets: TUseTargetsEvent;
@@ -166,6 +173,8 @@ type
     procedure ResolveTargets;
     procedure UpdateAI(const SecondsPassed: Single; const PlayerPos: TVector3);
     procedure TakeDamage(const Dmg: Integer);
+    { Part of Dmg the power armor absorbs (and uses up) }
+    function AbsorbPowerArmor(const Dmg: Integer): Integer;
     procedure Alert;
     function IsAlive: Boolean;
     { Owns the scene: used to map ray hits back to monsters }
@@ -180,6 +189,7 @@ type
     property IsAlerted: Boolean read Alerted;
     property SeesPlayer: Boolean read CanSeePlayer;
     property Facing: Single read FacingAngle;
+    property PowerArmor: Integer read PowerArmorPower;
   end;
 
   TQuakeMonsterList = specialize TObjectList<TQuakeMonster>;
@@ -592,6 +602,12 @@ begin
   FSightTimer := Random * 0.2;
   FDetourSide := 1;
   FIdleTimer := 3 + Random * 12;
+  { Quake 2 base game: only the brain has power armor (a power screen) }
+  if Def^.ClassName = 'monster_brain' then
+  begin
+    PowerArmorType := paScreen;
+    PowerArmorPower := 100;
+  end;
 
   Transform := TCastleTransform.Create(nil);
   Transform.Name := Format('Monster%.3d_%s', [NextEntityNumber, Def^.ClassName]);
@@ -815,6 +831,32 @@ begin
   end;
 end;
 
+function TQuakeMonster.AbsorbPowerArmor(const Dmg: Integer): Integer;
+var
+  DamagePerCell, Damage: Integer;
+begin
+  { Quake 2 CheckPowerArmor (the screen protects from all sides here, not
+    only from the front) }
+  Result := 0;
+  if (PowerArmorType = paNone) or (PowerArmorPower <= 0) or (Dmg <= 0) then
+    Exit;
+  if PowerArmorType = paScreen then
+  begin
+    DamagePerCell := 1;
+    Damage := Dmg div 3;
+  end else
+  begin
+    DamagePerCell := 2;
+    Damage := (2 * Dmg) div 3;
+  end;
+  Result := Min(PowerArmorPower * DamagePerCell, Damage);
+  if Result <= 0 then
+    Exit;
+  PowerArmorPower := Max(0, PowerArmorPower - Result div DamagePerCell);
+  FPowerArmorFlash := 0.2;
+  Sounds.PlayAt('sound/weapons/lashit.wav', Transform);
+end;
+
 procedure TQuakeMonster.TakeDamage(const Dmg: Integer);
 begin
   if not IsAlive then
@@ -831,7 +873,7 @@ begin
     Exit;
   end;
 
-  Health := Health - Dmg;
+  Health := Health - (Dmg - AbsorbPowerArmor(Dmg));
   if Health <= 0 then
   begin
     Sounds.PlayAt(MonsterSound(Def, Def^.DeathSound), Transform);
@@ -897,6 +939,13 @@ begin
       FLightTimer := 0.25;
       Model.SetTint(Lighting.SampleLight(Transform.Translation));
     end;
+    { M_SetEffects: green shell while the power armor is absorbing }
+    if FPowerArmorFlash > 0 then
+    begin
+      FPowerArmorFlash := FPowerArmorFlash - SecondsPassed;
+      Model.SetShell(Vector3(0, 1, 0));
+    end else
+      Model.SetShell(TVector3.Zero);
   end;
 
   StateTimer := StateTimer + SecondsPassed;

@@ -10,7 +10,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Lighting | RGB lightmaps, 4 styles, dynamic lights | All 4 styles (animated, switchable, ramps), 2x overbright, LightPoint model tint, dynamic lights on the world and models | More than 4 surface lights at once; light styles on model tint. |
 | Sky | Skybox, `skyrotate`, `skyaxis` | Skybox via `TCastleBackground` | Sky rotation. |
 | Liquids | Warped water / lava (`SURF_WARP`), contents | Non-solid liquid surfaces, point contents from BSP leafs, swimming, drowning, lava / slime damage, underwater tints | Warp shader. |
-| Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp and skins | Powerup shells, glow, bobbing items. |
+| Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp, skins, `RF_SHELL` shells | `EF_POWERSCREEN` model, glow, bobbing items. |
 | Sprites | SP2 (BFG, explosions) | SP2 loader, BFG ball / explosion sprites | Other sprite users (bubbles, flashes). |
 | Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove as `TQuakePlayerMovement` (friction, accel, air control, steps, crouch, jump pads, falling damage, water, ladders, player box) | Swept box traces with plane clipping (`PM_StepSlideMove`) instead of overlap tests. |
 | Weapons | 10 + hand grenades | 10 + hand grenades, chaingun spin-up | Frame-accurate timing. |
@@ -32,7 +32,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - ~~Light styles~~ — done on the CPU with a separate dynamic atlas; a shader version would avoid the re-uploads if very large maps need it.
 - ~~Dynamic lights~~ — done (muzzle flashes, explosions, rockets, blaster bolts, BFG): a `PLUG_texture_color` effect on the lightmap textures, the 4 lights nearest the player.
 - ~~Water warp~~ — done; an underwater wobble `TCastleScreenEffect` would complete it.
-- **Powerup shells** (quad blue, invulnerability yellow) as an extra MD2 shape with additive blending.
+- ~~Powerup shells~~ — done: `TQuakeMd2Instance.SetShell` (view weapon quad / invulnerability, monster power armor).
 - ~~SP2 sprites, gibs~~ — done.
 - ~~Weapon in its own viewport~~ — done (`WeaponViewport` in the design).
 
@@ -64,9 +64,9 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Water warp shader (`PLUG_texture_coord_shift` effect, like Quake 2's EmitWaterPolys)
 - [x] Explosion model, soft particles, splashes, lasers, props (barrels, banners, ships, dish, corpses)
 - [x] Gibs and barrel debris with gravity and bounce
-- [x] Powerup "shells" on the view weapon (quad blue, invulnerability gold)
+- [x] Powerup shells on the view weapon (quad blue, invulnerability red), as offset MD2 shapes
 - [x] SP2 sprites (BFG ball and explosion)
-- [ ] Shells on monsters / third-person models
+- [x] Shells on monsters: power armor (brain's power screen, absorbs damage) flashes green
 - [x] Weapon viewport (no wall clipping)
 
 ### Phase 2 – Play

@@ -105,7 +105,7 @@ Brush entities (`model "*N"`, classname `func_*`) are separate `TCastleScene`s i
 
 - MD2 indexes positions and texture coordinates separately; triangle corners are "unwelded" into unique (xyz, st) pairs so X3D can use one index list.
 - Every frame is decompressed into a `TVector3List` in CGE coordinates. Animations are grouped by frame name (`run3` → `run`, `attak105` → `attak1`).
-- `TQuakeMd2Instance` owns a scene, plays an animation by name with fallbacks (`'attak,attack,fire,...'`), and linearly interpolates between frames by rewriting the `TCoordinateNode` only when the frame / blend changes.
+- `TQuakeMd2Instance` owns a scene, plays an animation by name with fallbacks (`'attak,attack,fire,...'`), and linearly interpolates between frames by rewriting the `TCoordinateNode` only when the frame / blend changes. `SetShell(Color)` adds (lazily, in a `Switch`) a second shape: the same triangles with vertices moved 4 units along smoothed normals (`TQuakeMd2.OffsetAlongNormals`, summed per original MD2 vertex so UV seams don't crack), unlit, alpha 0.3, back faces culled. The view weapon uses it for quad (blue) / invulnerability (red); monsters for power armor (`AbsorbPowerArmor`, Quake 2 `CheckPowerArmor`: screen absorbs a third of the damage at 1 cell per point, shield two thirds at 2 points per cell; green for 0.2 s).
 - Lighting: models use an unlit material whose `EmissiveColor` is the lightmap color sampled under the model with `TQuakeBsp.LightPoint` (Quake 2's `RecursiveLightPoint` through the BSP nodes), ×2 overbright, plus the dynamic lights.
 
 ---

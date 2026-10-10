@@ -27,6 +27,9 @@ type
     FFrames: specialize TObjectList<TVector3List>;
     FFrameNames: TStringList;
     FAnims: specialize TDictionary<String, TMd2Anim>;
+    { Original MD2 vertex of each unwelded vertex (to smooth normals across UV seams) }
+    FXyzIndex: TInt32List;
+    FXyzCount: Integer;
     function GetFrameCount: Integer;
   public
     constructor Create(const AModelPath: String);
@@ -43,6 +46,11 @@ type
 
     { Interpolated vertex positions between frames A and B (0 <= T <= 1) }
     procedure LerpFrames(const A, B: Integer; const T: Single; const Dest: TVector3List);
+
+    { Points moved Distance along the smoothed vertex normals of Points
+      (Quake 2 RF_SHELL: POWERSUIT_SCALE = 4) }
+    procedure OffsetAlongNormals(const Points: TVector3List; const Distance: Single;
+      const Dest: TVector3List);
 
     property ModelPath: String read FModelPath;
     property FrameCount: Integer read GetFrameCount;
@@ -66,6 +74,13 @@ type
     FFps: Single;
     FLastA, FLastB: Integer;
     FLastT: Single;
+    FShellSwitch: TSwitchNode;
+    FShellCoord: TCoordinateNode;
+    FShellMaterial: TUnlitMaterialNode;
+    FShellColor: TVector3;
+    FShellTemp: TVector3List;
+    procedure CreateShell;
+    procedure UpdateShell;
   public
     Scene: TCastleScene;
     constructor Create(const AModel: TQuakeMd2; const SkinIndex: Integer = 0);
@@ -82,6 +97,11 @@ type
     procedure SetSkin(const SkinIndex: Integer);
     { 0 = opaque, 1 = invisible (switches to alpha blending) }
     procedure SetTransparency(const Value: Single);
+    { Powerup / power armor "shell" around the model, like Quake 2's
+      RF_SHELL_RED / GREEN / BLUE: a translucent copy pushed out along the
+      normals. Black = no shell. }
+    procedure SetShell(const Color: TVector3);
+    property ShellColor: TVector3 read FShellColor;
     property Model: TQuakeMd2 read FModel;
     { True when a non-looping animation reached its last frame }
     property AnimDone: Boolean read FAnimDone;
@@ -166,6 +186,7 @@ begin
   FIndices := TInt32List.Create;
   FFrames := specialize TObjectList<TVector3List>.Create(True);
   FFrameNames := TStringList.Create;
+  FXyzIndex := TInt32List.Create;
   FAnims := specialize TDictionary<String, TMd2Anim>.Create;
 end;
 
@@ -177,6 +198,7 @@ begin
   FFrames.Free;
   FFrameNames.Free;
   FAnims.Free;
+  FXyzIndex.Free;
   inherited Destroy;
 end;
 
@@ -252,6 +274,9 @@ begin
         FIndices.Add(OutIdx);
       end;
     end;
+
+    FXyzIndex.Assign(OutXyz);
+    FXyzCount := Hdr.NumXyz;
 
     { Frames }
     for I := 0 to Hdr.NumFrames - 1 do
@@ -357,6 +382,41 @@ begin
     Dest.L[I] := FA.L[I] + (FB.L[I] - FA.L[I]) * T;
 end;
 
+procedure TQuakeMd2.OffsetAlongNormals(const Points: TVector3List; const Distance: Single;
+  const Dest: TVector3List);
+var
+  Normals: array of TVector3;
+  I: Integer;
+  N: TVector3;
+  A, B, C: Integer;
+begin
+  SetLength(Normals, FXyzCount);
+  for I := 0 to High(Normals) do
+    Normals[I] := TVector3.Zero;
+  { Area-weighted face normals, summed per original MD2 vertex }
+  I := 0;
+  while I + 2 < FIndices.Count do
+  begin
+    A := FIndices.L[I];
+    B := FIndices.L[I + 1];
+    C := FIndices.L[I + 2];
+    { Clockwise from the front (Ccw = False), so the outward normal is (C-A) x (B-A) }
+    N := TVector3.CrossProduct(Points.L[C] - Points.L[A], Points.L[B] - Points.L[A]);
+    Normals[FXyzIndex.L[A]] := Normals[FXyzIndex.L[A]] + N;
+    Normals[FXyzIndex.L[B]] := Normals[FXyzIndex.L[B]] + N;
+    Normals[FXyzIndex.L[C]] := Normals[FXyzIndex.L[C]] + N;
+    Inc(I, 3);
+  end;
+  Dest.Count := Points.Count;
+  for I := 0 to Points.Count - 1 do
+  begin
+    N := Normals[FXyzIndex.L[I]];
+    if not N.IsZero then
+      N := N.Normalize;
+    Dest.L[I] := Points.L[I] + N * Distance;
+  end;
+end;
+
 { TQuakeMd2Instance }
 
 constructor TQuakeMd2Instance.Create(const AModel: TQuakeMd2; const SkinIndex: Integer);
@@ -427,6 +487,7 @@ end;
 destructor TQuakeMd2Instance.Destroy;
 begin
   FTemp.Free;
+  FShellTemp.Free;
   { Freeing the scene also removes it from its parent transform }
   FreeAndNil(Scene);
   inherited Destroy;
@@ -476,6 +537,63 @@ begin
   FLastT := T;
   FModel.LerpFrames(A, B, T, FTemp);
   FCoord.SetPoint(FTemp);
+  if not FShellColor.IsPerfectlyZero then
+    UpdateShell;
+end;
+
+procedure TQuakeMd2Instance.CreateShell;
+var
+  Shape: TShapeNode;
+  Geom: TIndexedTriangleSetNode;
+  App: TAppearanceNode;
+begin
+  FShellTemp := TVector3List.Create;
+  FShellCoord := TCoordinateNode.Create;
+  Geom := TIndexedTriangleSetNode.Create;
+  Geom.Coord := FShellCoord;
+  Geom.SetIndex(FModel.FIndices);
+  Geom.Ccw := False;
+  Geom.Solid := True; { only the outside, like a shell }
+
+  FShellMaterial := TUnlitMaterialNode.Create;
+  { Quake 2 draws shells with alpha 0.3 }
+  FShellMaterial.Transparency := 0.7;
+  App := TAppearanceNode.Create;
+  App.Material := FShellMaterial;
+  App.AlphaMode := amBlend;
+
+  Shape := TShapeNode.Create;
+  Shape.Geometry := Geom;
+  Shape.Appearance := App;
+  FShellSwitch := TSwitchNode.Create;
+  FShellSwitch.AddChildren(Shape);
+  Scene.RootNode.AddChildren(FShellSwitch);
+end;
+
+procedure TQuakeMd2Instance.UpdateShell;
+begin
+  if FTemp.Count = 0 then
+    FModel.LerpFrames(FAnim.First, FAnim.First, 0, FTemp);
+  FModel.OffsetAlongNormals(FTemp, 4, FShellTemp);
+  FShellCoord.SetPoint(FShellTemp);
+end;
+
+procedure TQuakeMd2Instance.SetShell(const Color: TVector3);
+begin
+  if TVector3.PerfectlyEquals(Color, FShellColor) then
+    Exit;
+  FShellColor := Color;
+  if Color.IsPerfectlyZero then
+  begin
+    if FShellSwitch <> nil then
+      FShellSwitch.WhichChoice := -1;
+    Exit;
+  end;
+  if FShellSwitch = nil then
+    CreateShell;
+  FShellMaterial.EmissiveColor := Color;
+  FShellSwitch.WhichChoice := 0;
+  UpdateShell;
 end;
 
 function TQuakeMd2Instance.AnimProgress: Single;

@@ -1835,6 +1835,7 @@ var
   M: TQuakeMonster;
   D: TDelayedTarget;
   Kick: Single;
+  Shell: TVector3;
   A: TAmmoType;
 begin
   if FBsp = nil then
@@ -1912,14 +1913,15 @@ begin
     FWeaponModel.Update(SecondsPassed);
     if FWeaponModel.AnimDone then
       PlayWeaponAnim('idle', True);
-    { Powerup "shells" (RF_SHELL_BLUE / RF_SHELL_GREEN-ish) as a pulsing tint }
-    if FStats.QuadTime > 0 then
-      FWeaponModel.SetTint(Vector3(0.5, 0.6, 1.6) * (1.0 + 0.25 * Sin(FTime * 8)))
-    else
-    if FStats.InvulnTime > 0 then
-      FWeaponModel.SetTint(Vector3(1.6, 1.4, 0.5) * (1.0 + 0.25 * Sin(FTime * 8)))
-    else
-      FWeaponModel.SetTint(Lighting.SampleLight(FPlayerPos - Vector3(0, 20, 0)));
+    FWeaponModel.SetTint(Lighting.SampleLight(FPlayerPos - Vector3(0, 20, 0)));
+    { Powerup shells: quad RF_SHELL_BLUE, invulnerability RF_SHELL_RED;
+      they blink in the last 3 seconds, like the Quake 2 HUD icons }
+    Shell := TVector3.Zero;
+    if (FStats.QuadTime > 3) or ((FStats.QuadTime > 0) and (Frac(FTime * 4) < 0.5)) then
+      Shell := Shell + Vector3(0, 0, 1);
+    if (FStats.InvulnTime > 3) or ((FStats.InvulnTime > 0) and (Frac(FTime * 4) < 0.5)) then
+      Shell := Shell + Vector3(1, 0, 0);
+    FWeaponModel.SetShell(Shell);
   end;
   Kick := FWeaponKick;
   FWeaponTransform.Translation := Vector3(0, -Kick * 1.0, Kick * 3.0);
