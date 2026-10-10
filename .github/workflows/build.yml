@@ -108,7 +108,7 @@ jobs:
           # One early screenshot per map, compared (as 64x36 block averages) with
           # tests/reference/<map>.png. A missing reference is created and uploaded
           # with the artifacts, to be committed.
-          mkdir -p test_output/compare
+          mkdir -p test_output/compare tests/reference
           status=0
           for map in demo1 demo2 demo3; do
             timeout 300 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest "$map" "test_output/compare/$map" --demo "W:2,S,Q" > "test_output/compare/$map.log" 2>&1
