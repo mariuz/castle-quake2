@@ -142,6 +142,8 @@ type
 
     procedure CheatGiveAll;
     procedure CheatGodMode;
+    { give quad / give invulnerability: 30 seconds, like the items }
+    procedure CheatPowerup(const Quad: Boolean);
 
     { Attach the view weapon to the camera }
     procedure AttachWeaponToCamera(const Camera: TCastleTransform);
@@ -1775,7 +1777,14 @@ begin
     FWeaponModel.Update(SecondsPassed);
     if FWeaponModel.AnimDone then
       PlayWeaponAnim('idle', True);
-    FWeaponModel.SetTint(Lighting.SampleLight(FPlayerPos - Vector3(0, 20, 0)));
+    { Powerup "shells" (RF_SHELL_BLUE / RF_SHELL_GREEN-ish) as a pulsing tint }
+    if FStats.QuadTime > 0 then
+      FWeaponModel.SetTint(Vector3(0.5, 0.6, 1.6) * (1.0 + 0.25 * Sin(FTime * 8)))
+    else
+    if FStats.InvulnTime > 0 then
+      FWeaponModel.SetTint(Vector3(1.6, 1.4, 0.5) * (1.0 + 0.25 * Sin(FTime * 8)))
+    else
+      FWeaponModel.SetTint(Lighting.SampleLight(FPlayerPos - Vector3(0, 20, 0)));
   end;
   Kick := FWeaponKick;
   FWeaponTransform.Translation := Vector3(0, -Kick * 1.0, Kick * 3.0);
@@ -2336,6 +2345,14 @@ begin
   FStats.Keys := $1FF;
   if FHud <> nil then
     FHud.ShowMessage('All weapons, ammo, armor and keys');
+end;
+
+procedure TQuakeWorld.CheatPowerup(const Quad: Boolean);
+begin
+  if Quad then
+    GiveItem(FindItemDef('item_quad'))
+  else
+    GiveItem(FindItemDef('item_invulnerability'));
 end;
 
 procedure TQuakeWorld.CheatGodMode;

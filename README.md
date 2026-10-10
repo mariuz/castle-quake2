@@ -68,7 +68,7 @@ The project follows the structure of CGE's own templates (`3d_fps_game`) and the
 | **F1** | Help computer (objectives, kills / goals / secrets) |
 | **F6 / F9** | Quick save / quick load |
 | **F12** | Screenshot |
-| **~** | Console (`map`, `maps`, `save`, `load`, `god`, `give all`, `noclip`, `kill`, `fps`, `lightstyle`, `quit`, `help`) |
+| **~** | Console (`map`, `maps`, `save`, `load`, `god`, `give all`, `give quad`, `give invulnerability`, `noclip`, `kill`, `fps`, `lightstyle`, `quit`, `help`) |
 | **F8** (debug build) | CGE inspector: hierarchy and live properties |
 | **Escape** | Menu |
 

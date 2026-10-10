@@ -64,7 +64,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Water warp shader (`PLUG_texture_coord_shift` effect, like Quake 2's EmitWaterPolys)
 - [x] Explosion model, soft particles, splashes, lasers, props (barrels, banners, ships, dish, corpses)
 - [x] Gibs and barrel debris with gravity and bounce
-- [ ] SP2 sprites, powerup shells
+- [x] Powerup "shells" on the view weapon (quad blue, invulnerability gold)
+- [ ] SP2 sprites, shells on monsters / third-person models
 - [x] Weapon viewport (no wall clipping)
 
 ### Phase 2 – Play

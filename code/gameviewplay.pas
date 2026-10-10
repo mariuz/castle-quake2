@@ -910,6 +910,12 @@ begin
   if (Cmd = 'give') and (Args = 'all') then
     FWorld.CheatGiveAll
   else
+  if (Cmd = 'give') and (Args = 'quad') then
+    FWorld.CheatPowerup(True)
+  else
+  if (Cmd = 'give') and (Args = 'invulnerability') then
+    FWorld.CheatPowerup(False)
+  else
   if Cmd = 'noclip' then
   begin
     if FCameraMode = cmFirstPerson then
@@ -930,6 +936,7 @@ begin
     Console.Print('  maps         - List maps in the loaded PAKs');
     Console.Print('  god          - Toggle god mode');
     Console.Print('  give all     - All weapons, ammo, armor, keys');
+    Console.Print('  give quad / give invulnerability - Powerups');
     Console.Print('  noclip       - Toggle fly mode');
     Console.Print('  fps          - Toggle FPS counter');
     Console.Print('  save [name]  - Save the game (F6 = quick save)');
