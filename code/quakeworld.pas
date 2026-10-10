@@ -66,6 +66,8 @@ type
     FUseDepth: Integer;
     FHelpPrimary, FHelpSecondary: String;
     FPlayer: TQuakePlayerMovement;
+    { Quake 2 game.serverflags: cross-level trigger bits, kept across maps of a unit }
+    FServerFlags: Integer;
     FLastWaterLevel: Integer;
     FAirFinished: Single;
     FLiquidDamageTimer: Single;
@@ -382,6 +384,7 @@ var
   Box: TBox3D;
   Trig: TQuakeTrigger;
   SpawnFlags: Integer;
+  D: TDelayedTarget;
 begin
   ChooseSpawnPoint(SpawnName);
   for Ent in FBsp.Entities do
@@ -479,6 +482,18 @@ begin
         FTimers.AddOrSetValue(Ent, -1);
     end;
 
+    if CName = 'target_crosslevel_target' then
+    begin
+      { Fires its targets after "delay" (default 1 s) if all its bits were set
+        by target_crosslevel_trigger in other levels }
+      if ((SpawnFlags and $FF) <> 0) and ((FServerFlags and SpawnFlags and $FF) = (SpawnFlags and $FF)) then
+      begin
+        D.Time := FTime + Ent.GetFloat('delay', 1);
+        D.Target := Ent.Target;
+        FDelayed.Add(D);
+        WritelnLog('QuakeWorld', 'Cross-level target will fire "%s"', [Ent.Target]);
+      end;
+    end else
     if CName = 'target_secret' then
       Inc(FStats.TotalSecrets)
     else
@@ -784,6 +799,11 @@ begin
       FLevelExited := True;
       FNextMap := MapName;
     end;
+  end else
+  if CName = 'target_crosslevel_trigger' then
+  begin
+    FServerFlags := FServerFlags or (Ent.SpawnFlags and $FF);
+    WritelnLog('QuakeWorld', 'Cross-level flags now %d', [FServerFlags]);
   end else
   if CName = 'target_secret' then
   begin
@@ -1874,6 +1894,7 @@ begin
     Arr.Add(FStats.MaxAmmo[A]);
   O.Add('maxAmmo', Arr);
   O.Add('helpPrimary', FHelpPrimary);
+  O.Add('serverFlags', FServerFlags);
   O.Add('helpSecondary', FHelpSecondary);
   Result.Add('player', O);
 
@@ -2009,6 +2030,7 @@ begin
         if Ord(A) < Arr.Count then
           FStats.MaxAmmo[A] := Arr.Integers[Ord(A)];
     FHelpPrimary := O.Get('helpPrimary', '');
+    FServerFlags := O.Get('serverFlags', 0);
     FHelpSecondary := O.Get('helpSecondary', '');
     if FHud <> nil then
     begin

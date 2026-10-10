@@ -16,7 +16,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Weapons | 10 + hand grenades | 10 weapons | Hand grenades, chaingun spin-up, frame-accurate timing. |
 | Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses) | Sight / chase / attack / pain / death, 19 definitions | Pathing, ambush flag, dodging, attack frames, bosses. |
 | Props / effects | Barrels, banners, ships, lasers, splashes, explosion models | All of these used by the demo maps | Gib models with velocities, `misc_viper`, `target_blaster`. |
-| Level flow | Units, cross-level triggers, help computer, intermission, savegames | Changelevel with spawn points, help computer (F1), intermission, savegames | Cross-level triggers / state. |
+| Level flow | Units, cross-level triggers, help computer, intermission, savegames | Changelevel with spawn points, cross-level triggers, help computer (F1), intermission, savegames | Keeping each level's state when revisiting it. |
 | Audio | 3D sounds, looping speakers / entity sounds, CD music | 3D sounds with Quake 2 attenuation, looping / triggered speakers, OGG tracks | Mover move loops, monster idle sounds. |
 | Tooling | Console, `+map`, demos | Console, autotest scripts in CI (Linux, xvfb + Mesa), CGE editor components, F8 inspector | Editor property editors, screenshot diffing. |
 
@@ -84,7 +84,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Help computer (F1) and intermission screens
 - [x] Looping ambient sounds (`target_speaker`), `func_timer`
 - [x] Savegames (JSON, quick save / load)
-- [ ] Cross-level triggers and carrying level state across units
+- [x] Cross-level triggers (`target_crosslevel_trigger` / `_target`, kept in savegames)
+- [ ] Remembering each level's state when revisiting it within a unit
 
 ### Phase 4 – Editor & tooling
 - [x] Views loaded from `.castle-user-interface` designs with published components
