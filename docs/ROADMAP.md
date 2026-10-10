@@ -11,7 +11,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Sky | Skybox, `skyrotate`, `skyaxis` | Skybox via `TCastleBackground` | Sky rotation. |
 | Liquids | Warped water / lava (`SURF_WARP`), contents | Non-solid liquid surfaces, point contents from BSP leafs, swimming, drowning, lava / slime damage, underwater tints | Warp shader. |
 | Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp and skins | Powerup shells, glow, bobbing items. |
-| Sprites | SP2 (BFG, explosions) | Billboard particles instead | SP2 loader. |
+| Sprites | SP2 (BFG, explosions) | SP2 loader, BFG ball / explosion sprites | Other sprite users (bubbles, flashes). |
 | Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove essentials as `TQuakePlayerMovement` (friction, accel, air control, steps, crouch, jump pads, falling damage) | Exact box (not sphere) collision. |
 | Weapons | 10 + hand grenades | 10 weapons | Hand grenades, chaingun spin-up, frame-accurate timing. |
 | Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses) | Sight / chase / attack / pain / death, 19 definitions | Pathing, ambush flag, dodging, attack frames, bosses. |
@@ -33,7 +33,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - **Dynamic lights** (muzzle flash, rockets, BFG) on world surfaces: add a light-accumulation term in the same shader effect.
 - ~~Water warp~~ — done; an underwater wobble `TCastleScreenEffect` would complete it.
 - **Powerup shells** (quad blue, invulnerability yellow) as an extra MD2 shape with additive blending.
-- **SP2 sprites** for the BFG ball; **gib models** (`models/objects/gibs/*`) with simple physics. (Explosions already use the `r_explode` model.)
+- ~~SP2 sprites, gibs~~ — done.
 - ~~Weapon in its own viewport~~ — done (`WeaponViewport` in the design).
 
 ### 3. CGE editor / inspectability
@@ -65,7 +65,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Explosion model, soft particles, splashes, lasers, props (barrels, banners, ships, dish, corpses)
 - [x] Gibs and barrel debris with gravity and bounce
 - [x] Powerup "shells" on the view weapon (quad blue, invulnerability gold)
-- [ ] SP2 sprites, shells on monsters / third-person models
+- [x] SP2 sprites (BFG ball and explosion)
+- [ ] Shells on monsters / third-person models
 - [x] Weapon viewport (no wall clipping)
 
 ### Phase 2 – Play

@@ -9,7 +9,7 @@ uses
   SysUtils, Classes, Generics.Collections, Math,
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions, CastleUtils,
   CastleSoundEngine, CastleBehaviors, CastleColors, CastleRenderOptions,
-  QuakeBsp, QuakeMd2, QuakeLight, QuakeSound, QuakeHud, QuakeParticles;
+  QuakeBsp, QuakeMd2, QuakeLight, QuakeSound, QuakeHud, QuakeParticles, QuakeSprite;
 
 type
   TItemCategory = (icWeapon, icAmmo, icHealth, icArmor, icPowerup, icKey);
@@ -158,6 +158,7 @@ type
     Kind: TProjectileKind;
     Transform: TCastleTransform;
     Model: TQuakeMd2Instance;
+    Sprite: TQuakeSpriteInstance;
     Velocity: TVector3;
     Damage: Integer;
     SplashDamage: Integer;
@@ -862,6 +863,13 @@ begin
   end;
   if MdlPath <> '' then
     Model := Md2Manager.CreateInstance(MdlPath);
+  { The BFG ball is an animated sprite }
+  if AKind = pkBfg then
+  begin
+    Sprite := SpriteManager.CreateInstance('sprites/s_bfg1.sp2');
+    if Sprite <> nil then
+      Transform.Add(Sprite.Scene);
+  end;
   if Model <> nil then
   begin
     ConfigureDecorScene(Model.Scene);
@@ -873,6 +881,7 @@ end;
 
 destructor TQuakeProjectile.Destroy;
 begin
+  FreeAndNil(Sprite);
   Model.Free;
   Transform.Free;
   inherited Destroy;

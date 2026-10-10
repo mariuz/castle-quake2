@@ -9,7 +9,7 @@ uses
   SysUtils, Classes, Generics.Collections, Math,
   CastleVectors, CastleTransform, CastleScene, CastleColors, CastleUtils, X3DNodes,
   CastleImages, CastleRenderOptions,
-  QuakePalette, QuakeMd2;
+  QuakePalette, QuakeMd2, QuakeSprite;
 
 type
   { Particle type kinds }
@@ -43,8 +43,12 @@ type
   public
     Transform: TCastleTransform;
     Model: TQuakeMd2Instance;
+    Sprite: TQuakeSpriteInstance;
     Life: Single;
     constructor Create(const Parent: TCastleTransform; const Pos: TVector3);
+    { Sprite explosion (e.g. the BFG's sprites/s_bfg3.sp2), played once }
+    constructor CreateSprite(const Parent: TCastleTransform; const Pos: TVector3;
+      const SpritePath: String);
     destructor Destroy; override;
   end;
 
@@ -214,8 +218,25 @@ begin
   Parent.Add(Transform);
 end;
 
+constructor TQuakeExplosionModel.CreateSprite(const Parent: TCastleTransform;
+  const Pos: TVector3; const SpritePath: String);
+begin
+  inherited Create;
+  Transform := TCastleTransform.Create(nil);
+  Transform.Name := 'SpriteExplosion';
+  Transform.Translation := Pos;
+  Sprite := SpriteManager.CreateInstance(SpritePath);
+  if Sprite <> nil then
+  begin
+    Transform.Add(Sprite.Scene);
+    Life := Sprite.FrameCount / 10;
+  end;
+  Parent.Add(Transform);
+end;
+
 destructor TQuakeExplosionModel.Destroy;
 begin
+  FreeAndNil(Sprite);
   FreeAndNil(Model);
   FreeAndNil(Transform);
   inherited Destroy;
@@ -426,7 +447,10 @@ begin
       { Quake 2 darkens the explosion by stepping through its 7 skins (2 frames each) }
       FExplosions[I].Model.SetSkin(Min(6, Trunc((1.6 - FExplosions[I].Life) * 10) div 2));
     end;
-    if (FExplosions[I].Life <= 0) or (FExplosions[I].Model = nil) or FExplosions[I].Model.AnimDone then
+    if FExplosions[I].Sprite <> nil then
+      FExplosions[I].Sprite.Update(SecondsPassed);
+    if (FExplosions[I].Life <= 0) or
+       ((FExplosions[I].Sprite = nil) and ((FExplosions[I].Model = nil) or FExplosions[I].Model.AnimDone)) then
       FExplosions.Delete(I);
   end;
 end;
@@ -691,9 +715,13 @@ var
 begin
   if FParent = nil then
     Exit;
-  P := TQuakeParticle.Create(FParent, Pos, Vector3(0, 0, 0), pkFireball, 0.6, 10, 60,
-    Vector3(0.3, 1.0, 0.3));
-  FParticles.Add(P);
+  FExplosions.Add(TQuakeExplosionModel.CreateSprite(FParent, Pos, 'sprites/s_bfg3.sp2'));
+  if FExplosions.Last.Sprite = nil then
+  begin
+    P := TQuakeParticle.Create(FParent, Pos, Vector3(0, 0, 0), pkFireball, 0.6, 10, 60,
+      Vector3(0.3, 1.0, 0.3));
+    FParticles.Add(P);
+  end;
   for I := 1 to 30 do
   begin
     P := TQuakeParticle.Create(FParent, Pos, Vector3((Random - 0.5) * 500,

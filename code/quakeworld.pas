@@ -1507,6 +1507,8 @@ begin
 
     if Proj.Kind = pkGrenade then
       Proj.Velocity.Y := Proj.Velocity.Y - 800 * SecondsPassed;
+    if Proj.Sprite <> nil then
+      Proj.Sprite.Update(SecondsPassed);
 
     if Proj.Life <= 0 then
     begin
