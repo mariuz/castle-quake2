@@ -1,4 +1,7 @@
-{ Main 3D gameplay view for Castle Quake 2. }
+{ Main 3D gameplay view for Castle Quake 2.
+  Its components (viewport, camera, navigation, TQuakeMap, HUD, console, menu)
+  are designed in data/gameviewplay.castle-user-interface ,
+  so they can be inspected and tweaked in the CGE editor. }
 unit GameViewPlay;
 
 {$mode objfpc}{$H+}
@@ -11,21 +14,26 @@ uses
   CastleViewport, CastleCameras, CastleTransform, CastleColors, CastleLog,
   CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound,
-  QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu;
+  QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap;
 
 type
   TCameraMode = (cmFirstPerson, cmNoclip);
 
   { The main gameplay view }
   TViewPlay = class(TCastleView)
+  published
+    { Components designed using CGE editor.
+      These fields will be automatically initialized at Start. }
+    MainViewport: TCastleViewport;
+    WalkNavigation: TCastleWalkNavigation;
+    Background: TCastleBackground;
+    QuakeMap: TQuakeMap;
+    Hud: TQuakeHud;
+    Console: TQuakeConsole;
+    Menu: TQuakeMenu;
+    LabelFps: TCastleLabel;
   private
-    FViewport: TCastleViewport;
-    FNavigation: TCastleWalkNavigation;
-    FBackground: TCastleBackground;
     FWorld: TQuakeWorld;
-    FHud: TQuakeHud;
-    FConsole: TQuakeConsole;
-    FMenu: TQuakeMenu;
     FCameraMode: TCameraMode;
     FMapName: String;
     FAutoTestMap: String;
@@ -37,7 +45,6 @@ type
     FDemoIndex: Integer;
     FDemoTimer: Single;
     FDemoFireHeld: Boolean;
-    procedure SetupNavigation;
     procedure SetupSky(const SkyName: String);
     procedure PlaceCamera(const Pos: TVector3; const YawDeg: Single);
     procedure HandleConsoleCommand(const Cmd, Args: String);
@@ -76,48 +83,30 @@ implementation
 constructor TViewPlay.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  DesignUrl := 'castle-data:/gameviewplay.castle-user-interface';
   FCameraMode := cmFirstPerson;
   FDemoCommands := TStringList.Create;
 end;
 
 destructor TViewPlay.Destroy;
 begin
-  FreeAndNil(FWorld);
   FDemoCommands.Free;
   inherited Destroy;
-end;
-
-procedure TViewPlay.SetupNavigation;
-begin
-  if FNavigation <> nil then
-    Exit;
-  FNavigation := TCastleWalkNavigation.Create(Self);
-  FNavigation.PreferredHeight := PlayerEyeHeight; { Quake 2 eye: 46 above the feet }
-  FNavigation.Radius := 14;
-  FNavigation.ClimbHeight := 18;                  { Quake 2 STEPSIZE }
-  FNavigation.MoveSpeed := 300;                   { Quake 2 run speed }
-  FNavigation.JumpMaxHeight := 1.0;
-  FNavigation.CrouchHeight := 0.55;
-  FNavigation.MouseLook := True;
-  FNavigation.HeadBobbing := 0.02;
-  { No camera roll when falling, Quake doesn't do that }
-  FNavigation.FallingEffect := False;
-  FViewport.InsertFront(FNavigation);
 end;
 
 procedure TViewPlay.SetCameraMode(const Mode: TCameraMode);
 begin
   FCameraMode := Mode;
-  FNavigation.Gravity := Mode = cmFirstPerson;
-  FNavigation.MouseLook := True;
+  WalkNavigation.Gravity := Mode = cmFirstPerson;
+  WalkNavigation.MouseLook := True;
   if Mode = cmNoclip then
   begin
-    FMenu.CameraModeName := 'Noclip Fly';
-    FHud.ShowMessage('noclip ON');
+    Menu.CameraModeName := 'Noclip Fly';
+    Hud.ShowMessage('noclip ON');
   end else
   begin
-    FMenu.CameraModeName := 'First-Person';
-    FHud.ShowMessage('noclip OFF');
+    Menu.CameraModeName := 'First-Person';
+    Hud.ShowMessage('noclip OFF');
   end;
 end;
 
@@ -171,81 +160,42 @@ procedure TViewPlay.SetupSky(const SkyName: String);
   end;
 
 begin
-  if FBackground = nil then
-  begin
-    FBackground := TCastleBackground.Create(Self);
-    FViewport.Background := FBackground;
-  end;
-  FBackground.SkyTopColor := Vector3(0.05, 0.05, 0.08);
-  FBackground.SkyEquatorColor := Vector3(0.1, 0.1, 0.12);
+  Background.SkyTopColor := Vector3(0.05, 0.05, 0.08);
+  Background.SkyEquatorColor := Vector3(0.1, 0.1, 0.12);
   if SkyName = '' then
   begin
-    FBackground.TexturePositiveX := '';
-    FBackground.TextureNegativeX := '';
-    FBackground.TexturePositiveY := '';
-    FBackground.TextureNegativeY := '';
-    FBackground.TextureNegativeZ := '';
-    FBackground.TexturePositiveZ := '';
+    Background.TexturePositiveX := '';
+    Background.TextureNegativeX := '';
+    Background.TexturePositiveY := '';
+    Background.TextureNegativeY := '';
+    Background.TextureNegativeZ := '';
+    Background.TexturePositiveZ := '';
     Exit;
   end;
   { Quake 2: rt = +X, lf = -X, bk = Quake +Y (CGE -Z), ft = Quake -Y (CGE +Z).
     Note TCastleBackground.TexturePositiveZ is the X3D "front", drawn at -Z. }
-  FBackground.TexturePositiveX := SideUrl('rt');
-  FBackground.TextureNegativeX := SideUrl('lf');
-  FBackground.TexturePositiveY := SideUrl('up');
-  FBackground.TextureNegativeY := SideUrl('dn');
-  FBackground.TexturePositiveZ := SideUrl('bk');
-  FBackground.TextureNegativeZ := SideUrl('ft');
+  Background.TexturePositiveX := SideUrl('rt');
+  Background.TextureNegativeX := SideUrl('lf');
+  Background.TexturePositiveY := SideUrl('up');
+  Background.TextureNegativeY := SideUrl('dn');
+  Background.TexturePositiveZ := SideUrl('bk');
+  Background.TextureNegativeZ := SideUrl('ft');
 end;
 
 procedure TViewPlay.Start;
 begin
   inherited Start;
 
-  if FViewport = nil then
-  begin
-    FViewport := TCastleViewport.Create(Self);
-    FViewport.FullSize := True;
-    FViewport.Transparent := False;
-    FViewport.BackgroundColor := Vector4(0.02, 0.02, 0.03, 1.0);
-    InsertFront(FViewport);
-    FViewport.Camera.ProjectionNear := 2.0;
-    FViewport.Camera.ProjectionFar := 0; { infinite }
-    FViewport.Camera.Perspective.FieldOfViewAxis := faHorizontal;
-    FViewport.Camera.Perspective.FieldOfView := DegToRad(90.0);
-  end;
+  { Settings that are not published (so not in the design) }
+  WalkNavigation.FallingEffect := False; { Quake doesn't roll the camera when falling }
 
-  SetupNavigation;
-
-  if FWorld = nil then
-  begin
-    FWorld := TQuakeWorld.Create(FViewport.Items);
-    FWorld.AttachWeaponToCamera(FViewport.Camera);
-  end;
-
-  Particles.SetParent(FViewport.Items);
-
-  if FHud = nil then
-  begin
-    FHud := TQuakeHud.Create(Self);
-    InsertFront(FHud);
-    FWorld.Hud := FHud;
-  end;
-
-  if FConsole = nil then
-  begin
-    FConsole := TQuakeConsole.Create(Self);
-    FConsole.OnCommand := @HandleConsoleCommand;
-    InsertFront(FConsole);
-  end;
-
-  if FMenu = nil then
-  begin
-    FMenu := TQuakeMenu.Create(Self);
-    FMenu.OnMenuAction := @HandleMenuAction;
-    FMenu.Exists := False;
-    InsertFront(FMenu);
-  end;
+  FWorld := TQuakeWorld.Create(MainViewport.Items, QuakeMap);
+  FWorld.AttachWeaponToCamera(MainViewport.Camera);
+  FWorld.Hud := Hud;
+  Particles.SetParent(MainViewport.Items);
+  Console.OnCommand := @HandleConsoleCommand;
+  Menu.OnMenuAction := @HandleMenuAction;
+  SetCameraMode(FCameraMode);
 
   if FAutoTestMap <> '' then
   begin
@@ -263,12 +213,15 @@ end;
 procedure TViewPlay.Stop;
 begin
   Sounds.StopMusic;
+  Particles.SetParent(nil);
+  { The world references design components, which are freed by inherited Stop }
+  FreeAndNil(FWorld);
   inherited Stop;
 end;
 
 procedure TViewPlay.PlaceCamera(const Pos: TVector3; const YawDeg: Single);
 begin
-  FViewport.Camera.SetWorldView(Pos, YawToCgeDir(YawDeg), Vector3(0, 1, 0));
+  MainViewport.Camera.SetWorldView(Pos, YawToCgeDir(YawDeg), Vector3(0, 1, 0));
 end;
 
 procedure TViewPlay.LoadLevel(const AMapName: String);
@@ -279,9 +232,9 @@ begin
     FMapName := FWorld.Bsp.MapName;
     PlaceCamera(FWorld.SpawnPoint, FWorld.SpawnAngle);
     SetupSky(FWorld.Geometry.SkyName);
-    FHud.ShowMessage(FMapName, 3.0);
+    Hud.ShowMessage(FMapName, 3.0);
   end else
-    FHud.ShowMessage('Failed to load level: ' + AMapName, 5.0);
+    Hud.ShowMessage('Failed to load level: ' + AMapName, 5.0);
 end;
 
 procedure TViewPlay.CaptureScreenshot(const Prefix: String);
@@ -299,7 +252,7 @@ begin
       Img.Free;
     end;
     WritelnLog('GameViewPlay', 'Saved screenshot to "%s" (%.1f FPS, camera %s)',
-      [OutPath, Container.Fps.RealFps, FViewport.Camera.Translation.ToString]);
+      [OutPath, Container.Fps.RealFps, MainViewport.Camera.Translation.ToString]);
   except
     on E: Exception do
       WritelnWarning('GameViewPlay', 'Failed to save screenshot "%s": %s', [OutPath, E.Message]);
@@ -372,42 +325,42 @@ begin
     CaptureScreenshot(FAutoTestPrefix)
   else
   if Action = 'X' then
-    FWorld.FireWeapon(FViewport.Camera.Translation, FViewport.Camera.Direction)
+    FWorld.FireWeapon(MainViewport.Camera.Translation, MainViewport.Camera.Direction)
   else
   if Action = 'H' then { Hold / release fire }
     FDemoFireHeld := not FDemoFireHeld
   else
   if Action = 'U' then
-    FWorld.ActivateUse(FViewport.Camera.Translation, FViewport.Camera.Direction)
+    FWorld.ActivateUse(MainViewport.Camera.Translation, MainViewport.Camera.Direction)
   else
   if Action = 'A' then { Absolute yaw (Quake degrees) }
-    PlaceCamera(FViewport.Camera.Translation, StrToFloatDef(Param, 0))
+    PlaceCamera(MainViewport.Camera.Translation, StrToFloatDef(Param, 0))
   else
   if Action = 'T' then { Turn left by degrees }
-    FViewport.Camera.SetWorldView(FViewport.Camera.Translation,
-      RotatePointAroundAxisRad(DegToRad(StrToFloatDef(Param, 0)), FViewport.Camera.Direction,
+    MainViewport.Camera.SetWorldView(MainViewport.Camera.Translation,
+      RotatePointAroundAxisRad(DegToRad(StrToFloatDef(Param, 0)), MainViewport.Camera.Direction,
       Vector3(0, 1, 0)), Vector3(0, 1, 0))
   else
   if Action = 'P' then { Pitch up by degrees }
   begin
-    Dir := FViewport.Camera.Direction;
+    Dir := MainViewport.Camera.Direction;
     Dir := RotatePointAroundAxisRad(DegToRad(StrToFloatDef(Param, 0)), Dir,
       TVector3.CrossProduct(Dir, Vector3(0, 1, 0)));
-    FViewport.Camera.SetWorldView(FViewport.Camera.Translation, Dir, Vector3(0, 1, 0));
+    MainViewport.Camera.SetWorldView(MainViewport.Camera.Translation, Dir, Vector3(0, 1, 0));
   end else
   if Action = 'M' then { Move along camera direction, with collisions }
   begin
     Val := StrToFloatDef(Param, 50.0);
-    Dir := FViewport.Camera.Direction;
+    Dir := MainViewport.Camera.Direction;
     Dir.Y := 0;
     if Dir.Length > 0 then
-      FViewport.Camera.Translation := FViewport.Camera.Translation + Dir.Normalize * Val;
+      MainViewport.Camera.Translation := MainViewport.Camera.Translation + Dir.Normalize * Val;
   end else
   if (Action = 'N') or (Action = 'I') or (Action = 'D') then
   begin
     { Go near monster / item / mover number Param, standing on a floor, facing it }
     P := StrToIntDef(Param, 0);
-    Target := FViewport.Camera.Translation;
+    Target := MainViewport.Camera.Translation;
     Ignore := nil;
     if (Action = 'N') and (P < FWorld.Monsters.Count) then
     begin
@@ -425,6 +378,14 @@ begin
     GoNear(Target);
     if Ignore <> nil then
       Ignore.Exists := True;
+  end else
+  if Action = 'O' then { Run a console command, e.g. "O:kill" or "O:map demo2" }
+  begin
+    P := Pos(' ', Param);
+    if P > 0 then
+      HandleConsoleCommand(LowerCase(Copy(Param, 1, P - 1)), Trim(Copy(Param, P + 1, MaxInt)))
+    else
+      HandleConsoleCommand(LowerCase(Param), '');
   end else
   if Action = 'E' then { Fire entity targets, like a trigger would }
     FWorld.UseTargets(Param)
@@ -447,7 +408,7 @@ begin
         Target.Data[J] := StrToFloatDef(Cmd, 0);
         Inc(J);
       end;
-    FViewport.Camera.Translation := QuakeToCge(Target);
+    MainViewport.Camera.Translation := QuakeToCge(Target);
   end else
   if Action = 'C' then
     FWorld.SelectWeapon(StrToIntDef(Param, 2))
@@ -478,7 +439,7 @@ var
   FloorDist: Single;
   Items: TCastleAbstractRootTransform;
 begin
-  Items := FViewport.Items;
+  Items := MainViewport.Items;
   for Dist in [160, 110, 220, 70] do
     for J := 0 to 7 do
     begin
@@ -490,7 +451,7 @@ begin
       if (Items.WorldRayCast(Spot, Vector3(0, -1, 0), FloorDist) = nil) or (FloorDist > 160) then
         Continue;
       Spot.Y := Spot.Y - FloorDist + PlayerEyeHeight;
-      FViewport.Camera.SetWorldView(Spot, (Target - Spot).Normalize, Vector3(0, 1, 0));
+      MainViewport.Camera.SetWorldView(Spot, (Target - Spot).Normalize, Vector3(0, 1, 0));
       WritelnLog('GameViewPlay', 'GoNear %s -> %s', [Target.ToString, Spot.ToString]);
       Exit;
     end;
@@ -525,8 +486,11 @@ begin
   if FWorld = nil then
     Exit;
 
-  FWorld.Update(SecondsPassed, FViewport.Camera.Translation, FViewport.Camera.Direction);
-  FNavigation.Exists := not FWorld.Dead;
+  if LabelFps.Exists then
+    LabelFps.Caption := 'FPS: ' + Container.Fps.ToString;
+
+  FWorld.Update(SecondsPassed, MainViewport.Camera.Translation, MainViewport.Camera.Direction);
+  WalkNavigation.Exists := not FWorld.Dead;
 
   if FWorld.TeleportPending then
   begin
@@ -542,10 +506,10 @@ begin
 
   { Hold to fire (left mouse / Ctrl) }
   Firing := FDemoFireHeld;
-  if not FConsole.IsOpen and not FMenu.Exists then
+  if not Console.IsOpen and not Menu.Exists then
     Firing := Firing or Container.Pressed[keyCtrl] or (buttonLeft in Container.MousePressed);
   if Firing then
-    FWorld.FireWeapon(FViewport.Camera.Translation, FViewport.Camera.Direction);
+    FWorld.FireWeapon(MainViewport.Camera.Translation, MainViewport.Camera.Direction);
 end;
 
 function TViewPlay.Press(const Event: TInputPressRelease): Boolean;
@@ -556,36 +520,36 @@ var
 begin
   Result := False;
 
-  if FConsole.IsOpen then
-    Exit(FConsole.Press(Event));
+  if Console.IsOpen then
+    Exit(Console.Press(Event));
 
-  if FMenu.Exists then
+  if Menu.Exists then
   begin
     if Event.IsKey(keyEscape) then
     begin
-      FMenu.Exists := False;
-      FNavigation.MouseLook := True;
+      Menu.Exists := False;
+      WalkNavigation.MouseLook := True;
       Exit(True);
     end;
-    Exit(FMenu.Press(Event));
+    Exit(Menu.Press(Event));
   end;
 
   if Event.IsKey(keyBackQuote) or (Event.KeyString = '~') or (Event.KeyString = '`') then
   begin
-    FConsole.Toggle;
+    Console.Toggle;
     Exit(True);
   end;
 
   if Event.IsKey(keyEscape) then
   begin
-    FMenu.Exists := True;
-    FNavigation.MouseLook := False;
+    Menu.Exists := True;
+    WalkNavigation.MouseLook := False;
     Exit(True);
   end;
 
   if Event.IsKey(keyE) then
   begin
-    FWorld.ActivateUse(FViewport.Camera.Translation, FViewport.Camera.Direction);
+    FWorld.ActivateUse(MainViewport.Camera.Translation, MainViewport.Camera.Direction);
     Exit(True);
   end;
 
@@ -617,7 +581,7 @@ begin
   if Event.IsKey(keyF12) then
   begin
     CaptureScreenshot('screenshot');
-    FHud.ShowMessage('Screenshot saved');
+    Hud.ShowMessage('Screenshot saved');
     Exit(True);
   end;
 end;
@@ -631,18 +595,21 @@ begin
     if Args <> '' then
       LoadLevel(Args)
     else
-      FConsole.Print('Usage: map <mapname>');
+      Console.Print('Usage: map <mapname>');
   end else
   if Cmd = 'maps' then
   begin
     Maps := Pak.FindFiles('maps/', '.bsp');
     try
       Maps.Sort;
-      FConsole.Print(Maps.CommaText);
+      Console.Print(Maps.CommaText);
     finally
       Maps.Free;
     end;
   end else
+  if Cmd = 'fps' then
+    LabelFps.Exists := not LabelFps.Exists
+  else
   if Cmd = 'god' then
     FWorld.CheatGodMode
   else
@@ -657,23 +624,24 @@ begin
       SetCameraMode(cmFirstPerson);
   end else
   if Cmd = 'kill' then
-    FWorld.DamagePlayer(1000, FViewport.Camera.Translation)
+    FWorld.DamagePlayer(1000, MainViewport.Camera.Translation)
   else
   if (Cmd = 'quit') or (Cmd = 'exit') then
     Application.Terminate
   else
   if Cmd = 'help' then
   begin
-    FConsole.Print('Commands:');
-    FConsole.Print('  map <name>   - Load map (e.g. base1, base2$spawn)');
-    FConsole.Print('  maps         - List maps in the loaded PAKs');
-    FConsole.Print('  god          - Toggle god mode');
-    FConsole.Print('  give all     - All weapons, ammo, armor, keys');
-    FConsole.Print('  noclip       - Toggle fly mode');
-    FConsole.Print('  kill         - Suicide');
-    FConsole.Print('  quit         - Exit game');
+    Console.Print('Commands:');
+    Console.Print('  map <name>   - Load map (e.g. base1, base2$spawn)');
+    Console.Print('  maps         - List maps in the loaded PAKs');
+    Console.Print('  god          - Toggle god mode');
+    Console.Print('  give all     - All weapons, ammo, armor, keys');
+    Console.Print('  noclip       - Toggle fly mode');
+    Console.Print('  fps          - Toggle FPS counter');
+    Console.Print('  kill         - Suicide');
+    Console.Print('  quit         - Exit game');
   end else
-    FConsole.Print('Unknown command: ' + Cmd);
+    Console.Print('Unknown command: ' + Cmd);
 end;
 
 procedure TViewPlay.HandleMenuAction(const Action: TMenuAction; const Param: String);
@@ -681,8 +649,8 @@ begin
   case Action of
     maNewGame, maWarpMap:
       begin
-        FMenu.Exists := False;
-        FNavigation.MouseLook := True;
+        Menu.Exists := False;
+        WalkNavigation.MouseLook := True;
         LoadLevel(Param);
       end;
     maToggleCamera:

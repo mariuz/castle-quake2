@@ -1,4 +1,6 @@
-{ Game initialization: window, views, PAK asset loading, and command-line parsing. }
+{ Game initialization: window, views, PAK asset loading, and command-line parsing.
+  This unit is cross-platform.
+  It will be used by the platform-specific program or library file. }
 unit GameInitialize;
 
 {$mode objfpc}{$H+}
@@ -9,8 +11,12 @@ uses
   SysUtils, Classes,
   CastleWindow, CastleLog, CastleUIControls, CastleApplicationProperties, CastleParameters,
   CastleUtils, CastleFilesUtils, CastleUriUtils,
-  QuakePak, QuakePalette, QuakeSound, QuakeGeometry,
-  GameViewMenu, GameViewPlay;
+  QuakePak, QuakePalette, QuakeSound, QuakeGeometry
+  {$region 'Castle Initialization Uses'}
+  // The content here may be automatically updated by CGE editor.
+  , GameViewMenu
+  , GameViewPlay
+  {$endregion 'Castle Initialization Uses'};
 
 var
   Window: TCastleWindow;
@@ -117,8 +123,12 @@ begin
   Palette.LoadFromPak;
   Sounds.PreloadCommonSounds;
 
+  { Create views (see https://castle-engine.io/views ). }
+  {$region 'Castle View Creation'}
+  // The content here may be automatically updated by CGE editor.
   ViewMenu := TViewMenu.Create(Application);
   ViewPlay := TViewPlay.Create(Application);
+  {$endregion 'Castle View Creation'}
 
   if AutoTestMap <> '' then
   begin
@@ -138,7 +148,7 @@ end;
 initialization
   CmdPaks := TStringList.Create;
   ApplicationProperties.ApplicationName := 'castle-quake2';
-  ApplicationProperties.Version := '0.1.0';
+  ApplicationProperties.Version := '0.2.0';
   LogFileName := 'castle-quake2.log';
   InitializeLog;
   Application.OnInitialize := @ApplicationInitialize;

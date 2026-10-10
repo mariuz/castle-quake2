@@ -9,7 +9,7 @@ interface
 uses
   SysUtils, Classes, Math, Generics.Collections,
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes,
-  QuakePak, QuakeBsp, QuakeGeometry, QuakeMd2, QuakeLight, QuakeSound, QuakeHud,
+  QuakePak, QuakeBsp, QuakeGeometry, QuakeMap, QuakeMd2, QuakeLight, QuakeSound, QuakeHud,
   QuakeParticles, QuakeEntities;
 
 const
@@ -26,6 +26,8 @@ type
   TQuakeWorld = class
   private
     FItems: TCastleAbstractRootTransform;
+    FMap: TQuakeMap;
+    FMapReused: Boolean;
     FBsp: TQuakeBsp;
     FGeometry: TQuakeGeometry;
     FPickups: TQuakePickupList;
@@ -87,7 +89,8 @@ type
     procedure KillPlayer;
     procedure ClearLevel;
   public
-    constructor Create(const AItems: TCastleAbstractRootTransform);
+    { AMap is the TQuakeMap component inside AItems (usually from the view design). }
+    constructor Create(const AItems: TCastleAbstractRootTransform; const AMap: TQuakeMap);
     destructor Destroy; override;
 
     { Load a map, e.g. "base1" or "base2$spawnname". Keeps the inventory. }
@@ -174,10 +177,11 @@ begin
     Up * ((Random * 2 - 1) * VSpread)).Normalize;
 end;
 
-constructor TQuakeWorld.Create(const AItems: TCastleAbstractRootTransform);
+constructor TQuakeWorld.Create(const AItems: TCastleAbstractRootTransform; const AMap: TQuakeMap);
 begin
   inherited Create;
   FItems := AItems;
+  FMap := AMap;
   FPickups := TQuakePickupList.Create(True);
   FMonsters := TQuakeMonsterList.Create(True);
   FProjectiles := TQuakeProjectileList.Create(True);
@@ -229,9 +233,9 @@ begin
   FDelayed.Clear;
   FCounters.Clear;
   Particles.Clear;
-  Lighting.SetMap(nil);
-  FreeAndNil(FGeometry);
-  FreeAndNil(FBsp);
+  { Map data is owned by the TQuakeMap component }
+  FGeometry := nil;
+  FBsp := nil;
 end;
 
 procedure TQuakeWorld.AttachWeaponToCamera(const Camera: TCastleTransform);
@@ -350,14 +354,14 @@ begin
     if ItemDef <> nil then
     begin
       { Items rest on the floor; origin is 15 units above it }
-      FPickups.Add(TQuakePickup.Create(FItems, ItemDef, Ent, Pos));
+      FPickups.Add(TQuakePickup.CreatePickup(FMap, ItemDef, Ent, Pos));
       Continue;
     end;
 
     MonsterDef := FindMonsterDef(CName);
     if MonsterDef <> nil then
     begin
-      Monster := TQuakeMonster.Create(FItems, MonsterDef, Ent, Pos, Ent.Angle);
+      Monster := TQuakeMonster.CreateMonster(FMap, MonsterDef, Ent, Pos, Ent.Angle);
       Monster.OnAttack := @MonsterAttack;
       FMonsters.Add(Monster);
       Inc(FStats.TotalKills);
@@ -445,17 +449,17 @@ begin
   FSpawnPoint := Vector3(0, PlayerEyeHeight, 0);
   FSpawnAngle := 0;
 
-  FBsp := TQuakeBsp.Create;
-  if not FBsp.LoadFromPak(MapPath) then
-  begin
-    FreeAndNil(FBsp);
-    Exit;
-  end;
-
-  FGeometry := TQuakeGeometry.Create(FBsp);
+  { The map component (TQuakeMap, placed in the view design) builds the
+    geometry; the world adds the gameplay on top of it. }
+  { Reuse the map the design already loaded (only the first time: restarts
+    and level changes must rebuild movers in their initial state) }
+  if FMapReused or (FMap.Bsp = nil) or not SameText(FMap.MapName, MapName) then
+    if not FMap.LoadMap(MapName) then
+      Exit;
+  FMapReused := True;
+  FBsp := FMap.Bsp;
+  FGeometry := FMap.Geometry;
   FGeometry.OnFireTargets := @UseTargets;
-  FGeometry.AddToWorld(FItems);
-  Lighting.SetMap(FBsp);
 
   SpawnEntities(SpawnName);
   UpdateWeaponModel;
@@ -1318,7 +1322,7 @@ begin
     end;
 
   for I := 0 to FPickups.Count - 1 do
-    FPickups[I].Update(SecondsPassed);
+    FPickups[I].UpdatePickup(SecondsPassed);
   if not FDead then
   begin
     CheckPickups;
@@ -1328,7 +1332,7 @@ begin
 
   for M in FMonsters do
   begin
-    M.Update(SecondsPassed, FPlayerPos);
+    M.UpdateAI(SecondsPassed, FPlayerPos);
     if (not M.IsAlive) and not M.KillCounted then
     begin
       M.KillCounted := True;

@@ -43,6 +43,9 @@ type
 
 implementation
 
+uses
+  CastleComponentSerialize;
+
 constructor TQuakeConsole.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
@@ -222,4 +225,6 @@ begin
     '] ' + FInputText + '_');
 end;
 
+initialization
+  RegisterSerializableComponent(TQuakeConsole, 'Quake 2 Console');
 end.

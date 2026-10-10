@@ -1,6 +1,6 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
     <PropertyGroup>
-        <ProjectGuid>{E93359E4-AA8A-4296-ACD6-36EE0A24B424}</ProjectGuid>
+        <ProjectGuid>{164CD147-EBB0-4E9E-836F-98BB893CC99D}</ProjectGuid>
         <MainSource>castle_quake2_standalone.dpr</MainSource>
         <Base>True</Base>
         <Config Condition="'$(Config)'==''">Debug</Config>
@@ -190,7 +190,8 @@
                     <Excluded_Packages Name="$(BDSBIN)\dcloffice2k280.bpl">Microsoft Office 2000 Sample Automation Server Wrapper Components</Excluded_Packages>
                     <Excluded_Packages Name="$(BDSBIN)\dclofficexp280.bpl">Microsoft Office XP Sample Automation Server Wrapper Components</Excluded_Packages>
                 </Excluded_Packages>
-
+                <WelcomePageFile Path="README.md"/>
+                <WelcomePageFolder/>
             </Delphi.Personality>
             <Deployment Version="4">
 
@@ -284,6 +285,194 @@
  <Platform Name="Win64">
   <RemoteDir>./data/</RemoteDir>
   <RemoteName>CastleSettings.xml</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+</DeployFile>
+<DeployFile LocalName="data\gameviewmenu.castle-user-interface" Class="File">
+ <Platform Name="Android">
+  <RemoteDir>assets</RemoteDir>
+  <RemoteName>gameviewmenu.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="Android64">
+  <RemoteDir>assets</RemoteDir>
+  <RemoteName>gameviewmenu.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="iOSDevice64">
+  <RemoteDir>./data/</RemoteDir>
+  <RemoteName>gameviewmenu.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="iOSSimARM64">
+  <RemoteDir>./data/</RemoteDir>
+  <RemoteName>gameviewmenu.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="Linux64">
+  <RemoteDir>./data/</RemoteDir>
+  <RemoteName>gameviewmenu.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="OSX64">
+  <RemoteDir>./data/</RemoteDir>
+  <RemoteName>gameviewmenu.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="OSXARM64">
+  <RemoteDir>./data/</RemoteDir>
+  <RemoteName>gameviewmenu.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="Win32">
+  <RemoteDir>./data/</RemoteDir>
+  <RemoteName>gameviewmenu.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="Win64">
+  <RemoteDir>./data/</RemoteDir>
+  <RemoteName>gameviewmenu.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+</DeployFile>
+<DeployFile LocalName="data\gameviewplay.castle-user-interface" Class="File">
+ <Platform Name="Android">
+  <RemoteDir>assets</RemoteDir>
+  <RemoteName>gameviewplay.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="Android64">
+  <RemoteDir>assets</RemoteDir>
+  <RemoteName>gameviewplay.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="iOSDevice64">
+  <RemoteDir>./data/</RemoteDir>
+  <RemoteName>gameviewplay.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="iOSSimARM64">
+  <RemoteDir>./data/</RemoteDir>
+  <RemoteName>gameviewplay.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="Linux64">
+  <RemoteDir>./data/</RemoteDir>
+  <RemoteName>gameviewplay.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="OSX64">
+  <RemoteDir>./data/</RemoteDir>
+  <RemoteName>gameviewplay.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="OSXARM64">
+  <RemoteDir>./data/</RemoteDir>
+  <RemoteName>gameviewplay.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="Win32">
+  <RemoteDir>./data/</RemoteDir>
+  <RemoteName>gameviewplay.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="Win64">
+  <RemoteDir>./data/</RemoteDir>
+  <RemoteName>gameviewplay.castle-user-interface</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+</DeployFile>
+<DeployFile LocalName="data\paks\QUAKE2_DEMO_LICENSE.txt" Class="File">
+ <Platform Name="Android">
+  <RemoteDir>assets\paks</RemoteDir>
+  <RemoteName>QUAKE2_DEMO_LICENSE.txt</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="Android64">
+  <RemoteDir>assets\paks</RemoteDir>
+  <RemoteName>QUAKE2_DEMO_LICENSE.txt</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="iOSDevice64">
+  <RemoteDir>./data/paks/</RemoteDir>
+  <RemoteName>QUAKE2_DEMO_LICENSE.txt</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="iOSSimARM64">
+  <RemoteDir>./data/paks/</RemoteDir>
+  <RemoteName>QUAKE2_DEMO_LICENSE.txt</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="Linux64">
+  <RemoteDir>./data/paks/</RemoteDir>
+  <RemoteName>QUAKE2_DEMO_LICENSE.txt</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="OSX64">
+  <RemoteDir>./data/paks/</RemoteDir>
+  <RemoteName>QUAKE2_DEMO_LICENSE.txt</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="OSXARM64">
+  <RemoteDir>./data/paks/</RemoteDir>
+  <RemoteName>QUAKE2_DEMO_LICENSE.txt</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="Win32">
+  <RemoteDir>./data/paks/</RemoteDir>
+  <RemoteName>QUAKE2_DEMO_LICENSE.txt</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="Win64">
+  <RemoteDir>./data/paks/</RemoteDir>
+  <RemoteName>QUAKE2_DEMO_LICENSE.txt</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+</DeployFile>
+<DeployFile LocalName="data\paks\quake2_demo.pak" Class="File">
+ <Platform Name="Android">
+  <RemoteDir>assets\paks</RemoteDir>
+  <RemoteName>quake2_demo.pak</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="Android64">
+  <RemoteDir>assets\paks</RemoteDir>
+  <RemoteName>quake2_demo.pak</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="iOSDevice64">
+  <RemoteDir>./data/paks/</RemoteDir>
+  <RemoteName>quake2_demo.pak</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="iOSSimARM64">
+  <RemoteDir>./data/paks/</RemoteDir>
+  <RemoteName>quake2_demo.pak</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="Linux64">
+  <RemoteDir>./data/paks/</RemoteDir>
+  <RemoteName>quake2_demo.pak</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="OSX64">
+  <RemoteDir>./data/paks/</RemoteDir>
+  <RemoteName>quake2_demo.pak</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="OSXARM64">
+  <RemoteDir>./data/paks/</RemoteDir>
+  <RemoteName>quake2_demo.pak</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="Win32">
+  <RemoteDir>./data/paks/</RemoteDir>
+  <RemoteName>quake2_demo.pak</RemoteName>
+  <Overwrite>true</Overwrite>
+ </Platform>
+ <Platform Name="Win64">
+  <RemoteDir>./data/paks/</RemoteDir>
+  <RemoteName>quake2_demo.pak</RemoteName>
   <Overwrite>true</Overwrite>
  </Platform>
 </DeployFile>

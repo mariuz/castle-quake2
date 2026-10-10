@@ -36,6 +36,17 @@ A port of **Quake 2** to the **Castle Game Engine** (Object Pascal / Free Pascal
 
 ---
 
+## Working in the Castle Game Engine editor
+
+The project follows the structure of CGE's own templates (`3d_fps_game`) and the `examples/advanced_editor/custom_component` sample:
+
+- **Views are designed, not hard-coded.** `TViewPlay` and `TViewMenu` load `data/gameviewplay.castle-user-interface` and `data/gameviewmenu.castle-user-interface` (`DesignUrl`); the viewport, camera (90° horizontal FOV), `TCastleWalkNavigation` (Quake 2 eye height 46, step 18, speed 300), `TCastleBackground`, HUD, console, menu and FPS label are published fields you can select and tweak in the editor.
+- **Custom components** (`editor_units` in `CastleEngineManifest.xml`): **Quake 2 Map** (`TQuakeMap`), **Quake 2 HUD**, **Quake 2 Console**, **Quake 2 Menu**. Open the project in the editor and use *Project → Restart Editor (With Custom Components)*.
+- **`TQuakeMap`** is a `TCastleTransform`: set `PakUrl` (default `castle-data:/paks/quake2_demo.pak`) and `MapName` (`demo1`, `demo2`, `demo3`, or `base1`... with a full PAK) and the level is built right in the editor viewport. Turn on `PreviewEntities` to see items and monsters as static models. Read-only `SkyName`, `EntityCount` and `FaceCount` show map info in the inspector. The game reuses this component: `TQuakeWorld` adds live entities on top of it.
+- **Behaviors with published state.** Monsters (`TQuakeMonster`), items (`TQuakePickup`) and brush entities (`TQuakeMover`) are `TCastleBehavior`s attached to named transforms such as `Monster007_monster_soldier`, `Item012_weapon_shotgun` or `Mover19_func_door`. In a debug build (`castle-engine compile --mode=debug`) press **F8** to open the CGE inspector and watch `MonsterState`, `HitPoints`, `IsAlerted`, `MoverState`, `MoveProgress` and more change live.
+
+---
+
 ## Controls
 
 | Key | Action |
@@ -48,7 +59,8 @@ A port of **Quake 2** to the **Castle Game Engine** (Object Pascal / Free Pascal
 | **1 .. 9, 0** / Mouse wheel | Select weapon (Blaster .. BFG10K) |
 | **F1** | Toggle noclip fly mode |
 | **F12** | Screenshot |
-| **~** | Console (`map`, `maps`, `god`, `give all`, `noclip`, `kill`, `quit`, `help`) |
+| **~** | Console (`map`, `maps`, `god`, `give all`, `noclip`, `kill`, `fps`, `quit`, `help`) |
+| **F8** (debug build) | CGE inspector: hierarchy and live properties |
 | **Escape** | Menu |
 
 ---
@@ -80,7 +92,7 @@ PAKs are loaded in this order (later ones override earlier ones):
 .\castle-quake2.exe --autotest demo1 shot --demo "W:1,S,K,C:9,N:3,X,W:0.2,S,Q"
 ```
 
-Demo script actions (comma separated): `W:sec` wait, `S` screenshot, `X` fire, `H` toggle hold-fire, `U` use, `C:slot` weapon, `K` give all, `Y` god, `A:deg` yaw, `T:deg` turn, `P:deg` pitch, `M:units` move, `N:i` / `I:i` / `D:i` stand near monster / item / brush entity number i, `G:x y z` go to Quake coordinates, `E:targetname` fire targets, `V` log mover states, `L:map` load map, `Q` quit.
+Demo script actions (comma separated): `W:sec` wait, `S` screenshot, `X` fire, `H` toggle hold-fire, `U` use, `C:slot` weapon, `K` give all, `Y` god, `A:deg` yaw, `T:deg` turn, `P:deg` pitch, `M:units` move, `N:i` / `I:i` / `D:i` stand near monster / item / brush entity number i, `G:x y z` go to Quake coordinates, `E:targetname` fire targets, `O:command` run a console command (e.g. `O:kill`), `V` log mover states, `L:map` load map, `Q` quit.
 
 ---
 

@@ -45,6 +45,9 @@ function FirstMapName: String;
 
 implementation
 
+uses
+  CastleComponentSerialize;
+
 function FirstMapName: String;
 var
   Maps: TStringList;
@@ -267,4 +270,6 @@ begin
     'Use Arrow Keys to Navigate, Enter to Select, Esc to Back');
 end;
 
+initialization
+  RegisterSerializableComponent(TQuakeMenu, 'Quake 2 Menu');
 end.

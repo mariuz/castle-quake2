@@ -109,6 +109,16 @@ Brush entities (`model "*N"`, classname `func_*`) are separate `TCastleScene`s i
 
 ---
 
-## 7. Automated testing
+## 7. Castle Game Engine editor integration
+
+| CGE convention (from templates / samples) | How Castle Quake 2 follows it |
+| --- | --- |
+| Views with `DesignUrl` and published component fields (`3d_fps_game` template) | `TViewPlay` / `TViewMenu` + `data/gameview*.castle-user-interface`. Viewport, camera, navigation, background, HUD, console, menu are designed. |
+| `{$region 'Castle View Creation'}` / `'Castle Initialization Uses'` in `GameInitialize` | Present, so the editor can add new views automatically. |
+| Custom components + `editor_units` (`examples/advanced_editor/custom_component`) | `TQuakeMap` (`TCastleTransform`), `TQuakeHud`, `TQuakeConsole`, `TQuakeMenu`, registered with `RegisterSerializableComponent`, basic properties grouped with `PropertySections`. |
+| Game logic as `TCastleBehavior` (`GameEnemy` in the template) | `TQuakeMonster`, `TQuakePickup`, `TQuakeMover`, with read-only published state for the inspector. |
+| Graceful design-time loading | `TQuakeMap` adds its PAK, palette and URL protocols itself (`EnsureData`), logs a warning instead of failing when a map is missing, and rebuilds when `MapName` / `PakUrl` change. |
+
+## 8. Automated testing
 
 `--autotest <map> <prefix> --demo "<script>"` loads a map, runs the script (see README) and exits after a final screenshot. Screenshots log the FPS and camera position, `V` logs every mover's state, and `N:` / `I:` / `D:` place the camera on a floor near a monster / item / mover, which makes visual regression checks of AI, pickups and movers possible without a human player.

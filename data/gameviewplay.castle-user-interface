@@ -1,0 +1,99 @@
+{
+  "$$ClassName" : "TCastleUserInterface",
+  "FullSize" : true,
+  "Name" : "RootGroup",
+  "$Children" : [
+    {
+      "$$ClassName" : "TCastleViewport",
+      "Background" : "Background",
+      "Camera" : "Camera",
+      "FullSize" : true,
+      "Name" : "MainViewport",
+      "Items" : {
+        "$$ClassName" : "TCastleRootTransform",
+        "$Children" : [
+          {
+            "$$ClassName" : "TCastleCamera",
+            "Name" : "Camera",
+            "ProjectionNear" : 2.0000000000000000E+000,
+            "Perspective" : {
+              "$$ClassName" : "TCastlePerspective",
+              "FieldOfView" : 1.5707963267948966E+000,
+              "FieldOfViewAxis" : "faHorizontal"
+            },
+            "TranslationPersistent" : {
+              "$$ClassName" : "TCastleVector3Persistent",
+              "X" : 1.2800000000000000E+002,
+              "Y" : 4.5000000000000000E+001,
+              "Z" : 3.2000000000000000E+002
+            }
+          },
+          {
+            "$$ClassName" : "TQuakeMap",
+            "MapName" : "demo1",
+            "Name" : "QuakeMap",
+            "PakUrl" : "castle-data:/paks/quake2_demo.pak"
+          }
+        ]
+      },
+      "$NonVisualComponents" : [
+        {
+          "$$ClassName" : "TCastleBackground",
+          "Name" : "Background"
+        }
+      ],
+      "$Children" : [
+        {
+          "$$ClassName" : "TCastleWalkNavigation",
+          "ClimbHeight" : 1.8000000000000000E+001,
+          "CrouchHeight" : 5.5000000000000004E-001,
+          "HeadBobbing" : 2.0000000000000000E-002,
+          "JumpMaxHeight" : 1.0000000000000000E+000,
+          "MouseLook" : true,
+          "MoveSpeed" : 3.0000000000000000E+002,
+          "Name" : "WalkNavigation",
+          "PreferredHeight" : 4.6000000000000000E+001,
+          "Radius" : 1.4000000000000000E+001
+        }
+      ]
+    },
+    {
+      "$$ClassName" : "TQuakeHud",
+      "FullSize" : true,
+      "Name" : "Hud"
+    },
+    {
+      "$$ClassName" : "TCastleLabel",
+      "ColorPersistent" : {
+        "$$ClassName" : "TCastleColorPersistent",
+        "Alpha" : 1.0000000000000000E+000,
+        "Blue" : 3.0000000000000000E-001,
+        "Green" : 1.0000000000000000E+000,
+        "Red" : 3.0000000000000000E-001
+      },
+      "Exists" : false,
+      "FontSize" : 2.0000000000000000E+001,
+      "HorizontalAnchorParent" : "hpRight",
+      "HorizontalAnchorSelf" : "hpRight",
+      "HorizontalAnchorDelta" : -1.6000000000000000E+001,
+      "Name" : "LabelFps",
+      "Text" : [
+        "FPS: xxx"
+      ],
+      "VerticalAnchorParent" : "vpTop",
+      "VerticalAnchorSelf" : "vpTop",
+      "VerticalAnchorDelta" : -1.6000000000000000E+001
+    },
+    {
+      "$$ClassName" : "TQuakeConsole",
+      "FullSize" : true,
+      "Name" : "Console"
+    },
+    {
+      "$$ClassName" : "TQuakeMenu",
+      "Exists" : false,
+      "FullSize" : true,
+      "Name" : "Menu"
+    }
+  ]
+}

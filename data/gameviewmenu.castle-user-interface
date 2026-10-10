@@ -1,0 +1,12 @@
+{
+  "$$ClassName" : "TCastleUserInterface",
+  "FullSize" : true,
+  "Name" : "RootGroup",
+  "$Children" : [
+    {
+      "$$ClassName" : "TQuakeMenu",
+      "FullSize" : true,
+      "Name" : "Menu"
+    }
+  ]
+}

@@ -58,8 +58,12 @@ type
 
   TQuakeGeometry = class;
 
-  { Brush entity (func_*) rendered as its own scene, possibly moving. }
-  TQuakeMover = class
+  { Brush entity (func_*) rendered as its own scene, possibly moving.
+    A TCastleBehavior attached to its Transform, so the published state
+    below is visible in the CGE inspector (F8 in debug builds). }
+  TQuakeMover = class(TCastleBehavior)
+  strict private
+    function GetEntityClass: String;
   public
     Geometry: TQuakeGeometry;
     Entity: TQuakeEntity;
@@ -89,10 +93,10 @@ type
     TrainCorner: TQuakeEntity;
     TrainFrom, TrainTo: TVector3;
     TrainRunning: Boolean;
-    constructor Create(const AGeometry: TQuakeGeometry; const AEntity: TQuakeEntity;
+    constructor CreateMover(const AGeometry: TQuakeGeometry; const AEntity: TQuakeEntity;
       const AModelIndex: Integer);
     destructor Destroy; override;
-    { Bounding box in world (CGE) space, at the current position
+    { Bounding box in map (= world, CGE) space, at the current position
       (empty when the brush has no visible faces) }
     function WorldBox: TBox3D;
     { Center in world (CGE) space; works for invisible brushes too }
@@ -103,6 +107,17 @@ type
     function Use: Boolean;
     { For plats: player stepped on it. }
     procedure PlayerOnTop;
+  published
+    property EntityClass: String read GetEntityClass;
+    property EntityTargetName: String read TargetName;
+    property EntityTarget: String read Target;
+    property MoverKind: TQuakeMoverKind read Kind;
+    property MoverState: TQuakeMoverState read State;
+    property MoveProgress: Single read Progress;
+    property MoveSpeed: Single read Speed;
+    property Wait: Single read WaitTime;
+    property HitPoints: Integer read Health;
+    property OpensWhenNear: Boolean read AutoOpen;
   end;
 
   TQuakeMoverList = specialize TObjectList<TQuakeMover>;
@@ -472,7 +487,7 @@ end;
 
 { TQuakeMover }
 
-constructor TQuakeMover.Create(const AGeometry: TQuakeGeometry; const AEntity: TQuakeEntity;
+constructor TQuakeMover.CreateMover(const AGeometry: TQuakeGeometry; const AEntity: TQuakeEntity;
   const AModelIndex: Integer);
 var
   CName: String;
@@ -482,7 +497,7 @@ var
   Lip, Dist, H: Single;
   SpawnFlags: Integer;
 begin
-  inherited Create;
+  inherited Create(nil);
   Geometry := AGeometry;
   Entity := AEntity;
   ModelIndex := AModelIndex;
@@ -496,9 +511,12 @@ begin
     Health := 100;
 
   Transform := TCastleTransform.Create(nil);
+  Transform.Name := Format('Mover%.2d_%s', [ModelIndex, CName]);
   Scene := TCastleScene.Create(nil);
+  Scene.Name := Transform.Name + '_Scene';
   Scene.PreciseCollisions := True;
   Transform.Add(Scene);
+  Transform.AddBehavior(Self);
 
   Mdl := Geometry.Bsp.Models[ModelIndex];
   { Size in CGE axes (Quake Z height becomes Y) }
@@ -621,13 +639,22 @@ end;
 
 destructor TQuakeMover.Destroy;
 begin
-  Transform.Free;
+  { BeforeDestruction already detached this behavior from Transform }
+  FreeAndNil(Scene);
+  FreeAndNil(Transform);
   inherited Destroy;
+end;
+
+function TQuakeMover.GetEntityClass: String;
+begin
+  Result := Entity.ClassName;
 end;
 
 function TQuakeMover.WorldBox: TBox3D;
 begin
-  Result := Transform.WorldBoundingBox;
+  { In the TQuakeMap coordinate system (the map itself is kept at identity),
+    so this works also while the design is being loaded }
+  Result := Transform.BoundingBox;
 end;
 
 function TQuakeMover.Center: TVector3;
@@ -827,13 +854,16 @@ begin
   inherited Create;
   FBsp := ABsp;
   FSceneWorld := TCastleScene.Create(nil);
+  FSceneWorld.Name := 'WorldGeometry';
   FSceneWorld.PreciseCollisions := True;
   { Sky faces are not drawn (the skybox is visible through them), but they
     still need to block the player. }
   FSceneSkyClip := TCastleScene.Create(nil);
+  FSceneSkyClip.Name := 'SkyClip';
   FSceneSkyClip.PreciseCollisions := True;
   FSceneSkyClip.Visible := False;
   FWorldTransform := TCastleTransform.Create(nil);
+  FWorldTransform.Name := 'World';
   FWorldTransform.Add(FSceneWorld);
   FWorldTransform.Add(FSceneSkyClip);
   FMovers := TQuakeMoverList.Create(True);
@@ -848,6 +878,8 @@ end;
 destructor TQuakeGeometry.Destroy;
 begin
   FMovers.Free;
+  FSceneWorld.Free;
+  FSceneSkyClip.Free;
   FWorldTransform.Free;
   FAnimTextures.Free;
   FScrollNodes.Free;
@@ -1026,7 +1058,7 @@ begin
     if (MdlIdx <= 0) or (MdlIdx >= FBsp.ModelCount) then
       Continue;
 
-    Mover := TQuakeMover.Create(Self, Ent, MdlIdx);
+    Mover := TQuakeMover.CreateMover(Self, Ent, MdlIdx);
     Root := TX3DRootNode.Create;
     BuildModelGeometry(MdlIdx, Root, nil);
     Mover.Scene.Load(Root, True);

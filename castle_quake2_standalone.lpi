@@ -63,7 +63,7 @@
         <PackageName Value="castle_engine_base"/>
       </Item2>
     </RequiredPackages>
-    <Units Count="18">
+    <Units Count="19">
       <Unit0>
         <Filename Value="castle_quake2_standalone.dpr"/>
         <IsPartOfProject Value="True"/>
@@ -119,40 +119,45 @@
         <UnitName Value="quakelight"/>
       </Unit10>
       <Unit11>
+        <Filename Value="code/quakemap.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="quakemap"/>
+      </Unit11>
+      <Unit12>
         <Filename Value="code/quakemd2.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="quakemd2"/>
-      </Unit11>
-      <Unit12>
+      </Unit12>
+      <Unit13>
         <Filename Value="code/quakemenu.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="quakemenu"/>
-      </Unit12>
-      <Unit13>
+      </Unit13>
+      <Unit14>
         <Filename Value="code/quakepak.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="quakepak"/>
-      </Unit13>
-      <Unit14>
+      </Unit14>
+      <Unit15>
         <Filename Value="code/quakepalette.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="quakepalette"/>
-      </Unit14>
-      <Unit15>
+      </Unit15>
+      <Unit16>
         <Filename Value="code/quakeparticles.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="quakeparticles"/>
-      </Unit15>
-      <Unit16>
+      </Unit16>
+      <Unit17>
         <Filename Value="code/quakesound.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="quakesound"/>
-      </Unit16>
-      <Unit17>
+      </Unit17>
+      <Unit18>
         <Filename Value="code/quakeworld.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="quakeworld"/>
-      </Unit17>
+      </Unit18>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

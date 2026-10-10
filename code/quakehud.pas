@@ -76,6 +76,9 @@ type
 
 implementation
 
+uses
+  CastleComponentSerialize;
+
 const
   { Quake 2 pics were drawn for 320x240; scale them up on the 1600x900 UI }
   PicScale = 3.0;
@@ -90,7 +93,9 @@ begin
   FillChar(FStats, SizeOf(FStats), 0);
   FStats.Health := 100;
 
+  { Children created in code are transient: not saved into designs }
   FMessageLabel := TCastleLabel.Create(Self);
+  FMessageLabel.SetTransient;
   FMessageLabel.Color := Vector4(0.3, 1.0, 0.3, 1.0);
   FMessageLabel.FontSize := 28;
   FMessageLabel.Alignment := hpMiddle;
@@ -99,6 +104,7 @@ begin
   InsertFront(FMessageLabel);
 
   FStatsLabel := TCastleLabel.Create(Self);
+  FStatsLabel.SetTransient;
   FStatsLabel.Color := Vector4(0.8, 0.8, 0.8, 0.85);
   FStatsLabel.Anchor(hpLeft, 16);
   FStatsLabel.Anchor(vpTop, -16);
@@ -351,4 +357,6 @@ begin
   end;
 end;
 
+initialization
+  RegisterSerializableComponent(TQuakeHud, 'Quake 2 HUD');
 end.

@@ -31,6 +31,8 @@ type
     procedure TriggerMuzzleFlash(const Position: TVector3);
 
     procedure Update(const SecondsPassed: Single);
+
+    property Bsp: TQuakeBsp read FBsp;
   end;
 
 { Convert Quake world coordinates to CGE world coordinates }

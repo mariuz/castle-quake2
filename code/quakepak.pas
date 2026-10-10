@@ -27,6 +27,8 @@ type
     FStreams: specialize TList<TMemoryStream>;
     FFilenames: TStringList;
     FEntries: TQuakePakEntryList;
+    { Normalized path -> index in FEntries, for O(1) lookups }
+    FIndex: specialize TDictionary<String, Integer>;
     FProtocolRegistered: Boolean;
     function FindEntryIndex(const APath: String): Integer;
   public
@@ -35,6 +37,9 @@ type
 
     { Add a PAK archive from file or castle-data URL. Returns true if successful. }
     function AddFile(const AUrlOrFilename: String): Boolean;
+
+    { Was this PAK URL / filename already added? }
+    function HasPak(const AUrlOrFilename: String): Boolean;
 
     { Check if a file exists in any loaded PAK. }
     function FileExists(const APath: String): Boolean;
@@ -95,6 +100,7 @@ begin
   FStreams := specialize TList<TMemoryStream>.Create;
   FFilenames := TStringList.Create;
   FEntries := TQuakePakEntryList.Create;
+  FIndex := specialize TDictionary<String, Integer>.Create;
   FProtocolRegistered := False;
 end;
 
@@ -109,6 +115,7 @@ begin
   FStreams.Free;
   FFilenames.Free;
   FEntries.Free;
+  FIndex.Free;
   inherited Destroy;
 end;
 
@@ -191,7 +198,7 @@ begin
     if ExistingIndex >= 0 then
       FEntries[ExistingIndex] := Entry
     else
-      FEntries.Add(Entry);
+      FIndex.AddOrSetValue(EntryName, FEntries.Add(Entry));
   end;
 
   WritelnLog('QuakePak', 'Loaded PAK "%s": %d files (total indexed: %d)',
@@ -199,16 +206,15 @@ begin
   Result := True;
 end;
 
-function TQuakePak.FindEntryIndex(const APath: String): Integer;
-var
-  Target: String;
-  I: Integer;
+function TQuakePak.HasPak(const AUrlOrFilename: String): Boolean;
 begin
-  Target := NormalizePath(APath);
-  for I := FEntries.Count - 1 downto 0 do
-    if FEntries[I].Path = Target then
-      Exit(I);
-  Result := -1;
+  Result := FFilenames.IndexOf(AUrlOrFilename) >= 0;
+end;
+
+function TQuakePak.FindEntryIndex(const APath: String): Integer;
+begin
+  if not FIndex.TryGetValue(NormalizePath(APath), Result) then
+    Result := -1;
 end;
 
 function TQuakePak.FileExists(const APath: String): Boolean;

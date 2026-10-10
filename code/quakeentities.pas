@@ -58,8 +58,12 @@ type
   end;
   PQuakeMonsterDef = ^TQuakeMonsterDef;
 
-  { Single active 3D pickup entity in the world }
-  TQuakePickup = class
+  { Single active 3D pickup entity in the world.
+    A TCastleBehavior of its Transform, inspectable in the CGE inspector. }
+  TQuakePickup = class(TCastleBehavior)
+  strict private
+    function GetItemName: String;
+    function GetEntityClass: String;
   public
     Def: PQuakeItemDef;
     Entity: TQuakeEntity;
@@ -68,10 +72,14 @@ type
     Origin: TVector3;
     RotationAngle: Single;
     Collected: Boolean;
-    constructor Create(const Parent: TCastleTransform; const ADef: PQuakeItemDef;
+    constructor CreatePickup(const AParent: TCastleTransform; const ADef: PQuakeItemDef;
       const AEntity: TQuakeEntity; const Pos: TVector3);
     destructor Destroy; override;
-    procedure Update(const SecondsPassed: Single);
+    procedure UpdatePickup(const SecondsPassed: Single);
+  published
+    property EntityClass: String read GetEntityClass;
+    property ItemName: String read GetItemName;
+    property IsCollected: Boolean read Collected;
   end;
 
   TQuakePickupList = specialize TObjectList<TQuakePickup>;
@@ -81,12 +89,14 @@ type
   TQuakeMonster = class;
   TMonsterAttackEvent = procedure(const Monster: TQuakeMonster) of object;
 
-  { Active 3D monster in the world }
-  TQuakeMonster = class
+  { Active 3D monster in the world.
+    A TCastleBehavior of its Transform, inspectable in the CGE inspector. }
+  TQuakeMonster = class(TCastleBehavior)
   private
     FLightTimer: Single;
     FSightTimer: Single;
     FFallSpeed: Single;
+    function GetEntityClass: String;
     procedure SetState(const NewState: TMonsterState);
     procedure StickToFloor(const SecondsPassed: Single);
   public
@@ -104,17 +114,24 @@ type
     Gibbed: Boolean;
     KillCounted: Boolean;
     OnAttack: TMonsterAttackEvent;
-    constructor Create(const Parent: TCastleTransform; const ADef: PQuakeMonsterDef;
+    constructor CreateMonster(const AParent: TCastleTransform; const ADef: PQuakeMonsterDef;
       const AEntity: TQuakeEntity; const Pos: TVector3; const Yaw: Single);
     destructor Destroy; override;
     { Eye position in CGE space }
     function EyePos: TVector3;
-    procedure Update(const SecondsPassed: Single; const PlayerPos: TVector3);
+    procedure UpdateAI(const SecondsPassed: Single; const PlayerPos: TVector3);
     procedure TakeDamage(const Dmg: Integer);
     procedure Alert;
     function IsAlive: Boolean;
     { Owns the scene: used to map ray hits back to monsters }
     function OwnsTransform(const T: TCastleTransform): Boolean;
+  published
+    property EntityClass: String read GetEntityClass;
+    property MonsterState: TMonsterState read State;
+    property HitPoints: Integer read Health;
+    property IsAlerted: Boolean read Alerted;
+    property SeesPlayer: Boolean read CanSeePlayer;
+    property Facing: Single read FacingAngle;
   end;
 
   TQuakeMonsterList = specialize TObjectList<TQuakeMonster>;
@@ -299,6 +316,16 @@ begin
     Result := 'sound/' + Def^.SoundDir + '/' + Name + '.wav';
 end;
 
+var
+  EntityCounter: Integer;
+
+{ Unique number for readable transform names in the inspector }
+function NextEntityNumber: Integer;
+begin
+  Inc(EntityCounter);
+  Result := EntityCounter;
+end;
+
 { Model scenes never block the player's shots against themselves or the
   ray casts used for floor detection; they are found by OwnsTransform. }
 procedure ConfigureDecorScene(const Scene: TCastleScene);
@@ -309,35 +336,49 @@ end;
 
 { TQuakePickup }
 
-constructor TQuakePickup.Create(const Parent: TCastleTransform; const ADef: PQuakeItemDef;
+constructor TQuakePickup.CreatePickup(const AParent: TCastleTransform; const ADef: PQuakeItemDef;
   const AEntity: TQuakeEntity; const Pos: TVector3);
 begin
-  inherited Create;
+  inherited Create(nil);
   Def := ADef;
   Entity := AEntity;
   Origin := Pos;
   RotationAngle := Random * 360;
 
   Transform := TCastleTransform.Create(nil);
+  Transform.Name := Format('Item%.3d_%s', [NextEntityNumber, Def^.ClassName]);
   Transform.Translation := Pos;
   Model := Md2Manager.CreateInstance(Def^.Model);
   if Model <> nil then
   begin
     ConfigureDecorScene(Model.Scene);
+    Model.Scene.Name := Transform.Name + '_Model';
     Model.SetTint(Lighting.SampleLight(Pos + Vector3(0, 8, 0)));
     Transform.Add(Model.Scene);
   end;
-  Parent.Add(Transform);
+  Transform.AddBehavior(Self);
+  AParent.Add(Transform);
 end;
 
 destructor TQuakePickup.Destroy;
 begin
-  Model.Free;
-  Transform.Free;
+  { BeforeDestruction already detached this behavior from Transform }
+  FreeAndNil(Model);
+  FreeAndNil(Transform);
   inherited Destroy;
 end;
 
-procedure TQuakePickup.Update(const SecondsPassed: Single);
+function TQuakePickup.GetItemName: String;
+begin
+  Result := Def^.Name;
+end;
+
+function TQuakePickup.GetEntityClass: String;
+begin
+  Result := Def^.ClassName;
+end;
+
+procedure TQuakePickup.UpdatePickup(const SecondsPassed: Single);
 begin
   Transform.Exists := not Collected;
   if Collected then
@@ -349,10 +390,10 @@ end;
 
 { TQuakeMonster }
 
-constructor TQuakeMonster.Create(const Parent: TCastleTransform; const ADef: PQuakeMonsterDef;
+constructor TQuakeMonster.CreateMonster(const AParent: TCastleTransform; const ADef: PQuakeMonsterDef;
   const AEntity: TQuakeEntity; const Pos: TVector3; const Yaw: Single);
 begin
-  inherited Create;
+  inherited Create(nil);
   Def := ADef;
   Entity := AEntity;
   Health := Def^.Health;
@@ -361,6 +402,7 @@ begin
   FSightTimer := Random * 0.2;
 
   Transform := TCastleTransform.Create(nil);
+  Transform.Name := Format('Monster%.3d_%s', [NextEntityNumber, Def^.ClassName]);
   Transform.Translation := Pos;
   Transform.Rotation := Vector4(0, 1, 0, DegToRad(Yaw));
   Transform.CollisionSphereRadius := 16;
@@ -368,20 +410,28 @@ begin
   Model := Md2Manager.CreateInstance(Def^.Model, Def^.Skin);
   if Model <> nil then
   begin
+    Model.Scene.Name := Transform.Name + '_Model';
     { Monsters block the player, and are found by ray casts (see OwnsTransform) }
     Model.Scene.Collides := True;
     Model.Scene.PreciseCollisions := False;
     Transform.Add(Model.Scene);
   end;
   SetState(msIdle);
-  Parent.Add(Transform);
+  Transform.AddBehavior(Self);
+  AParent.Add(Transform);
 end;
 
 destructor TQuakeMonster.Destroy;
 begin
-  Model.Free;
-  Transform.Free;
+  { BeforeDestruction already detached this behavior from Transform }
+  FreeAndNil(Model);
+  FreeAndNil(Transform);
   inherited Destroy;
+end;
+
+function TQuakeMonster.GetEntityClass: String;
+begin
+  Result := Def^.ClassName;
 end;
 
 function TQuakeMonster.EyePos: TVector3;
@@ -492,7 +542,7 @@ begin
   end;
 end;
 
-procedure TQuakeMonster.Update(const SecondsPassed: Single; const PlayerPos: TVector3);
+procedure TQuakeMonster.UpdateAI(const SecondsPassed: Single; const PlayerPos: TVector3);
 var
   Delta, MoveVec: TVector3;
   Dist, TargetYaw, Diff: Single;
@@ -604,6 +654,7 @@ begin
   Life := 5;
 
   Transform := TCastleTransform.Create(nil);
+  Transform.Name := Format('Projectile%.3d', [NextEntityNumber]);
   Transform.Translation := Pos;
   { Orient the model along the velocity (Quake models face +X) }
   Dir := Vel.Normalize;
