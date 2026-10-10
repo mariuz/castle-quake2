@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Castle Quake 2</title>
+  <meta name="description" content="Quake 2 levels, MD2 models, RGB lightmaps and gameplay rendered and played with Castle Game Engine.">
+  <style>
+    :root {
+      --bg: #0d0f12;
+      --panel: #171b22;
+      --panel-border: #323b47;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #e26a2c;
+      --accent-hover: #ff7d3b;
+      --accent-gold: #f5b642;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+    }
+    main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+    header { text-align: center; padding: 36px 0 20px; }
+    h1 {
+      font-size: clamp(2.4rem, 6vw, 4.2rem);
+      margin: 0;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+      text-transform: uppercase;
+      text-shadow: 0 0 24px rgba(226, 106, 44, 0.35);
+    }
+    header p { color: var(--muted); font-size: 1.2rem; margin: 10px 0 26px; }
+    .cta-container { margin: 18px 0; }
+    .cta {
+      display: inline-block; padding: 14px 30px; border-radius: 8px;
+      background: var(--accent); color: #fff; font-weight: 700; font-size: 1.2rem;
+      text-decoration: none; letter-spacing: 0.04em;
+      transition: background 0.2s, transform 0.1s;
+    }
+    .cta:hover { background: var(--accent-hover); transform: translateY(-1px); }
+    .cta.secondary {
+      background: var(--panel); border: 1px solid var(--panel-border);
+      color: var(--text); margin-left: 10px;
+    }
+    .cta.secondary:hover { background: #21262d; border-color: #484f58; }
+    .note { color: var(--muted); font-size: 0.95rem; margin-top: 14px; max-width: 800px; margin-left: auto; margin-right: auto; }
+    .hero { margin-top: 24px; }
+    .hero img { width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--panel-border); display: block; box-shadow: 0 8px 30px rgba(0,0,0,0.6); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-top: 16px; }
+    .grid img { width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--panel-border); display: block; box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
+    section { margin-top: 44px; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 10px; padding: 24px 28px; }
+    h2 { color: var(--accent-gold); margin-top: 0; margin-bottom: 12px; font-size: 1.5rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.95rem; margin-top: 12px; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--panel-border); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.05em; }
+    code { background: rgba(255, 255, 255, 0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    kbd {
+      background: #21262d; border: 1px solid #30363d; border-bottom-width: 2px;
+      border-radius: 4px; padding: 2px 7px; font-size: 0.9em; font-family: inherit;
+      color: var(--accent-gold); margin: 0 2px; display: inline-block;
+    }
+    footer { margin-top: 54px; color: var(--muted); font-size: 0.9rem; text-align: center; }
+    a { color: var(--accent-gold); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    ul { padding-left: 20px; }
+    li { margin-bottom: 6px; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Castle Quake 2</h1>
+    <p>Quake 2 levels and gameplay, rendered and played with <a href="https://castle-engine.io/">Castle Game Engine</a>. Ships with the Quake 2 shareware demo; loads a full <code>baseq2</code> install.</p>
+    <div class="cta-container">
+      <a class="cta" href="play/">Play in the browser</a>
+      <a class="cta secondary" href="https://github.com/mariuz/castle-quake2/releases">Download for Windows / Linux</a>
+    </div>
+    <p class="note">The browser version runs via WebAssembly and WebGL 2. Click the viewport to lock mouse look.</p>
+  </header>
+
+  <div class="hero">
+    <img src="docs/screenshot-demo1.png" alt="Castle Quake 2 at the start of demo1 with lightmaps, view weapon and the Quake 2 status bar">
+  </div>
+  <div class="grid">
+    <img src="docs/screenshot-soldier.png" alt="An enforcer lit by the map's lightmaps">
+    <img src="docs/screenshot-railgun.png" alt="Railgun trail and an enforcer in demo1">
+  </div>
+
+  <section>
+    <h2>Controls</h2>
+    <p>
+      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to move, mouse to look,
+      <kbd>Left Click</kbd> or <kbd>Ctrl</kbd> to fire,
+      <kbd>Space</kbd> to jump, <kbd>C</kbd> to crouch,
+      <kbd>E</kbd> to use doors and buttons,
+      <kbd>1</kbd>&ndash;<kbd>9</kbd>, <kbd>0</kbd> or the mouse wheel to switch weapons (Blaster &hellip; BFG10K),
+      <kbd>F1</kbd> for noclip, <kbd>F12</kbd> for a screenshot,
+      <kbd>~</kbd> for the console, <kbd>Esc</kbd> for the menu.
+    </p>
+  </section>
+
+  <section>
+    <h2>How Quake 2 maps onto Castle Game Engine</h2>
+    <table>
+      <thead>
+        <tr><th>Quake 2 system</th><th>Castle Game Engine implementation</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>BSP world (IBSP v38)</strong></td><td>Faces batched per WAL texture into <code>TIndexedTriangleSetNode</code> shapes in a <code>TCastleScene</code> with precise collisions.</td></tr>
+        <tr><td><strong>RGB lightmaps</strong></td><td>Packed into an atlas and applied with <code>TMultiTextureNode</code> (<code>MODULATE2X</code>); models are tinted with the light sampled from the BSP below them.</td></tr>
+        <tr><td><strong>Skybox</strong></td><td><code>env/*.tga</code> faces in a <code>TCastleBackground</code>.</td></tr>
+        <tr><td><strong>MD2 models</strong></td><td>Unwelded meshes with interpolated frame animation and PCX skins.</td></tr>
+        <tr><td><strong>Doors, plats, buttons, trains</strong></td><td>Brush models in <code>TCastleTransform</code>s driven by Quake 2 target / trigger chains.</td></tr>
+        <tr><td><strong>Weapons</strong></td><td>All 10 weapons; hitscan via <code>WorldRayCast</code>, projectiles, splash damage, railgun trails as <code>TBillboardNode</code> particles.</td></tr>
+        <tr><td><strong>Audio</strong></td><td>PAK WAVs through <code>TCastleSoundSource</code> for 3D positional sound.</td></tr>
+        <tr><td><strong>HUD</strong></td><td>Original <code>pics/*.pcx</code> numbers and icons drawn with <code>TDrawableImage</code>.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Game data</h2>
+    <ul>
+      <li><strong>Quake 2 demo</strong>: bundled (<code>demo1</code>&ndash;<code>demo3</code>), redistributed under id Software's demo license.</li>
+      <li><strong>Full Quake 2</strong>: put <code>baseq2/pak0.pak</code> (Steam / GOG / CD) next to the executable or pass <code>-basedir</code>.</li>
+    </ul>
+  </section>
+
+  <footer>
+    <p>
+      <a href="https://github.com/mariuz/castle-quake2">Source code on GitHub</a> &middot;
+      <a href="https://github.com/mariuz/castle-quake2/blob/main/docs/ARCHITECTURE.md">Architecture</a> &middot;
+      <a href="https://github.com/mariuz/castle-quake2/blob/main/docs/ROADMAP.md">Roadmap</a> &middot;
+      Built with <a href="https://castle-engine.io/">Castle Game Engine</a> and Free Pascal.
+      Quake is a registered trademark of id Software / ZeniMax Media.
+    </p>
+  </footer>
+</main>
+</body>
+</html>

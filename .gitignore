@@ -1,0 +1,24 @@
+# Castle Game Engine build output
+castle-engine-output/
+castle-auto-generated-resources.res
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.o
+*.ppu
+*.rsj
+*.or
+*.res
+*.lps
+*.zip
+*.tar.gz
+
+# Logs, test outputs and temporary files
+*.log
+run_log.txt
+test_output/
+
+# Linux / macOS executable
+/castle-quake2
