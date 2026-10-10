@@ -53,6 +53,7 @@ const
   CONTENTS_SLIME  = 16;
   CONTENTS_WATER  = 32;
   CONTENTS_LADDER = $20000000;
+  CONTENTS_PLAYERCLIP = $10000;
   MASK_LIQUID = CONTENTS_LAVA or CONTENTS_SLIME or CONTENTS_WATER;
 
 type
@@ -180,6 +181,7 @@ type
     FLeafs: TBSPLeafArray;
     { Planes of each ladder brush (point inside = behind all of them) }
     FLadderBrushes: array of array of Integer;
+    FClipBrushes: array of array of Integer;
     FVertices: TVector3Array;
     FEdges: TBSPEdgeArray;
     FSurfEdges: TSurfEdgeArray;
@@ -229,6 +231,10 @@ type
     { Contents (CONTENTS_* bits) of the BSP leaf containing a point
       (Quake coordinates), like Quake 2's CM_PointContents for the world. }
     function PointContents(const P: TVector3): Integer;
+
+    { Faces (convex polygons, Quake coordinates) of the player-clip brushes
+      that are not otherwise solid: invisible walls for collision. }
+    procedure GetClipBrushPolygons(const Polygons: Classes.TList);
 
     { Is the point (Quake coordinates) inside a ladder brush? Exact, unlike
       PointContents: ladders are detail brushes, which don't split leafs. }
@@ -762,7 +768,18 @@ begin
   Brushes := Pointer(Data + H^.Lumps[LUMP_BRUSHES].Offset);
   Sides := Pointer(Data + H^.Lumps[LUMP_BRUSHSIDES].Offset);
   SetLength(FLadderBrushes, 0);
+  SetLength(FClipBrushes, 0);
   for I := 0 to Count - 1 do
+  begin
+    if ((Brushes[I].Contents and CONTENTS_PLAYERCLIP) <> 0) and
+       ((Brushes[I].Contents and CONTENTS_SOLID) = 0) then
+    begin
+      SetLength(FClipBrushes, Length(FClipBrushes) + 1);
+      SetLength(FClipBrushes[High(FClipBrushes)], Brushes[I].NumSides);
+      for J := 0 to Brushes[I].NumSides - 1 do
+        if Brushes[I].FirstSide + J < SideCount then
+          FClipBrushes[High(FClipBrushes)][J] := Sides[Brushes[I].FirstSide + J].PlaneNum;
+    end;
     if (Brushes[I].Contents and CONTENTS_LADDER) <> 0 then
     begin
       SetLength(FLadderBrushes, Length(FLadderBrushes) + 1);
@@ -771,7 +788,72 @@ begin
         if Brushes[I].FirstSide + J < SideCount then
           FLadderBrushes[High(FLadderBrushes)][J] := Sides[Brushes[I].FirstSide + J].PlaneNum;
     end;
-  WritelnLog('QuakeBsp', '%d ladder brushes (of %d brushes)', [Length(FLadderBrushes), Count]);
+  end;
+  WritelnLog('QuakeBsp', '%d ladder brushes, %d player-clip brushes (of %d brushes)',
+    [Length(FLadderBrushes), Length(FClipBrushes), Count]);
+end;
+
+procedure TQuakeBsp.GetClipBrushPolygons(const Polygons: Classes.TList);
+
+  { Keep the part of Poly behind Plane (dot(n, p) - d <= 0) }
+  function ClipPolygon(const Poly: TVector3List; const Plane: TBSPPlane): TVector3List;
+  var
+    I: Integer;
+    A, B: TVector3;
+    DA, DB: Single;
+  begin
+    Result := TVector3List.Create;
+    for I := 0 to Poly.Count - 1 do
+    begin
+      A := Poly.L[I];
+      B := Poly.L[(I + 1) mod Poly.Count];
+      DA := TVector3.DotProduct(A, Plane.Normal) - Plane.Dist;
+      DB := TVector3.DotProduct(B, Plane.Normal) - Plane.Dist;
+      if DA <= 0.01 then
+        Result.Add(A);
+      if ((DA < -0.01) and (DB > 0.01)) or ((DA > 0.01) and (DB < -0.01)) then
+        Result.Add(A + (B - A) * (DA / (DA - DB)));
+    end;
+  end;
+
+var
+  B, I, J: Integer;
+  Plane: TBSPPlane;
+  N, U, V, Center: TVector3;
+  Poly, Clipped: TVector3List;
+const
+  Big = 65536;
+begin
+  for B := 0 to High(FClipBrushes) do
+    for I := 0 to High(FClipBrushes[B]) do
+    begin
+      Plane := FPlanes[FClipBrushes[B][I]];
+      N := Plane.Normal;
+      { A huge square on the plane, then clipped by the brush's other planes }
+      if Abs(N.Z) < 0.9 then
+        U := TVector3.CrossProduct(N, Vector3(0, 0, 1)).Normalize
+      else
+        U := TVector3.CrossProduct(N, Vector3(1, 0, 0)).Normalize;
+      V := TVector3.CrossProduct(N, U);
+      Center := N * Plane.Dist;
+      Poly := TVector3List.Create;
+      Poly.Add(Center - U * Big - V * Big);
+      Poly.Add(Center + U * Big - V * Big);
+      Poly.Add(Center + U * Big + V * Big);
+      Poly.Add(Center - U * Big + V * Big);
+      for J := 0 to High(FClipBrushes[B]) do
+      begin
+        if (J = I) or (Poly.Count < 3) then
+          Continue;
+        Clipped := ClipPolygon(Poly, FPlanes[FClipBrushes[B][J]]);
+        Poly.Free;
+        Poly := Clipped;
+      end;
+      if Poly.Count >= 3 then
+        Polygons.Add(Poly)
+      else
+        Poly.Free;
+    end;
 end;
 
 function TQuakeBsp.PointInLadder(const P: TVector3): Boolean;

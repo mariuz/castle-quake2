@@ -12,7 +12,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Liquids | Warped water / lava (`SURF_WARP`), contents | Non-solid liquid surfaces, point contents from BSP leafs, swimming, drowning, lava / slime damage, underwater tints | Warp shader. |
 | Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp and skins | Powerup shells, glow, bobbing items. |
 | Sprites | SP2 (BFG, explosions) | Billboard particles instead | SP2 loader. |
-| Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove essentials as `TQuakePlayerMovement` (friction, accel, air control, steps, crouch, jump pads, falling damage) | Exact box (not sphere) collision, player-clip brushes. |
+| Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove essentials as `TQuakePlayerMovement` (friction, accel, air control, steps, crouch, jump pads, falling damage) | Exact box (not sphere) collision. |
 | Weapons | 10 + hand grenades | 10 weapons | Hand grenades, chaingun spin-up, frame-accurate timing. |
 | Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses) | Sight / chase / attack / pain / death, 19 definitions | Pathing, ambush flag, dodging, attack frames, bosses. |
 | Props / effects | Barrels, banners, ships, lasers, splashes, explosion models | All of these used by the demo maps | Gib models with velocities, `misc_viper`, `target_blaster`. |
@@ -76,7 +76,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Pmove player physics: friction, acceleration, air control, steps, crouch, jump pads, falling damage
 - [x] Swimming, drowning, lava / slime damage, underwater tints
 - [x] Ladders (exact test against ladder brushes; they are detail brushes that don't split leafs)
-- [ ] Box-shaped player collision, player-clip brushes
+- [x] Player-clip brushes as invisible walls (polygons built from the brush planes)
+- [ ] Box-shaped player collision
 - [x] Monster steering around obstacles (±45° / ±90° detours) and ledge checks
 - [x] Attacks happen partway through the attack animation (wind-up; pain cancels the shot)
 - [ ] Medic revive, bosses, real pathfinding

@@ -170,6 +170,8 @@ type
     { Warped liquid surfaces: visible, but you swim through them and shots
       pass them, so they neither collide nor are pickable }
     FSceneLiquids: TCastleScene;
+    { Invisible walls from player-clip brushes (they have no faces) }
+    FScenePlayerClip: TCastleScene;
     { Shader effect warping liquid textures like Quake 2's EmitWaterPolys }
     FWarpEffect: TEffectNode;
     FWarpTime: TSFFloat;
@@ -185,6 +187,7 @@ type
     procedure BuildModelGeometry(const ModelIdx: Integer; const RootNode: TX3DRootNode;
       const SkyRoot: TX3DRootNode; const LiquidRoot: TX3DRootNode = nil);
     procedure SetupMovers(const Parent: TCastleTransform);
+    procedure BuildPlayerClip;
     procedure RegisterAnimNode(const TexName: String; const Node: TImageTextureNode);
   public
     constructor Create(const ABsp: TQuakeBsp);
@@ -976,6 +979,12 @@ begin
   FSceneLiquids.Name := 'Liquids';
   FSceneLiquids.Collides := False;
   FSceneLiquids.Pickable := False;
+  FScenePlayerClip := TCastleScene.Create(nil);
+  FScenePlayerClip.Name := 'PlayerClip';
+  FScenePlayerClip.PreciseCollisions := True;
+  FScenePlayerClip.Visible := False;
+  { Blocks walking, but shots and projectiles fly through, like Quake 2 }
+  FScenePlayerClip.Pickable := False;
 
   FWarpEffect := TEffectNode.Create;
   FWarpEffect.Language := slGLSL;
@@ -999,6 +1008,7 @@ begin
   FWorldTransform.Add(FSceneWorld);
   FWorldTransform.Add(FSceneSkyClip);
   FWorldTransform.Add(FSceneLiquids);
+  FWorldTransform.Add(FScenePlayerClip);
   FMovers := TQuakeMoverList.Create(True);
   FAnimTextures := TQuakeAnimTexList.Create(True);
   FScrollNodes := specialize TList<TTextureTransformNode>.Create;
@@ -1015,6 +1025,7 @@ begin
   FSceneWorld.Free;
   FSceneSkyClip.Free;
   FSceneLiquids.Free;
+  FScenePlayerClip.Free;
   FWorldTransform.Free;
   { All scenes using the effect are gone now }
   FWarpEffect.FreeIfUnused;
@@ -1317,6 +1328,7 @@ begin
   FSceneWorld.Load(RootWorld, True);
   FSceneSkyClip.Load(RootSky, True);
   FSceneLiquids.Load(RootLiquids, True);
+  BuildPlayerClip;
   Parent.Add(FWorldTransform);
   SetupMovers(Parent);
   WritelnLog('QuakeGeometry', '%d animated texture chains, %d flowing surfaces, %d light-style faces, sky "%s"',
@@ -1330,6 +1342,59 @@ begin
   Result := 0;
   for Dyn in FDynLightmaps do
     Result := Result + Dyn.FaceCount;
+end;
+
+procedure TQuakeGeometry.BuildPlayerClip;
+var
+  Polygons: Classes.TList;
+  I, J, Base: Integer;
+  Poly: TVector3List;
+  Coords: TVector3List;
+  Indices: TInt32List;
+  Coord: TCoordinateNode;
+  Geom: TIndexedTriangleSetNode;
+  Shape: TShapeNode;
+  Root: TX3DRootNode;
+begin
+  Polygons := Classes.TList.Create;
+  Coords := TVector3List.Create;
+  Indices := TInt32List.Create;
+  try
+    FBsp.GetClipBrushPolygons(Polygons);
+    for I := 0 to Polygons.Count - 1 do
+    begin
+      Poly := TVector3List(Polygons[I]);
+      Base := Coords.Count;
+      for J := 0 to Poly.Count - 1 do
+        Coords.Add(QuakeToCge(Poly.L[J]));
+      for J := 1 to Poly.Count - 2 do
+      begin
+        Indices.Add(Base);
+        Indices.Add(Base + J);
+        Indices.Add(Base + J + 1);
+      end;
+      Poly.Free;
+    end;
+    Root := TX3DRootNode.Create;
+    if Coords.Count > 0 then
+    begin
+      Coord := TCoordinateNode.Create;
+      Coord.SetPoint(Coords);
+      Geom := TIndexedTriangleSetNode.Create;
+      Geom.Coord := Coord;
+      Geom.SetIndex(Indices);
+      Geom.Solid := False;
+      Shape := TShapeNode.Create;
+      Shape.Geometry := Geom;
+      Root.AddChildren(Shape);
+    end;
+    FScenePlayerClip.Load(Root, True);
+    WritelnLog('QuakeGeometry', 'Player clip: %d triangles', [Indices.Count div 3]);
+  finally
+    Polygons.Free;
+    Coords.Free;
+    Indices.Free;
+  end;
 end;
 
 procedure TQuakeGeometry.FireTargets(const ATarget: String);
