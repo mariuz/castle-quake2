@@ -33,7 +33,7 @@ Demo script actions: `W:sec` wait, `S` screenshot (logs FPS + camera), `X` fire,
 
 `tests/` is a console CGE project (search path `../code/`): `cd tests; castle-engine compile; ./castle-quake2-tests` — 44 checks of the parsers against the demo PAK (counts, contents, ladders, LightPoint, MD2 animations, SP2). Run from `tests/` (it loads `../data/paks/quake2_demo.pak`). CI runs it before the autotests.
 
-Screenshot comparison: `./castle-quake2-tests --compare reference/<map>.png <shot>.png <diff>.png [limit]` averages both images into 64x36 blocks and fails when the mean channel difference is above 3 (identical runs: < 1; a 10° turn: ~6). CI compares a `W:0.5,S,Q` shot of each demo map with `tests/reference/*.png`. After an intended visual change, delete the affected reference and commit the one CI creates (artifact `autotest-screenshots`, `compare/reference/`), (references are made by CI's Mesa renderer; Windows shots differ by up to ~4, so don't regenerate them locally).
+Screenshot comparison: `./castle-quake2-tests --compare reference/<map>.png <shot>.png <diff>.png [limit]` averages both images into 64x36 blocks and fails when the mean channel difference is above 3 (identical runs: < 1; a 10° turn: ~6). CI compares a `W:2,S,Q` shot (after the player has settled) of each demo map with `tests/reference/*.png`. After an intended visual change, delete the affected reference and commit the one CI creates (artifact `autotest-screenshots`, `compare/reference/`), (references are made by CI's Mesa renderer; Windows shots differ by up to ~4, so don't regenerate them locally).
 
 ## CGE editor integration
 
