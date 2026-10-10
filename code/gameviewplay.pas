@@ -486,6 +486,10 @@ begin
   else
   if Action = 'V' then { Log mover states }
   begin
+    WritelnLog('Demo', 'Player at %s water level %d on ground %s velocity %s health %d', [
+      MainViewport.Camera.Translation.ToString, PlayerMovement.WaterLevel,
+      BoolToStr(PlayerMovement.OnGround, True), PlayerMovement.Velocity.ToString,
+      FWorld.Stats.Health]);
     for J := 0 to FWorld.Geometry.Movers.Count - 1 do
       WritelnLog('Demo', 'Mover %d %s state %d progress %.2f exists %s', [J,
         FWorld.Geometry.Movers[J].Entity.ClassName, Ord(FWorld.Geometry.Movers[J].State),

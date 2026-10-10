@@ -66,6 +66,11 @@ type
     FUseDepth: Integer;
     FHelpPrimary, FHelpSecondary: String;
     FPlayer: TQuakePlayerMovement;
+    FLastWaterLevel: Integer;
+    FAirFinished: Single;
+    FLiquidDamageTimer: Single;
+    function PlayerPointContents(const CgePos: TVector3): Integer;
+    procedure UpdateLiquids(const SecondsPassed: Single);
     procedure SetPlayer(const Value: TQuakePlayerMovement);
     procedure PlayerFallDamage(const Damage: Integer);
     procedure PlayerLanded(Sender: TObject);
@@ -1704,6 +1709,7 @@ begin
   end;
 
   UpdateTimersAndLasers(SecondsPassed);
+  UpdateLiquids(SecondsPassed);
   UpdateProjectiles(SecondsPassed);
   Particles.Update(SecondsPassed);
   Lighting.Update(SecondsPassed);
@@ -1842,7 +1848,79 @@ begin
   if FPlayer <> nil then
   begin
     FPlayer.OnFallDamage := @PlayerFallDamage;
+    FPlayer.OnPointContents := @PlayerPointContents;
     FPlayer.OnLandSound := @PlayerLanded;
+  end;
+end;
+
+function TQuakeWorld.PlayerPointContents(const CgePos: TVector3): Integer;
+begin
+  if FBsp = nil then
+    Result := 0
+  else
+    Result := FBsp.PointContents(CgeToQuake(CgePos));
+end;
+
+procedure TQuakeWorld.UpdateLiquids(const SecondsPassed: Single);
+var
+  Level, WType: Integer;
+begin
+  if (FPlayer = nil) or FDead then
+    Exit;
+  Level := FPlayer.WaterLevel;
+  WType := FPlayer.WaterType;
+
+  { P_WorldEffects: enter / leave sounds }
+  if (FLastWaterLevel = 0) and (Level > 0) then
+  begin
+    if (WType and CONTENTS_LAVA) <> 0 then
+      Sounds.Play('sound/player/lava_in.wav')
+    else
+      Sounds.Play('sound/player/watr_in.wav');
+  end else
+  if (FLastWaterLevel > 0) and (Level = 0) then
+    Sounds.Play('sound/player/watr_out.wav')
+  else
+  if (FLastWaterLevel < 3) and (Level = 3) then
+    Sounds.Play('sound/player/watr_un.wav');
+  if (FLastWaterLevel = 3) and (Level < 3) and (FAirFinished < FTime + 7) then
+    Sounds.Play('sound/player/gasp1.wav');
+
+  { Drowning: 12 seconds of air, then 2 damage per second, increasing }
+  if Level < 3 then
+    FAirFinished := FTime + 12
+  else
+  if FTime > FAirFinished then
+  begin
+    FLiquidDamageTimer := FLiquidDamageTimer - SecondsPassed;
+    if FLiquidDamageTimer <= 0 then
+    begin
+      FLiquidDamageTimer := 1;
+      DamagePlayer(Min(15, 2 + 2 * Trunc(FTime - FAirFinished)), FPlayerPos);
+    end;
+  end;
+
+  { Lava: 30 per second per water level; slime: 10 (no enviro suit here) }
+  if (Level > 0) and ((WType and (CONTENTS_LAVA or CONTENTS_SLIME)) <> 0) then
+  begin
+    FLiquidDamageTimer := FLiquidDamageTimer - SecondsPassed;
+    if FLiquidDamageTimer <= 0 then
+    begin
+      FLiquidDamageTimer := 0.1;
+      if (WType and CONTENTS_LAVA) <> 0 then
+        DamagePlayer(3 * Level, FPlayerPos)
+      else
+        DamagePlayer(Level, FPlayerPos);
+    end;
+  end;
+
+  FLastWaterLevel := Level;
+  if FHud <> nil then
+  begin
+    if Level = 3 then
+      FHud.UnderwaterType := WType
+    else
+      FHud.UnderwaterType := 0;
   end;
 end;
 

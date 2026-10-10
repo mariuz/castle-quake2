@@ -165,6 +165,9 @@ type
     FBsp: TQuakeBsp;
     FSceneWorld: TCastleScene;
     FSceneSkyClip: TCastleScene;
+    { Warped liquid surfaces: visible, but you swim through them and shots
+      pass them, so they neither collide nor are pickable }
+    FSceneLiquids: TCastleScene;
     FWorldTransform: TCastleTransform;
     FMovers: TQuakeMoverList;
     FAnimTextures: TQuakeAnimTexList;
@@ -175,7 +178,7 @@ type
     FSkyName: String;
     FOnFireTargets: TQuakeFireTargetsEvent;
     procedure BuildModelGeometry(const ModelIdx: Integer; const RootNode: TX3DRootNode;
-      const SkyRoot: TX3DRootNode);
+      const SkyRoot: TX3DRootNode; const LiquidRoot: TX3DRootNode = nil);
     procedure SetupMovers(const Parent: TCastleTransform);
     procedure RegisterAnimNode(const TexName: String; const Node: TImageTextureNode);
   public
@@ -942,10 +945,15 @@ begin
   FSceneSkyClip.Name := 'SkyClip';
   FSceneSkyClip.PreciseCollisions := True;
   FSceneSkyClip.Visible := False;
+  FSceneLiquids := TCastleScene.Create(nil);
+  FSceneLiquids.Name := 'Liquids';
+  FSceneLiquids.Collides := False;
+  FSceneLiquids.Pickable := False;
   FWorldTransform := TCastleTransform.Create(nil);
   FWorldTransform.Name := 'World';
   FWorldTransform.Add(FSceneWorld);
   FWorldTransform.Add(FSceneSkyClip);
+  FWorldTransform.Add(FSceneLiquids);
   FMovers := TQuakeMoverList.Create(True);
   FAnimTextures := TQuakeAnimTexList.Create(True);
   FScrollNodes := specialize TList<TTextureTransformNode>.Create;
@@ -961,6 +969,7 @@ begin
   FMovers.Free;
   FSceneWorld.Free;
   FSceneSkyClip.Free;
+  FSceneLiquids.Free;
   FWorldTransform.Free;
   FAnimTextures.Free;
   FScrollNodes.Free;
@@ -998,7 +1007,7 @@ begin
 end;
 
 procedure TQuakeGeometry.BuildModelGeometry(const ModelIdx: Integer; const RootNode: TX3DRootNode;
-  const SkyRoot: TX3DRootNode);
+  const SkyRoot: TX3DRootNode; const LiquidRoot: TX3DRootNode);
 var
   Batches: TQuakeGeomBatchDict;
   SkyBatch: TQuakeGeomBatch;
@@ -1165,7 +1174,10 @@ begin
         Batch.CreateNodes(LightmapTex);
       if Batch.Shape = nil then
         Continue;
-      RootNode.AddChildren(Batch.Shape);
+      if (LiquidRoot <> nil) and ((Batch.Flags and SURF_WARP) <> 0) then
+        LiquidRoot.AddChildren(Batch.Shape)
+      else
+        RootNode.AddChildren(Batch.Shape);
       RegisterAnimNode(Batch.TextureName, Batch.TexNode);
       if Batch.ScrollNode <> nil then
         FScrollNodes.Add(Batch.ScrollNode);
@@ -1247,13 +1259,15 @@ end;
 
 procedure TQuakeGeometry.AddToWorld(const Parent: TCastleTransform);
 var
-  RootWorld, RootSky: TX3DRootNode;
+  RootWorld, RootSky, RootLiquids: TX3DRootNode;
 begin
   RootWorld := TX3DRootNode.Create;
   RootSky := TX3DRootNode.Create;
-  BuildModelGeometry(0, RootWorld, RootSky);
+  RootLiquids := TX3DRootNode.Create;
+  BuildModelGeometry(0, RootWorld, RootSky, RootLiquids);
   FSceneWorld.Load(RootWorld, True);
   FSceneSkyClip.Load(RootSky, True);
+  FSceneLiquids.Load(RootLiquids, True);
   Parent.Add(FWorldTransform);
   SetupMovers(Parent);
   WritelnLog('QuakeGeometry', '%d animated texture chains, %d flowing surfaces, %d light-style faces, sky "%s"',

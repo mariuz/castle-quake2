@@ -9,7 +9,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | World geometry | IBSP v38, PVS / areaportal culling | X3D batches per texture, CGE frustum culling | PVS / area culling on big maps. |
 | Lighting | RGB lightmaps, 4 styles, dynamic lights | All 4 styles (animated, switchable, ramps), `MODULATE2X`, LightPoint model tint | Dynamic lights on the world; light styles on model tint. |
 | Sky | Skybox, `skyrotate`, `skyaxis` | Skybox via `TCastleBackground` | Sky rotation. |
-| Liquids | Warped water / lava (`SURF_WARP`), contents | Static texture, blended when `TRANS33/66` | Warp shader, swimming, liquid damage. |
+| Liquids | Warped water / lava (`SURF_WARP`), contents | Non-solid liquid surfaces, point contents from BSP leafs, swimming, drowning, lava / slime damage, underwater tints | Warp shader. |
 | Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp and skins | Powerup shells, glow, bobbing items. |
 | Sprites | SP2 (BFG, explosions) | Billboard particles instead | SP2 loader. |
 | Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove essentials as `TQuakePlayerMovement` (friction, accel, air control, steps, crouch, jump pads, falling damage) | Swimming, ladders, exact box (not sphere) collision. |
@@ -60,7 +60,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Quake 2 HUD pics, crosshair, screen blends
 - [x] Light styles: flickering, switchable lights, `target_lightramp`
 - [ ] Dynamic lights on world surfaces (shader effect)
-- [ ] Water warp shader and underwater screen effect
+- [x] Underwater screen tints
+- [ ] Water warp shader
 - [x] Explosion model, soft particles, splashes, lasers, props (barrels, banners, ships, dish, corpses)
 - [x] Gibs and barrel debris with gravity and bounce
 - [ ] SP2 sprites, powerup shells
@@ -72,7 +73,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Target / trigger chains, counters, keys, secrets, goals, teleporters, level changes
 - [x] Monster sight / chase / attack / pain / death
 - [x] Pmove player physics: friction, acceleration, air control, steps, crouch, jump pads, falling damage
-- [ ] Swimming, ladders, box-shaped player collision
+- [x] Swimming, drowning, lava / slime damage, underwater tints
+- [ ] Ladders, box-shaped player collision
 - [x] Monster steering around obstacles (±45° / ±90° detours) and ledge checks
 - [ ] Per-frame attack timing, medic revive, bosses, real pathfinding
 - [ ] Hand grenades, chaingun spin-up

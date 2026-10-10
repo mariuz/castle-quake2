@@ -17,6 +17,8 @@ uses
 
 type
   TFallDamageEvent = procedure(const Damage: Integer) of object;
+  { Contents (Quake CONTENTS_* bits) at a CGE position }
+  TPointContentsEvent = function(const CgePos: TVector3): Integer of object;
 
   TQuakePlayerMovement = class(TCastleBehavior)
   strict private
@@ -29,7 +31,13 @@ type
     FRunSpeed, FCrouchSpeed, FAccelerate, FAirAccelerate, FFriction, FStopSpeed: Single;
     FGravity, FJumpSpeed, FStepSize, FRadius, FEyeHeight, FCrouchEyeHeight: Single;
     FOnFallDamage: TFallDamageEvent;
+    FOnPointContents: TPointContentsEvent;
+    FWaterLevel: Integer;
+    FWaterType: Integer;
+    FWaterSpeed, FWaterFriction, FWaterSink: Single;
     FOnLandSound: TNotifyEvent;
+    procedure CategorizeWater(const Pos: TVector3);
+    procedure WaterMove(const Pos: TVector3; const SecondsPassed: Single);
     function EyeHeight: Single;
     { Height of the eye above the ground below Pos (huge if no ground) }
     function HeightAboveGround(const Pos: TVector3): Single;
@@ -53,7 +61,13 @@ type
     property Velocity: TVector3 read FVelocity write FVelocity;
     property OnFallDamage: TFallDamageEvent read FOnFallDamage write FOnFallDamage;
     property OnLandSound: TNotifyEvent read FOnLandSound write FOnLandSound;
+    property OnPointContents: TPointContentsEvent read FOnPointContents write FOnPointContents;
+    { Contents bits of the liquid the player is in (0 = none) }
+    property WaterType: Integer read FWaterType;
   published
+    { 0 = not in liquid, 1 = feet, 2 = waist (swimming), 3 = eyes under }
+    property WaterLevel: Integer read FWaterLevel;
+    property WaterSpeed: Single read FWaterSpeed write FWaterSpeed;
     { Read-only state, visible in the inspector }
     property OnGround: Boolean read FOnGround;
     property Crouched: Boolean read FCrouched;
@@ -97,6 +111,9 @@ begin
   FRadius := 14;
   FEyeHeight := 46;       { origin 24 above the feet + viewheight 22 }
   FCrouchEyeHeight := 22; { ducked: origin 24 + viewheight -2 }
+  FWaterSpeed := 400 * 0.5; { pm_waterspeed, halved by PM_WaterMove }
+  FWaterFriction := 1;
+  FWaterSink := 60;
 end;
 
 function TQuakePlayerMovement.PropertySections(const PropertyName: String): TPropertySections;
@@ -211,6 +228,71 @@ begin
   FVelocity.Z := 0;
 end;
 
+procedure TQuakePlayerMovement.CategorizeWater(const Pos: TVector3);
+const
+  MASK_LIQUID = 8 or 16 or 32;
+var
+  Feet: TVector3;
+  C: Integer;
+begin
+  { PM_CatagorizePosition: sample at the feet, waist and eyes }
+  FWaterLevel := 0;
+  FWaterType := 0;
+  if not Assigned(FOnPointContents) then
+    Exit;
+  Feet := Pos - Vector3(0, EyeHeight - 1, 0);
+  C := FOnPointContents(Feet);
+  if (C and MASK_LIQUID) = 0 then
+    Exit;
+  FWaterType := C and MASK_LIQUID;
+  FWaterLevel := 1;
+  if (FOnPointContents(Pos - Vector3(0, EyeHeight / 2, 0)) and MASK_LIQUID) <> 0 then
+  begin
+    FWaterLevel := 2;
+    if (FOnPointContents(Pos) and MASK_LIQUID) <> 0 then
+      FWaterLevel := 3;
+  end;
+end;
+
+procedure TQuakePlayerMovement.WaterMove(const Pos: TVector3; const SecondsPassed: Single);
+var
+  Dir, Right, WishVel, NewPos: TVector3;
+  WishSpeed, Speed, Drop: Single;
+begin
+  { PM_WaterMove: swim in the view direction (including pitch), sink slowly
+    without input, jump swims up }
+  Dir := Parent.Direction;
+  Right := TVector3.CrossProduct(Dir, Vector3(0, 1, 0)).Normalize;
+  WishVel := Dir * InputForward + Right * InputSide;
+  if InputJump then
+    WishVel.Y := WishVel.Y + 1;
+  if (InputForward = 0) and (InputSide = 0) and not InputJump then
+    WishVel.Y := WishVel.Y - FWaterSink / FWaterSpeed;
+  WishSpeed := Min(1, WishVel.Length) * FWaterSpeed;
+
+  { Water friction, scaled by how deep we are }
+  Speed := FVelocity.Length;
+  if Speed > 0.1 then
+  begin
+    Drop := Speed * FFriction * FWaterFriction * FWaterLevel * SecondsPassed * 0.5;
+    FVelocity := FVelocity * (Max(0, Speed - Drop) / Speed);
+  end;
+  if WishVel.Length > 0.001 then
+    Accelerate(WishVel.Normalize, WishSpeed, FAccelerate, SecondsPassed);
+
+  NewPos := TryHorizontalMove(Pos, Vector3(FVelocity.X, 0, FVelocity.Z) * SecondsPassed);
+  if not World.WorldSegmentCollision(NewPos, NewPos + Vector3(0, FVelocity.Y * SecondsPassed +
+    Sign(FVelocity.Y) * FRadius, 0)) then
+    NewPos.Y := NewPos.Y + FVelocity.Y * SecondsPassed
+  else
+    FVelocity.Y := 0;
+  { Don't sink through the bottom }
+  if HeightAboveGround(NewPos) < EyeHeight then
+    NewPos.Y := NewPos.Y + (EyeHeight - HeightAboveGround(NewPos));
+  Parent.Translation := NewPos;
+  FOnGround := False;
+end;
+
 procedure TQuakePlayerMovement.Update(const SecondsPassed: Single; var RemoveMe: TRemoveType);
 var
   Pos, Forward, Right, WishVel, WishDir, NewPos: TVector3;
@@ -240,6 +322,13 @@ begin
   else
   if FCrouched and not World.WorldSegmentCollision(Pos, Pos + Vector3(0, FEyeHeight - FCrouchEyeHeight + 8, 0)) then
     FCrouched := False;
+
+  CategorizeWater(Pos);
+  if FWaterLevel >= 2 then
+  begin
+    WaterMove(Pos, Dt);
+    Exit;
+  end;
 
   Above := HeightAboveGround(Pos);
   WasOnGround := FOnGround;

@@ -50,6 +50,7 @@ type
     FWeaponIcon, FAmmoIcon: String;
     FKeyIcons: TStringList;
     FHelpVisible: Boolean;
+    FUnderwaterType: Integer;
     FIntermission: Boolean;
     FLevelName, FHelpPrimary, FHelpSecondary: String;
     procedure RenderHelpComputer;
@@ -78,6 +79,8 @@ type
     property CrosshairVisible: Boolean read FCrosshairVisible write FCrosshairVisible;
     { Quake 2 help computer (F1): objectives and level statistics }
     property HelpVisible: Boolean read FHelpVisible write FHelpVisible;
+    { Contents bits of the liquid the eye is in (screen tint), 0 = none }
+    property UnderwaterType: Integer read FUnderwaterType write FUnderwaterType;
     { End of level: the help computer layout as a mission summary, no status bar }
     property Intermission: Boolean read FIntermission write FIntermission;
     property LevelName: String read FLevelName write FLevelName;
@@ -326,6 +329,16 @@ begin
     RenderHelpComputer;
     Exit;
   end;
+
+  { Quake 2 V_CalcBlend liquid tints: lava, slime, water }
+  if (FUnderwaterType and 8) <> 0 then
+    DrawRectangle(R, Vector4(1.0, 0.3, 0.0, 0.6))
+  else
+  if (FUnderwaterType and 16) <> 0 then
+    DrawRectangle(R, Vector4(0.0, 0.1, 0.05, 0.6))
+  else
+  if (FUnderwaterType and 32) <> 0 then
+    DrawRectangle(R, Vector4(0.5, 0.3, 0.2, 0.4));
 
   { Screen blends: damage (red), quad (blue), pickup (yellow) }
   if FDamageFlash > 0 then

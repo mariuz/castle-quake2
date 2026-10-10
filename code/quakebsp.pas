@@ -46,6 +46,14 @@ const
   SURF_FLOWING = $40;  { scroll towards angle }
   SURF_NODRAW  = $80;  { don't bother referencing the texture }
 
+  { Brush / leaf contents }
+  CONTENTS_SOLID  = 1;
+  CONTENTS_WINDOW = 2;
+  CONTENTS_LAVA   = 8;
+  CONTENTS_SLIME  = 16;
+  CONTENTS_WATER  = 32;
+  MASK_LIQUID = CONTENTS_LAVA or CONTENTS_SLIME or CONTENTS_WATER;
+
 type
   TBSPLump = packed record
     Offset: Cardinal;
@@ -70,6 +78,15 @@ type
     Mins, Maxs: array[0..2] of SmallInt;
     FirstFace: Word;
     NumFaces: Word;
+  end;
+
+  TBSPLeaf = packed record
+    Contents: LongInt;
+    Cluster: SmallInt;
+    Area: SmallInt;
+    Mins, Maxs: array[0..2] of SmallInt;
+    FirstLeafFace, NumLeafFaces: Word;
+    FirstLeafBrush, NumLeafBrushes: Word;
   end;
 
   TBSPEdge = packed record
@@ -144,6 +161,7 @@ type
 
   TBSPPlaneArray = array of TBSPPlane;
   TBSPNodeArray = array of TBSPNode;
+  TBSPLeafArray = array of TBSPLeaf;
   TVector3Array = array of TVector3;
   TBSPEdgeArray = array of TBSPEdge;
   TSurfEdgeArray = array of LongInt;
@@ -158,6 +176,7 @@ type
     FMapName: String;
     FPlanes: TBSPPlaneArray;
     FNodes: TBSPNodeArray;
+    FLeafs: TBSPLeafArray;
     FVertices: TVector3Array;
     FEdges: TBSPEdgeArray;
     FSurfEdges: TSurfEdgeArray;
@@ -202,6 +221,10 @@ type
     { Sample the baked lightmap below a point, like Quake 2's R_LightPoint.
       Returns 0..1 RGB (unmodulated); False when nothing below was found. }
     function LightPoint(const P: TVector3; out Color: TVector3): Boolean;
+
+    { Contents (CONTENTS_* bits) of the BSP leaf containing a point
+      (Quake coordinates), like Quake 2's CM_PointContents for the world. }
+    function PointContents(const P: TVector3): Integer;
 
     { Find first entity by classname }
     function FindEntity(const AClassName: String): TQuakeEntity;
@@ -541,6 +564,10 @@ begin
   if Length(FNodes) > 0 then
     Move((Data + Hdr.Lumps[LUMP_NODES].Offset)^, FNodes[0], Length(FNodes) * SizeOf(TBSPNode));
 
+  SetLength(FLeafs, Hdr.Lumps[LUMP_LEAFS].Length div SizeOf(TBSPLeaf));
+  if Length(FLeafs) > 0 then
+    Move((Data + Hdr.Lumps[LUMP_LEAFS].Offset)^, FLeafs[0], Length(FLeafs) * SizeOf(TBSPLeaf));
+
   SetLength(FVertices, Hdr.Lumps[LUMP_VERTICES].Length div SizeOf(TVector3));
   if Length(FVertices) > 0 then
     Move((Data + Hdr.Lumps[LUMP_VERTICES].Offset)^, FVertices[0], Length(FVertices) * SizeOf(TVector3));
@@ -703,6 +730,28 @@ begin
   if (Length(FNodes) = 0) or (Length(FModels) = 0) or (Length(FLightmaps) = 0) then
     Exit(False);
   Result := RecursiveLightPoint(FModels[0].HeadNode, P, P - Vector3(0, 0, 2048), Color) >= 0;
+end;
+
+function TQuakeBsp.PointContents(const P: TVector3): Integer;
+var
+  Node: Integer;
+  Plane: TBSPPlane;
+begin
+  Result := 0;
+  if (Length(FModels) = 0) or (Length(FNodes) = 0) then
+    Exit;
+  Node := FModels[0].HeadNode;
+  while Node >= 0 do
+  begin
+    Plane := FPlanes[FNodes[Node].PlaneNum];
+    if TVector3.DotProduct(P, Plane.Normal) - Plane.Dist >= 0 then
+      Node := FNodes[Node].Children[0]
+    else
+      Node := FNodes[Node].Children[1];
+  end;
+  Node := -(Node + 1);
+  if Node < Length(FLeafs) then
+    Result := FLeafs[Node].Contents;
 end;
 
 function TQuakeBsp.FindEntity(const AClassName: String): TQuakeEntity;
