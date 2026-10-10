@@ -427,6 +427,11 @@ function MonsterSound(const Def: PQuakeMonsterDef; const Name: String): String;
 function MonsterIdleSound(const Def: PQuakeMonsterDef): String;
 function MonsterSearchSound(const Def: PQuakeMonsterDef): String;
 
+var
+  { Quake 2 "notarget" cheat: monsters don't notice the player
+    (also keeps the CI screenshot comparison free of combat) }
+  NoTarget: Boolean = False;
+
 implementation
 
 function FindItemDef(const AClassName: String): PQuakeItemDef;
@@ -684,7 +689,7 @@ end;
 
 procedure TQuakeMonster.Alert;
 begin
-  if Alerted or not IsAlive then
+  if Alerted or not IsAlive or NoTarget then
     Exit;
   Alerted := True;
   Sounds.PlayAt(MonsterSound(Def, Def^.SightSound), Transform);
@@ -938,7 +943,7 @@ begin
           Sounds.PlayAt(MonsterSearchSound(Def), Transform, 1, 2);
       end;
     end;
-    if (not Alerted) and CanSeePlayer and (Dist < 1200) then
+    if (not Alerted) and CanSeePlayer and (Dist < 1200) and not NoTarget then
       Alert;
   end;
 

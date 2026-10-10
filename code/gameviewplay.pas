@@ -858,6 +858,11 @@ begin
   if (Cmd = 'give') and (Args = 'invulnerability') then
     FWorld.CheatPowerup(False)
   else
+  if Cmd = 'notarget' then
+  begin
+    NoTarget := not NoTarget;
+    Hud.ShowMessage('notarget ' + Iff(NoTarget, 'ON', 'OFF'), 2);
+  end else
   if Cmd = 'noclip' then
   begin
     if FCameraMode = cmFirstPerson then
@@ -880,6 +885,7 @@ begin
     Console.Print('  give all     - All weapons, ammo, armor, keys');
     Console.Print('  give quad / give invulnerability - Powerups');
     Console.Print('  noclip       - Toggle fly mode');
+    Console.Print('  notarget     - Monsters ignore you');
     Console.Print('  fps          - Toggle FPS counter');
     Console.Print('  markers      - Show player starts, paths and triggers');
     Console.Print('  save [name]  - Save the game (F6 = quick save)');
