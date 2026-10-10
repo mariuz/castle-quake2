@@ -10,7 +10,7 @@ uses
   SysUtils, Classes, Generics.Collections, Math,
   CastleVectors, CastleScene, CastleTransform, X3DNodes, CastleLog,
   CastleImages, CastleUtils, CastleBoxes, CastleRenderOptions, X3DFields,
-  QuakeBsp, QuakePalette, QuakeLight, QuakeSound;
+  QuakeBsp, QuakePalette, QuakeLight, QuakeSound, CastleSoundEngine, CastleBehaviors;
 
 type
   { A batch of polygons sharing one texture and surface flags }
@@ -112,6 +112,9 @@ type
     { True for doors with no targetname: they open when the player comes near }
     AutoOpen: Boolean;
     StartSound, EndSound: String;
+    { Looping sound while moving (Quake 2 moveinfo.sound_middle) }
+    MoveSound: String;
+    MoveSource: TCastleSoundSource;
     { Train path }
     TrainCorner: TQuakeEntity;
     TrainFrom, TrainTo: TVector3;
@@ -132,6 +135,7 @@ type
     procedure PlayerOnTop;
     { Re-apply Transform from State / Progress / SpinAngle (after loading a save) }
     procedure ApplyPose;
+    procedure UpdateMoveSound(const Moving: Boolean);
   published
     property EntityClass: String read GetEntityClass;
     property EntityTargetName: String read TargetName;
@@ -644,6 +648,7 @@ begin
     begin
       StartSound := 'sound/doors/dr1_strt.wav';
       EndSound := 'sound/doors/dr1_end.wav';
+      MoveSound := 'sound/doors/dr1_mid.wav';
     end;
   end else
   if CName = 'func_door_rotating' then
@@ -671,6 +676,7 @@ begin
     AutoOpen := (TargetName = '') and (Health = 0);
     StartSound := 'sound/doors/dr1_strt.wav';
     EndSound := 'sound/doors/dr1_end.wav';
+    MoveSound := 'sound/doors/dr1_mid.wav';
   end else
   if CName = 'func_plat' then
   begin
@@ -687,6 +693,7 @@ begin
     WaitTime := 3;
     StartSound := 'sound/plats/pt1_strt.wav';
     EndSound := 'sound/plats/pt1_end.wav';
+    MoveSound := 'sound/plats/pt1_mid.wav';
     if TargetName = '' then
     begin
       { Start at the bottom: swap so "start" = bottom }
@@ -733,8 +740,34 @@ begin
     Transform.Rotation := Vector4(RotAxis, Angle1);
 end;
 
+procedure TQuakeMover.UpdateMoveSound(const Moving: Boolean);
+var
+  Snd: TCastleSound;
+begin
+  if MoveSound = '' then
+    Exit;
+  if Moving and (MoveSource = nil) then
+  begin
+    Snd := Sounds.SpatialSound(MoveSound, 1);
+    if Snd = nil then
+    begin
+      MoveSound := '';
+      Exit;
+    end;
+    MoveSource := TCastleSoundSource.Create(nil);
+    MoveSource.SoundPlaying := False;
+    MoveSource.Sound := Snd;
+    { Play from the middle of the brush (its transform origin may be far away) }
+    MoveSource.Spatial := True;
+    Transform.AddBehavior(MoveSource);
+  end;
+  if (MoveSource <> nil) and (MoveSource.SoundPlaying <> Moving) then
+    MoveSource.SoundPlaying := Moving;
+end;
+
 destructor TQuakeMover.Destroy;
 begin
+  FreeAndNil(MoveSource);
   { BeforeDestruction already detached this behavior from Transform }
   FreeAndNil(Scene);
   FreeAndNil(Transform);
@@ -911,6 +944,7 @@ begin
       end;
     else
       begin
+        UpdateMoveSound(State in [msToEnd, msToStart]);
         if MoveLength <= 0 then
           Step := 1
         else
