@@ -68,6 +68,8 @@ type
     FPlayer: TQuakePlayerMovement;
     { Quake 2 game.serverflags: cross-level trigger bits, kept across maps of a unit }
     FServerFlags: Integer;
+    { States of levels left through a changelevel in the current unit, by map name }
+    FLevelStates: TJSONObject;
     FLastWaterLevel: Integer;
     FAirFinished: Single;
     FLiquidDamageTimer: Single;
@@ -150,7 +152,8 @@ type
     { Savegame: the whole level state (the map must already be loaded for
       LoadState). The view adds the camera. }
     function SaveState: TJSONObject;
-    procedure LoadState(const Obj: TJSONObject);
+    { IncludePlayer = False restores only the level (revisiting a level of the unit) }
+    procedure LoadState(const Obj: TJSONObject; const IncludePlayer: Boolean = True);
 
     { info_player_intermission camera (CGE position, Quake yaw / pitch).
       False if the map has none. }
@@ -230,6 +233,7 @@ begin
   FDelayed := specialize TList<TDelayedTarget>.Create;
   FCounters := specialize TDictionary<TQuakeEntity, Integer>.Create;
   FKeyIcons := TStringList.Create;
+  FLevelStates := TJSONObject.Create;
   FWeaponTransform := TCastleTransform.Create(nil);
   FWeaponModelSlot := -1;
   ResetStats;
@@ -251,6 +255,7 @@ begin
   FDelayed.Free;
   FCounters.Free;
   FKeyIcons.Free;
+  FLevelStates.Free;
   inherited Destroy;
 end;
 
@@ -514,6 +519,7 @@ end;
 
 function TQuakeWorld.LoadMap(const AMapName: String): Boolean;
 var
+  RestoreRemembered: Boolean;
   MapName, SpawnName, MapPath: String;
   P: Integer;
   World: TQuakeEntity;
@@ -542,6 +548,19 @@ begin
     WritelnWarning('QuakeWorld', 'Map "%s" not found', [MapPath]);
     Exit;
   end;
+
+  { Quake 2 units: leaving a level through a changelevel remembers its state
+    for when the player comes back; a "*map" starts a new unit (forget all) }
+  if Pos('*', AMapName) = 1 then
+    FLevelStates.Clear
+  else
+  if FLevelExited and (FBsp <> nil) then
+  begin
+    if FLevelStates.IndexOfName(FBsp.MapName) >= 0 then
+      FLevelStates.Delete(FBsp.MapName);
+    FLevelStates.Add(FBsp.MapName, SaveState);
+  end;
+  RestoreRemembered := FLevelExited;
 
   ClearLevel;
   FLevelExited := False;
@@ -572,6 +591,11 @@ begin
   FGeometry.OnFireTargets := @UseTargets;
 
   SpawnEntities(SpawnName);
+  if RestoreRemembered and (FLevelStates.IndexOfName(FBsp.MapName) >= 0) then
+  begin
+    LoadState(FLevelStates.Objects[FBsp.MapName], False);
+    WritelnLog('QuakeWorld', 'Restored remembered state of "%s"', [FBsp.MapName]);
+  end;
   UpdateWeaponModel;
   PlayWeaponAnim('active', False);
 
@@ -1994,7 +2018,7 @@ begin
   Result.Add('lightStyles', Arr);
 end;
 
-procedure TQuakeWorld.LoadState(const Obj: TJSONObject);
+procedure TQuakeWorld.LoadState(const Obj: TJSONObject; const IncludePlayer: Boolean);
 var
   O: TJSONObject;
   Arr: TJSONArray;
@@ -2005,6 +2029,14 @@ var
   Key: String;
 begin
   O := Obj.Get('player', TJSONObject(nil));
+  if (O <> nil) and not IncludePlayer then
+  begin
+    { Level counters belong to the level }
+    FStats.Kills := O.Get('kills', 0);
+    FStats.Secrets := O.Get('secrets', 0);
+    FStats.Goals := O.Get('goals', 0);
+    O := nil;
+  end;
   if O <> nil then
   begin
     FStats.Health := O.Get('health', FStats.Health);
@@ -2144,8 +2176,11 @@ begin
     for I := 0 to Min(Arr.Count, 31) - 1 do
       Lighting.SetStyle(32 + I, Arr.Strings[I]);
 
-  { Pending events from before the save are not restored }
-  FDelayed.Clear;
+  { Pending events from before a save are not restored. When revisiting a
+    level, keep the ones scheduled at spawn: Quake 2's ReadLevel re-arms
+    target_crosslevel_target the same way. }
+  if IncludePlayer then
+    FDelayed.Clear;
   FProjectiles.Clear;
 end;
 
