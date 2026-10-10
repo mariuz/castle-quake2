@@ -5,13 +5,13 @@
   See https://castle-engine.io/project_manifest for documentation of this file.
 
   editor_units: units with components registered for the CGE editor
-  (TQuakeMap, TQuakeHud, TQuakeConsole, TQuakeMenu). Use
+  (TQuakeMap, TQuakePlayerMovement, TQuakeHud, TQuakeConsole, TQuakeMenu). Use
   "Project -> Restart Editor (With Custom Components)" to see them.
 -->
 <project name="castle-quake2"
   standalone_source="castle_quake2_standalone.dpr"
   game_units="GameInitialize"
-  editor_units="QuakeMap, QuakeHud, QuakeConsole, QuakeMenu"
+  editor_units="QuakeMap, QuakePlayer, QuakeHud, QuakeConsole, QuakeMenu"
   qualified_name="io.castleengine.castlequake2"
   caption="Castle Quake 2"
   author="castle-quake2"

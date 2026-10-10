@@ -15,6 +15,12 @@
           {
             "$$ClassName" : "TCastleCamera",
             "Name" : "Camera",
+            "$Behaviors" : [
+              {
+                "$$ClassName" : "TQuakePlayerMovement",
+                "Name" : "PlayerMovement"
+              }
+            ],
             "ProjectionNear" : 2.0000000000000000E+000,
             "Perspective" : {
               "$$ClassName" : "TCastlePerspective",

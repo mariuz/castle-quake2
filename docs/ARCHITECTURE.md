@@ -45,7 +45,11 @@ Quake: X east, Y north, Z up. CGE: Y up.
 
 - `CGE = (Quake.X, Quake.Z, -Quake.Y)` (`QuakeToCge`), determinant +1, so windings are preserved.
 - A Quake yaw `a` (0 = east, 90 = north) is a CGE rotation of `a` around +Y; the facing vector is `(cos a, 0, -sin a)` (`YawToCgeDir`).
-- Quake 2 player: origin 24 above the feet, eye 22 above the origin → `PreferredHeight = 46`, `ClimbHeight = 18`, `MoveSpeed = 300`.
+- Quake 2 player: origin 24 above the feet, eye 22 above the origin → eye height 46 (22 when crouched), 18-unit steps, 300 u/s run.
+
+### Player movement
+
+`TQuakePlayerMovement` (unit `QuakePlayer`) is a `TCastleBehavior` of the camera that ports the core of Quake 2's `pmove.c`: `PM_Friction` (stop speed 100, friction 6), `PM_Accelerate` (10 on the ground, 1 in the air), gravity 800, jump 270 (needs the key released in between), crouching. Collision uses CGE's world queries: `WorldMoveAllowed` with wall sliding for a sphere at the eye, plus `WorldHeight` below the new position to step up stairs (≤ 18 units), refuse higher obstacles, stick to the ground going down and land. Landing speed gives Quake 2's falling damage (`delta = v² × 0.0001`, damage `(delta − 30) / 2`). `trigger_push` sets the velocity to `movedir × speed × 10`. `TCastleWalkNavigation` keeps only mouse look (its movement inputs are cleared).
 
 ---
 

@@ -9,7 +9,7 @@ interface
 uses
   SysUtils, Classes, Math, Generics.Collections,
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes,
-  QuakePak, QuakeBsp, QuakeGeometry, QuakeMap, QuakeMd2, QuakeLight, QuakeSound, QuakeHud,
+  QuakePak, QuakeBsp, QuakeGeometry, QuakeMap, QuakeMd2, QuakePlayer, QuakeLight, QuakeSound, QuakeHud,
   QuakeParticles, QuakeEntities;
 
 const
@@ -65,6 +65,10 @@ type
     FKeyIcons: TStringList;
     FUseDepth: Integer;
     FHelpPrimary, FHelpSecondary: String;
+    FPlayer: TQuakePlayerMovement;
+    procedure SetPlayer(const Value: TQuakePlayerMovement);
+    procedure PlayerFallDamage(const Damage: Integer);
+    procedure PlayerLanded(Sender: TObject);
     procedure ResetStats;
     procedure ChooseSpawnPoint(const SpawnName: String);
     procedure SpawnEntities(const SpawnName: String);
@@ -141,6 +145,8 @@ type
     function IntermissionSpot(out Pos: TVector3; out Yaw, Pitch: Single): Boolean;
 
     property Hud: TQuakeHud read FHud write FHud;
+    { Player movement (pmove), for falling damage and jump pads; may be nil }
+    property Player: TQuakePlayerMovement read FPlayer write SetPlayer;
     property Stats: TQuakePlayerStats read FStats;
     property SpawnPoint: TVector3 read FSpawnPoint;
     property SpawnAngle: Single read FSpawnAngle;
@@ -1194,8 +1200,15 @@ begin
     end else
     if CName = 'trigger_push' then
     begin
-      { Jump pads / wind: handled as a short upward boost by the view }
-      Trig.Cooldown := 0.5;
+      { Quake 2 trigger_push: velocity = movedir * speed * 10 (speed default 1000) }
+      if FPlayer <> nil then
+        FPlayer.Velocity := EntityMoveDir(Trig.Entity) * Trig.Entity.GetFloat('speed', 1000) * 10;
+      Sounds.Play('sound/misc/windfly.wav');
+      { PUSH_ONCE = 1 }
+      if (Trig.Entity.SpawnFlags and 1) <> 0 then
+        Trig.Enabled := False
+      else
+        Trig.Cooldown := 0.1;
     end;
   end;
 end;
@@ -1821,6 +1834,30 @@ begin
   Pitch := A.X;
   Yaw := A.Y;
   Result := True;
+end;
+
+procedure TQuakeWorld.SetPlayer(const Value: TQuakePlayerMovement);
+begin
+  FPlayer := Value;
+  if FPlayer <> nil then
+  begin
+    FPlayer.OnFallDamage := @PlayerFallDamage;
+    FPlayer.OnLandSound := @PlayerLanded;
+  end;
+end;
+
+procedure TQuakeWorld.PlayerFallDamage(const Damage: Integer);
+begin
+  if Damage >= 10 then
+    Sounds.Play('sound/player/male/fall1.wav')
+  else
+    Sounds.Play('sound/player/male/fall2.wav');
+  DamagePlayer(Damage, FPlayerPos);
+end;
+
+procedure TQuakeWorld.PlayerLanded(Sender: TObject);
+begin
+  Sounds.Play('sound/player/land1.wav');
 end;
 
 procedure TQuakeWorld.TeleportDone;

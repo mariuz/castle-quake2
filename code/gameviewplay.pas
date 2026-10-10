@@ -14,7 +14,8 @@ uses
   CastleViewport, CastleCameras, CastleTransform, CastleColors, CastleLog,
   CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound,
-  QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap;
+  QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap,
+  QuakePlayer;
 
 type
   TCameraMode = (cmFirstPerson, cmNoclip);
@@ -29,6 +30,9 @@ type
       buffer, so the gun never sticks into walls (like Quake 2's depth hack) }
     WeaponViewport: TCastleViewport;
     WalkNavigation: TCastleWalkNavigation;
+    { Quake 2 pmove (behavior of Camera); WalkNavigation only does mouse look
+      while it's enabled }
+    PlayerMovement: TQuakePlayerMovement;
     Background: TCastleBackground;
     QuakeMap: TQuakeMap;
     Hud: TQuakeHud;
@@ -50,6 +54,11 @@ type
     FDemoFireHeld: Boolean;
     FIntermission: Boolean;
     FIntermissionTime: Single;
+    { Demo script movement: hold forward / side input until FDemoMoveTime runs out }
+    FDemoMoveForward, FDemoMoveSide: Single;
+    FDemoMoveTime: Single;
+    FDemoJump: Boolean;
+    procedure UpdateMovementInput(const SecondsPassed: Single);
     procedure BeginIntermission;
     procedure EndIntermission;
     procedure SetupSky(const SkyName: String);
@@ -104,7 +113,8 @@ end;
 procedure TViewPlay.SetCameraMode(const Mode: TCameraMode);
 begin
   FCameraMode := Mode;
-  WalkNavigation.Gravity := Mode = cmFirstPerson;
+  WalkNavigation.Gravity := (Mode = cmFirstPerson) and not PlayerMovement.Active;
+  PlayerMovement.Noclip := Mode = cmNoclip;
   { Autotests must not depend on where the desktop mouse happens to be }
   WalkNavigation.MouseLook := FAutoTestMap = '';
   if Mode = cmNoclip then
@@ -196,10 +206,22 @@ begin
 
   { Settings that are not published (so not in the design) }
   WalkNavigation.FallingEffect := False; { Quake doesn't roll the camera when falling }
+  if PlayerMovement.Active then
+  begin
+    { pmove moves the player; the navigation only turns the view }
+    WalkNavigation.Gravity := False;
+    WalkNavigation.Input_Forward.MakeClear;
+    WalkNavigation.Input_Backward.MakeClear;
+    WalkNavigation.Input_LeftStrafe.MakeClear;
+    WalkNavigation.Input_RightStrafe.MakeClear;
+    WalkNavigation.Input_Jump.MakeClear;
+    WalkNavigation.Input_Crouch.MakeClear;
+  end;
 
   FWorld := TQuakeWorld.Create(MainViewport.Items, QuakeMap);
   FWorld.AttachWeaponToCamera(WeaponViewport.Camera);
   FWorld.Hud := Hud;
+  FWorld.Player := PlayerMovement;
   Particles.SetParent(MainViewport.Items);
   Console.OnCommand := @HandleConsoleCommand;
   Menu.OnMenuAction := @HandleMenuAction;
@@ -230,6 +252,44 @@ end;
 procedure TViewPlay.PlaceCamera(const Pos: TVector3; const YawDeg: Single);
 begin
   MainViewport.Camera.SetWorldView(Pos, YawToCgeDir(YawDeg), Vector3(0, 1, 0));
+  PlayerMovement.ResetVelocity;
+end;
+
+procedure TViewPlay.UpdateMovementInput(const SecondsPassed: Single);
+var
+  Typing: Boolean;
+begin
+  Typing := Console.IsOpen or Menu.Exists or FIntermission or FWorld.Dead;
+  PlayerMovement.InputForward := 0;
+  PlayerMovement.InputSide := 0;
+  PlayerMovement.InputJump := False;
+  PlayerMovement.InputCrouch := False;
+  if not Typing then
+  begin
+    if Container.Pressed[keyW] or Container.Pressed[keyArrowUp] then
+      PlayerMovement.InputForward := PlayerMovement.InputForward + 1;
+    if Container.Pressed[keyS] or Container.Pressed[keyArrowDown] then
+      PlayerMovement.InputForward := PlayerMovement.InputForward - 1;
+    if Container.Pressed[keyD] then
+      PlayerMovement.InputSide := PlayerMovement.InputSide + 1;
+    if Container.Pressed[keyA] then
+      PlayerMovement.InputSide := PlayerMovement.InputSide - 1;
+    PlayerMovement.InputJump := Container.Pressed[keySpace];
+    PlayerMovement.InputCrouch := Container.Pressed[keyC];
+  end;
+  { Scripted movement for autotests }
+  if FDemoMoveTime > 0 then
+  begin
+    FDemoMoveTime := FDemoMoveTime - SecondsPassed;
+    PlayerMovement.InputForward := FDemoMoveForward;
+    PlayerMovement.InputSide := FDemoMoveSide;
+  end;
+  if FDemoJump then
+  begin
+    PlayerMovement.InputJump := True;
+    FDemoJump := False;
+  end;
+  PlayerMovement.Suspended := FWorld.Dead or FIntermission;
 end;
 
 procedure TViewPlay.LoadLevel(const AMapName: String);
@@ -356,6 +416,23 @@ begin
       TVector3.CrossProduct(Dir, Vector3(0, 1, 0)));
     MainViewport.Camera.SetWorldView(MainViewport.Camera.Translation, Dir, Vector3(0, 1, 0));
   end else
+  if Action = 'GO' then { Hold movement input: "GO:forward side seconds", e.g. GO:1 0 2 }
+  begin
+    J := 0;
+    for Cmd in Param.Split([' ']) do
+      if Cmd <> '' then
+      begin
+        case J of
+          0: FDemoMoveForward := StrToFloatDef(Cmd, 0);
+          1: FDemoMoveSide := StrToFloatDef(Cmd, 0);
+          2: FDemoMoveTime := StrToFloatDef(Cmd, 1);
+        end;
+        Inc(J);
+      end;
+  end else
+  if Action = 'J' then { Jump }
+    FDemoJump := True
+  else
   if Action = 'M' then { Move along camera direction, with collisions }
   begin
     Val := StrToFloatDef(Param, 50.0);
@@ -558,6 +635,7 @@ begin
     Exit;
   end;
 
+  UpdateMovementInput(SecondsPassed);
   FWorld.Update(SecondsPassed, MainViewport.Camera.Translation, MainViewport.Camera.Direction);
   WalkNavigation.Exists := not FWorld.Dead;
 

@@ -12,7 +12,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Liquids | Warped water / lava (`SURF_WARP`), contents | Static texture, blended when `TRANS33/66` | Warp shader, swimming, liquid damage. |
 | Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp and skins | Powerup shells, glow, bobbing items. |
 | Sprites | SP2 (BFG, explosions) | Billboard particles instead | SP2 loader. |
-| Player physics | Pmove (air control, water, ladders, crouch slide) | `TCastleWalkNavigation` (walk, jump, crouch, noclip) | Pmove port, jump pads, ladders, falling damage. |
+| Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove essentials as `TQuakePlayerMovement` (friction, accel, air control, steps, crouch, jump pads, falling damage) | Swimming, ladders, exact box (not sphere) collision. |
 | Weapons | 10 + hand grenades | 10 weapons | Hand grenades, chaingun spin-up, frame-accurate timing. |
 | Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses) | Sight / chase / attack / pain / death, 19 definitions | Pathing, ambush flag, dodging, attack frames, bosses. |
 | Props / effects | Barrels, banners, ships, lasers, splashes, explosion models | All of these used by the demo maps | Gib models with velocities, `misc_viper`, `target_blaster`. |
@@ -23,7 +23,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 ## Suggested improvements (prioritised)
 
 ### 1. Feel of the game (highest impact)
-- **Port Quake 2 `pmove`** as a custom `TCastleNavigation` descendant: friction, acceleration, air control, step-up / step-down, water and ladders, crouch, and `trigger_push` jump pads (base maps rely on them). Today `TCastleWalkNavigation` makes movement feel "floaty" and pads are ignored.
+- ~~Port Quake 2 `pmove`~~ — essentials done (`TQuakePlayerMovement`); still missing: water, ladders, and colliding with a box instead of the eye sphere + ground height test.
 - **Per-frame weapon and monster timing** driven by MD2 frame indices (Quake 2 fires on specific animation frames), instead of cooldown timers.
 - **Monster navigation**: wall-follow / step-around when `Move` is blocked, ledge checks so monsters don't walk off cliffs, `ambush` spawnflag, dodge from rockets.
 - ~~Help computer (F1) and intermission~~ — done.
@@ -71,7 +71,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Doors, rotating doors, plats, buttons, trains, rotating brushes, explosives
 - [x] Target / trigger chains, counters, keys, secrets, goals, teleporters, level changes
 - [x] Monster sight / chase / attack / pain / death
-- [ ] Pmove player physics (jump pads, ladders, swimming, falling damage)
+- [x] Pmove player physics: friction, acceleration, air control, steps, crouch, jump pads, falling damage
+- [ ] Swimming, ladders, box-shaped player collision
 - [x] Monster steering around obstacles (±45° / ±90° detours) and ledge checks
 - [ ] Per-frame attack timing, medic revive, bosses, real pathfinding
 - [ ] Hand grenades, chaingun spin-up
