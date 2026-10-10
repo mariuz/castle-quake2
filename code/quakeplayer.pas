@@ -36,7 +36,12 @@ type
     FWaterType: Integer;
     FWaterSpeed, FWaterFriction, FWaterSink: Single;
     FOnLandSound: TNotifyEvent;
+    FOnLadder: Boolean;
     procedure CategorizeWater(const Pos: TVector3);
+    { A ladder brush right in front of the player (PM_CatagorizePosition's
+      ladder trace, done with point contents) }
+    function TouchingLadder(const Pos: TVector3): Boolean;
+    procedure LadderMove(const Pos: TVector3; const SecondsPassed: Single);
     procedure WaterMove(const Pos: TVector3; const SecondsPassed: Single);
     function EyeHeight: Single;
     { Height of the eye above the ground below Pos (huge if no ground) }
@@ -67,6 +72,7 @@ type
   published
     { 0 = not in liquid, 1 = feet, 2 = waist (swimming), 3 = eyes under }
     property WaterLevel: Integer read FWaterLevel;
+    property OnLadder: Boolean read FOnLadder;
     property WaterSpeed: Single read FWaterSpeed write FWaterSpeed;
     { Read-only state, visible in the inspector }
     property OnGround: Boolean read FOnGround;
@@ -293,6 +299,87 @@ begin
   FOnGround := False;
 end;
 
+function TQuakePlayerMovement.TouchingLadder(const Pos: TVector3): Boolean;
+const
+  CONTENTS_LADDER = $20000000;
+var
+  Forward, Probe: TVector3;
+  Heights: array[0..1] of Single;
+  Dists: array[0..3] of Single;
+  I, J: Integer;
+begin
+  Result := False;
+  if not Assigned(FOnPointContents) then
+    Exit;
+  Forward := Vector3(Parent.Direction.X, 0, Parent.Direction.Z);
+  if Forward.Length < 0.001 then
+    Exit;
+  Forward := Forward.Normalize;
+  { Probe just beyond the collision sphere, at waist and at the eyes }
+  { Ladders are usually thin player-clip brushes (no visible faces), so check
+    at the player and at a few distances ahead }
+  Heights[0] := EyeHeight / 2;
+  Heights[1] := 4;
+  Dists[0] := 0;
+  Dists[1] := 8;
+  Dists[2] := FRadius + 2;
+  Dists[3] := FRadius + 8;
+  for I := 0 to High(Heights) do
+    for J := 0 to High(Dists) do
+    begin
+      Probe := Pos + Forward * Dists[J] - Vector3(0, Heights[I], 0);
+      if (FOnPointContents(Probe) and CONTENTS_LADDER) <> 0 then
+        Exit(True);
+    end;
+end;
+
+procedure TQuakePlayerMovement.LadderMove(const Pos: TVector3; const SecondsPassed: Single);
+const
+  ClimbSpeed = 200;
+  SinPitch15 = 0.2588;
+var
+  Dir, Forward, Right, WishVel, NewPos: TVector3;
+  WantY, Above: Single;
+begin
+  { PM_AirMove ladder rules: forward + looking up climbs, forward + looking
+    down descends, jump / crouch climb / descend; no gravity; slow sideways }
+  Dir := Parent.Direction;
+  if (InputForward > 0) and (Dir.Y >= SinPitch15) then
+    WantY := ClimbSpeed
+  else
+  if (InputForward > 0) and (Dir.Y <= -SinPitch15) then
+    WantY := -ClimbSpeed
+  else
+  if InputJump then
+    WantY := ClimbSpeed
+  else
+  if InputCrouch then
+    WantY := -ClimbSpeed
+  else
+    WantY := 0;
+
+  Forward := Vector3(Dir.X, 0, Dir.Z).Normalize;
+  Right := TVector3.CrossProduct(Forward, Vector3(0, 1, 0)).Normalize;
+  WishVel := (Forward * InputForward + Right * InputSide) * FRunSpeed;
+  FVelocity.X := EnsureRange(WishVel.X, -25, 25);
+  FVelocity.Z := EnsureRange(WishVel.Z, -25, 25);
+  FVelocity.Y := WantY;
+
+  NewPos := TryHorizontalMove(Pos, Vector3(FVelocity.X, 0, FVelocity.Z) * SecondsPassed);
+  if FVelocity.Y > 0 then
+  begin
+    if not World.WorldSegmentCollision(NewPos, NewPos + Vector3(0, FVelocity.Y * SecondsPassed + FRadius, 0)) then
+      NewPos.Y := NewPos.Y + FVelocity.Y * SecondsPassed;
+  end else
+  if FVelocity.Y < 0 then
+  begin
+    Above := HeightAboveGround(NewPos);
+    NewPos.Y := NewPos.Y - Min(-FVelocity.Y * SecondsPassed, Max(0, Above - EyeHeight));
+  end;
+  Parent.Translation := NewPos;
+  FOnGround := HeightAboveGround(NewPos) <= EyeHeight + 2;
+end;
+
 procedure TQuakePlayerMovement.Update(const SecondsPassed: Single; var RemoveMe: TRemoveType);
 var
   Pos, Forward, Right, WishVel, WishDir, NewPos: TVector3;
@@ -327,6 +414,14 @@ begin
   if FWaterLevel >= 2 then
   begin
     WaterMove(Pos, Dt);
+    Exit;
+  end;
+
+  { On a ladder unless just standing at its foot without input }
+  FOnLadder := TouchingLadder(Pos);
+  if FOnLadder and ((InputForward <> 0) or InputJump or InputCrouch or not FOnGround) then
+  begin
+    LadderMove(Pos, Dt);
     Exit;
   end;
 

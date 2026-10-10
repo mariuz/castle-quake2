@@ -52,6 +52,7 @@ const
   CONTENTS_LAVA   = 8;
   CONTENTS_SLIME  = 16;
   CONTENTS_WATER  = 32;
+  CONTENTS_LADDER = $20000000;
   MASK_LIQUID = CONTENTS_LAVA or CONTENTS_SLIME or CONTENTS_WATER;
 
 type
@@ -177,6 +178,8 @@ type
     FPlanes: TBSPPlaneArray;
     FNodes: TBSPNodeArray;
     FLeafs: TBSPLeafArray;
+    { Planes of each ladder brush (point inside = behind all of them) }
+    FLadderBrushes: array of array of Integer;
     FVertices: TVector3Array;
     FEdges: TBSPEdgeArray;
     FSurfEdges: TSurfEdgeArray;
@@ -192,6 +195,7 @@ type
     function GetModelCount: Integer; inline;
     procedure ParseEntities(const Text: String);
     procedure LoadTextures;
+    procedure LoadLadderBrushes(const Data: PByte; const Hdr: Pointer);
     procedure ComputeExtents;
     function RecursiveLightPoint(const NodeIdx: Integer; const Start, Stop: TVector3;
       out Color: TVector3): Integer;
@@ -225,6 +229,10 @@ type
     { Contents (CONTENTS_* bits) of the BSP leaf containing a point
       (Quake coordinates), like Quake 2's CM_PointContents for the world. }
     function PointContents(const P: TVector3): Integer;
+
+    { Is the point (Quake coordinates) inside a ladder brush? Exact, unlike
+      PointContents: ladders are detail brushes, which don't split leafs. }
+    function PointInLadder(const P: TVector3): Boolean;
 
     { Find first entity by classname }
     function FindEntity(const AClassName: String): TQuakeEntity;
@@ -598,6 +606,7 @@ begin
 
   LoadTextures;
   ComputeExtents;
+  LoadLadderBrushes(Data, @Hdr);
 
   WritelnLog('QuakeBsp', 'Loaded map "%s": %d faces, %d vertices, %d texinfos, %d models, %d entities',
     [AMapPath, Length(FFaces), Length(FVertices), Length(FTexInfos), Length(FModels), FEntities.Count]);
@@ -730,6 +739,63 @@ begin
   if (Length(FNodes) = 0) or (Length(FModels) = 0) or (Length(FLightmaps) = 0) then
     Exit(False);
   Result := RecursiveLightPoint(FModels[0].HeadNode, P, P - Vector3(0, 0, 2048), Color) >= 0;
+end;
+
+procedure TQuakeBsp.LoadLadderBrushes(const Data: PByte; const Hdr: Pointer);
+type
+  TBSPBrush = packed record
+    FirstSide, NumSides, Contents: LongInt;
+  end;
+  TBSPBrushSide = packed record
+    PlaneNum: Word;
+    TexInfo: SmallInt;
+  end;
+var
+  H: ^TBSPHeader;
+  Brushes: ^TBSPBrush;
+  Sides: ^TBSPBrushSide;
+  I, J, Count, SideCount: Integer;
+begin
+  H := Hdr;
+  Count := H^.Lumps[LUMP_BRUSHES].Length div SizeOf(TBSPBrush);
+  SideCount := H^.Lumps[LUMP_BRUSHSIDES].Length div SizeOf(TBSPBrushSide);
+  Brushes := Pointer(Data + H^.Lumps[LUMP_BRUSHES].Offset);
+  Sides := Pointer(Data + H^.Lumps[LUMP_BRUSHSIDES].Offset);
+  SetLength(FLadderBrushes, 0);
+  for I := 0 to Count - 1 do
+    if (Brushes[I].Contents and CONTENTS_LADDER) <> 0 then
+    begin
+      SetLength(FLadderBrushes, Length(FLadderBrushes) + 1);
+      SetLength(FLadderBrushes[High(FLadderBrushes)], Brushes[I].NumSides);
+      for J := 0 to Brushes[I].NumSides - 1 do
+        if Brushes[I].FirstSide + J < SideCount then
+          FLadderBrushes[High(FLadderBrushes)][J] := Sides[Brushes[I].FirstSide + J].PlaneNum;
+    end;
+  WritelnLog('QuakeBsp', '%d ladder brushes (of %d brushes)', [Length(FLadderBrushes), Count]);
+end;
+
+function TQuakeBsp.PointInLadder(const P: TVector3): Boolean;
+var
+  B, J: Integer;
+  Inside: Boolean;
+  Plane: TBSPPlane;
+begin
+  for B := 0 to High(FLadderBrushes) do
+  begin
+    Inside := True;
+    for J := 0 to High(FLadderBrushes[B]) do
+    begin
+      Plane := FPlanes[FLadderBrushes[B][J]];
+      if TVector3.DotProduct(P, Plane.Normal) - Plane.Dist > 0 then
+      begin
+        Inside := False;
+        Break;
+      end;
+    end;
+    if Inside then
+      Exit(True);
+  end;
+  Result := False;
 end;
 
 function TQuakeBsp.PointContents(const P: TVector3): Integer;

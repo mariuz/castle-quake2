@@ -73,7 +73,6 @@ type
     FLastWaterLevel: Integer;
     FAirFinished: Single;
     FLiquidDamageTimer: Single;
-    function PlayerPointContents(const CgePos: TVector3): Integer;
     procedure UpdateLiquids(const SecondsPassed: Single);
     procedure SetPlayer(const Value: TQuakePlayerMovement);
     procedure PlayerFallDamage(const Damage: Integer);
@@ -165,6 +164,8 @@ type
     function IntermissionSpot(out Pos: TVector3; out Yaw, Pitch: Single): Boolean;
 
     property Hud: TQuakeHud read FHud write FHud;
+    { Contents bits at a CGE position (liquids, exact ladders) }
+    function PlayerPointContents(const CgePos: TVector3): Integer;
     { Player movement (pmove), for falling damage and jump pads; may be nil }
     property Player: TQuakePlayerMovement read FPlayer write SetPlayer;
     property Stats: TQuakePlayerStats read FStats;
@@ -2245,9 +2246,11 @@ end;
 function TQuakeWorld.PlayerPointContents(const CgePos: TVector3): Integer;
 begin
   if FBsp = nil then
-    Result := 0
-  else
-    Result := FBsp.PointContents(CgeToQuake(CgePos));
+    Exit(0);
+  { Leaf contents, but the ladder bit only when really inside a ladder brush }
+  Result := FBsp.PointContents(CgeToQuake(CgePos)) and not CONTENTS_LADDER;
+  if FBsp.PointInLadder(CgeToQuake(CgePos)) then
+    Result := Result or CONTENTS_LADDER;
 end;
 
 procedure TQuakeWorld.UpdateLiquids(const SecondsPassed: Single);
