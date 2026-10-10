@@ -29,6 +29,10 @@ The log goes to `%LOCALAPPDATA%\castle-quake2\castle-quake2.log`. Audio needs `O
 
 Demo script actions: `W:sec` wait, `S` screenshot (logs FPS + camera), `X` fire, `H` hold-fire toggle, `U` use, `C:slot` weapon (1 blaster .. 10 BFG), `K` give all, `Y` god, `A:deg` absolute yaw, `T:deg` turn, `P:deg` pitch, `M:units` move, `N:i`/`I:i`/`D:i`/`R:i` stand near monster/item/mover/prop i, `F` help computer, `G:x y z` goto (Quake coords), `E:targetname` fire targets, `O:command` console command, `V` log mover states, `L:map` load map, `Q` quit.
 
+## Unit tests
+
+`tests/` is a console CGE project (search path `../code/`): `cd tests; castle-engine compile; ./castle-quake2-tests` — 44 checks of the parsers against the demo PAK (counts, contents, ladders, LightPoint, MD2 animations, SP2). Run from `tests/` (it loads `../data/paks/quake2_demo.pak`). CI runs it before the autotests.
+
 ## CGE editor integration
 
 - Views use designs: `data/gameviewplay.castle-user-interface`, `data/gameviewmenu.castle-user-interface` (`DesignUrl` + published fields). Change viewport / camera / navigation settings in the design, not in code.

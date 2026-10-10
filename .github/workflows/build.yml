@@ -65,6 +65,12 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl1
 
+      - name: Parser unit tests
+        working-directory: tests
+        run: |
+          castle-engine compile --os=linux --cpu=x86_64 --mode=debug
+          ./castle-quake2-tests
+
       - name: Compile (Linux)
         run: castle-engine compile --os=linux --cpu=x86_64 --mode=release
 

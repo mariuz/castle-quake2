@@ -92,6 +92,16 @@ PAKs are loaded in this order (later ones override earlier ones):
 2. `baseq2/pak0.pak`, `pak1.pak`, ... next to the executable — a full Quake 2 install.
 3. `-basedir <quake2 dir>` (loads `<dir>/baseq2/pak*.pak`) and `-pak <file>`.
 
+### Tests
+
+```powershell
+cd tests
+castle-engine compile
+.\castle-quake2-tests.exe   # parser unit tests (PAK, PCX, WAL, BSP, MD2, SP2) against the demo PAK
+```
+
+CI also runs the `--autotest` demo scripts on Linux (xvfb + Mesa) and uploads their screenshots.
+
 ### Command line
 
 ```powershell

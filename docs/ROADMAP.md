@@ -45,7 +45,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 
 ### 4. Engineering
 - ~~CI autotests~~ — done (`autotest` job); next: compare screenshots against references.
-- **Unit tests** for the parsers (BSP lumps, MD2 unwelding, PCX RLE, WAL) with small fixture files, using CGE's test framework (`castle-tester`).
+- ~~Unit tests for the parsers~~ — done (`tests/`, against the demo PAK).
 - ~~Savegames~~ — done as JSON (entities matched by spawn order); projectiles and pending delayed events are not saved.
 - **PVS culling**: decompress the visibility lump and toggle per-cluster shapes, important for the larger full-game maps.
 - **Performance**: ~~batch particles~~ (done: one scene, camera-facing quads rebuilt per frame); cache `LineOfSight` results across monsters; merge mover scenes that never move (`func_wall`).
@@ -99,5 +99,6 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [ ] Design-time skybox and entity gizmos
 - [ ] Monster prefabs (`.castle-transform`) and named sounds
 - [x] CI autotests with screenshots (Linux, xvfb + Mesa)
-- [ ] Parser unit tests, screenshot diffing
+- [x] Parser unit tests (`tests/`, in CI)
+- [ ] Screenshot diffing
 - [x] WebAssembly build deployed to GitHub Pages
