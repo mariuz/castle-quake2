@@ -707,9 +707,9 @@ var
   I, Slot: Integer;
 begin
   Slot := FWorld.Stats.CurrentWeapon;
-  for I := 1 to 10 do
+  for I := 1 to WeaponSlots do
   begin
-    Slot := ((Slot - 1 + Delta + 10) mod 10) + 1;
+    Slot := ((Slot - 1 + Delta + WeaponSlots) mod WeaponSlots) + 1;
     if (FWorld.Stats.WeaponMask and (1 shl Slot)) <> 0 then
     begin
       FWorld.SelectWeapon(Slot);
@@ -820,6 +820,11 @@ begin
       FWorld.SelectWeapon(Slot);
       Exit(True);
     end;
+  if Event.IsKey(keyG) then
+  begin
+    FWorld.SelectWeapon(11); { hand grenades }
+    Exit(True);
+  end;
 
   if Event.EventType = itMouseWheel then
   begin

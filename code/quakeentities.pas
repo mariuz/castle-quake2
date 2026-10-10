@@ -153,7 +153,7 @@ type
 
   TQuakeMonsterList = specialize TObjectList<TQuakeMonster>;
 
-  TProjectileKind = (pkBlasterBolt, pkRocket, pkGrenade, pkBfg);
+  TProjectileKind = (pkBlasterBolt, pkRocket, pkGrenade, pkHandGrenade, pkBfg);
 
   { Active projectile (blaster bolt, rocket, grenade, BFG ball) }
   TQuakeProjectile = class
@@ -285,6 +285,9 @@ const
   KEY_COMMANDER    = 1 shl 7;
   KEY_AIRSTRIKE    = 1 shl 8;
 
+  { Weapon slots: 1 Blaster .. 10 BFG10K, 11 Hand Grenades }
+  WeaponSlots = 11;
+
   POWERUP_QUAD = 1;
   POWERUP_INVULN = 2;
   POWERUP_ADRENALINE = 3;
@@ -305,7 +308,7 @@ const
 
     (ClassName: 'ammo_shells'; Category: icAmmo; Model: 'models/items/ammo/shells/medium/tris.md2'; Icon: 'a_shells'; Name: 'Shells'; Sound: 'sound/misc/am_pkup.wav'; Weapon: 0; AmmoType: atShells; Amount: 10; Param: 0),
     (ClassName: 'ammo_bullets'; Category: icAmmo; Model: 'models/items/ammo/bullets/medium/tris.md2'; Icon: 'a_bullets'; Name: 'Bullets'; Sound: 'sound/misc/am_pkup.wav'; Weapon: 0; AmmoType: atBullets; Amount: 50; Param: 0),
-    (ClassName: 'ammo_grenades'; Category: icAmmo; Model: 'models/items/ammo/grenades/medium/tris.md2'; Icon: 'a_grenades'; Name: 'Grenades'; Sound: 'sound/misc/am_pkup.wav'; Weapon: 0; AmmoType: atGrenades; Amount: 5; Param: 0),
+    (ClassName: 'ammo_grenades'; Category: icAmmo; Model: 'models/items/ammo/grenades/medium/tris.md2'; Icon: 'a_grenades'; Name: 'Grenades'; Sound: 'sound/misc/am_pkup.wav'; Weapon: 11; AmmoType: atGrenades; Amount: 5; Param: 0),
     (ClassName: 'ammo_rockets'; Category: icAmmo; Model: 'models/items/ammo/rockets/medium/tris.md2'; Icon: 'a_rockets'; Name: 'Rockets'; Sound: 'sound/misc/am_pkup.wav'; Weapon: 0; AmmoType: atRockets; Amount: 5; Param: 0),
     (ClassName: 'ammo_cells'; Category: icAmmo; Model: 'models/items/ammo/cells/medium/tris.md2'; Icon: 'a_cells'; Name: 'Cells'; Sound: 'sound/misc/am_pkup.wav'; Weapon: 0; AmmoType: atCells; Amount: 50; Param: 0),
     (ClassName: 'ammo_slugs'; Category: icAmmo; Model: 'models/items/ammo/slugs/medium/tris.md2'; Icon: 'a_slugs'; Name: 'Slugs'; Sound: 'sound/misc/am_pkup.wav'; Weapon: 0; AmmoType: atSlugs; Amount: 10; Param: 0),
@@ -342,18 +345,20 @@ const
     (ClassName: 'key_airstrike_target'; Category: icKey; Model: 'models/items/keys/target/tris.md2'; Icon: 'i_airstrike'; Name: 'Airstrike Marker'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_AIRSTRIKE; Param: 0)
   );
 
-  { Weapon slots 1..10 (key 0 selects slot 10) }
-  WeaponDefs: array[1..10] of TQuakeWeaponDef = (
+  { Weapon slots 1..11 (key 0 selects slot 10, G slot 11) }
+  WeaponDefs: array[1..WeaponSlots] of TQuakeWeaponDef = (
     (Name: 'Blaster'; ViewModel: 'models/weapons/v_blast/tris.md2'; Icon: 'w_blaster'; AmmoType: atNone; AmmoPerShot: 0; Cooldown: 0.5; Sound: 'sound/weapons/blastf1a.wav'),
     (Name: 'Shotgun'; ViewModel: 'models/weapons/v_shotg/tris.md2'; Icon: 'w_shotgun'; AmmoType: atShells; AmmoPerShot: 1; Cooldown: 1.0; Sound: 'sound/weapons/shotgf1b.wav'),
     (Name: 'Super Shotgun'; ViewModel: 'models/weapons/v_shotg2/tris.md2'; Icon: 'w_sshotgun'; AmmoType: atShells; AmmoPerShot: 2; Cooldown: 1.1; Sound: 'sound/weapons/sshotf1b.wav'),
     (Name: 'Machinegun'; ViewModel: 'models/weapons/v_machn/tris.md2'; Icon: 'w_machinegun'; AmmoType: atBullets; AmmoPerShot: 1; Cooldown: 0.1; Sound: 'sound/weapons/machgf1b.wav'),
-    (Name: 'Chaingun'; ViewModel: 'models/weapons/v_chain/tris.md2'; Icon: 'w_chaingun'; AmmoType: atBullets; AmmoPerShot: 1; Cooldown: 0.05; Sound: 'sound/weapons/machgf2b.wav'),
+    (Name: 'Chaingun'; ViewModel: 'models/weapons/v_chain/tris.md2'; Icon: 'w_chaingun'; AmmoType: atBullets; AmmoPerShot: 1; Cooldown: 0.1; Sound: 'sound/weapons/machgf2b.wav'),
     (Name: 'Grenade Launcher'; ViewModel: 'models/weapons/v_launch/tris.md2'; Icon: 'w_glauncher'; AmmoType: atGrenades; AmmoPerShot: 1; Cooldown: 0.8; Sound: 'sound/weapons/grenlf1a.wav'),
     (Name: 'Rocket Launcher'; ViewModel: 'models/weapons/v_rocket/tris.md2'; Icon: 'w_rlauncher'; AmmoType: atRockets; AmmoPerShot: 1; Cooldown: 0.8; Sound: 'sound/weapons/rocklf1a.wav'),
     (Name: 'HyperBlaster'; ViewModel: 'models/weapons/v_hyperb/tris.md2'; Icon: 'w_hyperblaster'; AmmoType: atCells; AmmoPerShot: 1; Cooldown: 0.1; Sound: 'sound/weapons/hyprbf1a.wav'),
     (Name: 'Railgun'; ViewModel: 'models/weapons/v_rail/tris.md2'; Icon: 'w_railgun'; AmmoType: atSlugs; AmmoPerShot: 1; Cooldown: 1.5; Sound: 'sound/weapons/railgf1a.wav'),
-    (Name: 'BFG10K'; ViewModel: 'models/weapons/v_bfg/tris.md2'; Icon: 'w_bfg'; AmmoType: atCells; AmmoPerShot: 50; Cooldown: 2.5; Sound: 'sound/weapons/bfg__f1y.wav')
+    (Name: 'BFG10K'; ViewModel: 'models/weapons/v_bfg/tris.md2'; Icon: 'w_bfg'; AmmoType: atCells; AmmoPerShot: 50; Cooldown: 2.5; Sound: 'sound/weapons/bfg__f1y.wav'),
+    { Thrown on release; picking up grenades gives it (Quake 2 "Grenades") }
+    (Name: 'Hand Grenades'; ViewModel: 'models/weapons/v_handgr/tris.md2'; Icon: 'w_hgrenade'; AmmoType: atGrenades; AmmoPerShot: 1; Cooldown: 1.0; Sound: 'sound/weapons/hgrent1a.wav')
   );
 
   AmmoIcons: array[TAmmoType] of String = ('', 'a_shells', 'a_bullets', 'a_grenades',
@@ -934,6 +939,7 @@ begin
     pkBlasterBolt: MdlPath := 'models/objects/laser/tris.md2';
     pkRocket: MdlPath := 'models/objects/rocket/tris.md2';
     pkGrenade: MdlPath := 'models/objects/grenade/tris.md2';
+    pkHandGrenade: MdlPath := 'models/objects/grenade2/tris.md2';
     else MdlPath := '';
   end;
   if MdlPath <> '' then

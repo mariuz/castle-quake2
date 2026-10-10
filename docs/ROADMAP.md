@@ -13,7 +13,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp and skins | Powerup shells, glow, bobbing items. |
 | Sprites | SP2 (BFG, explosions) | SP2 loader, BFG ball / explosion sprites | Other sprite users (bubbles, flashes). |
 | Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove essentials as `TQuakePlayerMovement` (friction, accel, air control, steps, crouch, jump pads, falling damage) | Exact box (not sphere) collision. |
-| Weapons | 10 + hand grenades | 10 weapons | Hand grenades, chaingun spin-up, frame-accurate timing. |
+| Weapons | 10 + hand grenades | 10 + hand grenades, chaingun spin-up | Frame-accurate timing. |
 | Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses) | Sight / chase / attack / pain / death, 19 definitions | Pathing, ambush flag, dodging, attack frames, bosses. |
 | Props / effects | Barrels, banners, ships, lasers, splashes, explosion models | All of these used by the demo maps | Gib models with velocities, `misc_viper`, `target_blaster`. |
 | Level flow | Units, cross-level triggers, help computer, intermission, savegames | Changelevel with spawn points, cross-level triggers, help computer (F1), intermission, savegames | — |
@@ -82,7 +82,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Monster steering around obstacles (±45° / ±90° detours) and ledge checks
 - [x] Attacks happen partway through the attack animation (wind-up; pain cancels the shot)
 - [ ] Medic revive, bosses, real pathfinding
-- [ ] Hand grenades, chaingun spin-up
+- [x] Hand grenades (cook, throw speed by hold time, explode in hand), chaingun spin-up
 
 ### Phase 3 – Flow
 - [x] Help computer (F1) and intermission screens

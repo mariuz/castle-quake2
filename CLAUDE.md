@@ -27,7 +27,7 @@ The log goes to `%LOCALAPPDATA%\castle-quake2\castle-quake2.log`. Audio needs `O
 .\castle-quake2.exe --autotest demo1 test_output\shot --demo "W:1.5,S,K,C:9,N:3,W:0.5,X,W:0.2,S,Q"
 ```
 
-Demo script actions: `W:sec` wait, `S` screenshot (logs FPS + camera), `X` fire, `H` hold-fire toggle, `U` use, `C:slot` weapon (1 blaster .. 10 BFG), `K` give all, `Y` god, `A:deg` absolute yaw, `T:deg` turn, `P:deg` pitch, `M:units` move, `N:i`/`I:i`/`D:i`/`R:i` stand near monster/item/mover/prop i, `F` help computer, `G:x y z` goto (Quake coords), `E:targetname` fire targets, `O:command` console command, `V` log mover states, `L:map` load map, `Q` quit.
+Demo script actions: `W:sec` wait, `S` screenshot (logs FPS + camera), `X` fire, `H` hold-fire toggle, `U` use, `C:slot` weapon (1 blaster .. 10 BFG, 11 hand grenades), `K` give all, `Y` god, `A:deg` absolute yaw, `T:deg` turn, `P:deg` pitch, `M:units` move, `N:i`/`I:i`/`D:i`/`R:i` stand near monster/item/mover/prop i, `F` help computer, `G:x y z` goto (Quake coords), `E:targetname` fire targets, `O:command` console command, `V` log mover states, `L:map` load map, `Q` quit.
 
 ## Unit tests
 

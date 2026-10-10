@@ -22,8 +22,8 @@ type
     ArmorType: Integer; { 0 = none, 1 = jacket, 2 = combat, 3 = body }
     Ammo: array[TAmmoType] of Integer;
     MaxAmmo: array[TAmmoType] of Integer;
-    WeaponMask: Cardinal;   { bit N = weapon slot N (1..10) }
-    CurrentWeapon: Integer; { 1 blaster .. 10 BFG10K }
+    WeaponMask: Cardinal;   { bit N = weapon slot N (1..11) }
+    CurrentWeapon: Integer; { 1 blaster .. 10 BFG10K, 11 hand grenades }
     Keys: Cardinal;         { bitmask of TQuakeKey }
     Kills, TotalKills: Integer;
     Secrets, TotalSecrets: Integer;
@@ -355,7 +355,7 @@ begin
   case FStats.CurrentWeapon of
     2, 3: AmmoT := atShells;
     4, 5: AmmoT := atBullets;
-    6: AmmoT := atGrenades;
+    6, 11: AmmoT := atGrenades;
     7: AmmoT := atRockets;
     8, 10: AmmoT := atCells;
     9: AmmoT := atSlugs;
