@@ -61,7 +61,6 @@ type
     procedure UpdateMovementInput(const SecondsPassed: Single);
     procedure BeginIntermission;
     procedure EndIntermission;
-    procedure SetupSky(const SkyName: String);
     procedure PlaceCamera(const Pos: TVector3; const YawDeg: Single);
     procedure HandleConsoleCommand(const Cmd, Args: String);
     procedure HandleMenuAction(const Action: TMenuAction; const Param: String);
@@ -129,78 +128,6 @@ begin
     Menu.CameraModeName := 'First-Person';
     Hud.ShowMessage('noclip OFF');
   end;
-end;
-
-procedure TViewPlay.SetupSky(const SkyName: String);
-
-  { Load env/<sky><suffix>.tga (or .pcx), re-oriented for TCastleBackground,
-    cache it and return its quaketex: URL ('' if missing).
-    Quake 2 side faces already match X3D (upright, seen from inside);
-    the up / down faces are rotated by 90 degrees relative to X3D. }
-  function SideUrl(const Suffix: String): String;
-  var
-    Base, Id: String;
-    Src, Dst: TCastleImage;
-    X, Y, N: Integer;
-  begin
-    Result := '';
-    Base := 'env/' + SkyName + Suffix;
-    Id := 'sky/' + SkyName + Suffix;
-    if not Palette.HasCachedImage(Id) then
-    begin
-      Src := nil;
-      try
-        if Pak.FileExists(Base + '.tga') then
-          Src := LoadImage('quakepak:/' + Base + '.tga', [TRGBImage, TRGBAlphaImage])
-        else
-        if Palette.LoadPcx(Base + '.pcx', False) then
-          Src := Palette.GetCachedImage(Base + '.pcx').MakeCopy;
-      except
-        on E: Exception do
-          WritelnWarning('GameViewPlay', 'Cannot load sky "%s": %s', [Base, E.Message]);
-      end;
-      if Src = nil then
-        Exit;
-      WritelnLog('GameViewPlay', 'Sky side %s: %dx%d %s', [Base, Src.Width, Src.Height, Src.ClassName]);
-      if (Suffix = 'up') or (Suffix = 'dn') then
-      begin
-        N := Min(Src.Width, Src.Height);
-        Dst := TRGBAlphaImage.Create(N, N);
-        for Y := 0 to N - 1 do
-          for X := 0 to N - 1 do
-            if Suffix = 'up' then
-              Dst.Colors[X, Y, 0] := Src.Colors[Y, N - 1 - X, 0]
-            else
-              Dst.Colors[X, Y, 0] := Src.Colors[N - 1 - Y, X, 0];
-        Src.Free;
-        Palette.CacheImage(Id, Dst);
-      end else
-        Palette.CacheImage(Id, Src);
-    end;
-    Result := 'quaketex:/' + Id;
-  end;
-
-begin
-  Background.SkyTopColor := Vector3(0.05, 0.05, 0.08);
-  Background.SkyEquatorColor := Vector3(0.1, 0.1, 0.12);
-  if SkyName = '' then
-  begin
-    Background.TexturePositiveX := '';
-    Background.TextureNegativeX := '';
-    Background.TexturePositiveY := '';
-    Background.TextureNegativeY := '';
-    Background.TextureNegativeZ := '';
-    Background.TexturePositiveZ := '';
-    Exit;
-  end;
-  { Quake 2: rt = +X, lf = -X, bk = Quake +Y (CGE -Z), ft = Quake -Y (CGE +Z).
-    Note TCastleBackground.TexturePositiveZ is the X3D "front", drawn at -Z. }
-  Background.TexturePositiveX := SideUrl('rt');
-  Background.TextureNegativeX := SideUrl('lf');
-  Background.TexturePositiveY := SideUrl('up');
-  Background.TextureNegativeY := SideUrl('dn');
-  Background.TexturePositiveZ := SideUrl('bk');
-  Background.TextureNegativeZ := SideUrl('ft');
 end;
 
 procedure TViewPlay.Start;
@@ -304,7 +231,6 @@ begin
   begin
     FMapName := FWorld.Bsp.MapName;
     PlaceCamera(FWorld.SpawnPoint, FWorld.SpawnAngle);
-    SetupSky(FWorld.Geometry.SkyName);
     Hud.ShowMessage(FMapName, 3.0);
   end else
     Hud.ShowMessage('Failed to load level: ' + AMapName, 5.0);
@@ -894,6 +820,9 @@ begin
   if Cmd = 'fps' then
     LabelFps.Exists := not LabelFps.Exists
   else
+  if Cmd = 'markers' then
+    QuakeMap.PreviewMarkers := not QuakeMap.PreviewMarkers
+  else
   if Cmd = 'save' then
   begin
     if Args = '' then
@@ -952,6 +881,7 @@ begin
     Console.Print('  give quad / give invulnerability - Powerups');
     Console.Print('  noclip       - Toggle fly mode');
     Console.Print('  fps          - Toggle FPS counter');
+    Console.Print('  markers      - Show player starts, paths and triggers');
     Console.Print('  save [name]  - Save the game (F6 = quick save)');
     Console.Print('  load [name]  - Load a saved game (F9 = quick load)');
     Console.Print('  lightstyle n p - Set light style n to pattern p (a = dark .. z = bright)');

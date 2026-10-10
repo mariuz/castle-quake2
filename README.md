@@ -19,7 +19,7 @@ A port of **Quake 2** to the **Castle Game Engine** (Object Pascal / Free Pascal
   - Surface flags: `SURF_SKY` (invisible but solid), `SURF_NODRAW`, `SURF_WARP` (animated with a GLSL `PLUG_texture_coord_shift` shader effect, non-solid), `SURF_TRANS33/66` (blended), `SURF_FLOWING` (scrolling `TTextureTransformNode`).
   - **Animated textures** following the WAL `animname` chains at 2 frames/second.
   - **Light styles**: flickering, pulsing and switchable lights. Faces lit by animated styles live in a separate lightmap atlas that is recomposed from their up to 4 style layers (10 Hz, only when a style changes) and re-uploaded; `light` entities with a `targetname` switch on/off, `target_lightramp` fades them.
-- **Skybox** from `env/<sky>{rt,lf,up,dn,bk,ft}.tga|pcx` via `TCastleBackground`.
+- **Skybox** from `env/<sky>{rt,lf,up,dn,bk,ft}.tga|pcx` via `TCastleBackground` (`TQuakeMap.Background`, also shown in the CGE editor).
 - **SP2 sprites** (IDS2 v2): the BFG10K ball and its explosion, as animated camera-facing quads.
 - **MD2 models** (IDP2 v8): monsters, items, weapons, projectiles and the first-person view weapon, with **interpolated frame animation**, PCX skins (index 255 transparent) and per-model tint sampled from the lightmaps below them (Quake 2's `R_LightPoint`, done by walking the BSP nodes).
 - **Brush entities** as `TCastleTransform`s: `func_door`, `func_door_rotating`, `func_plat`, `func_button`, `func_rotating`, `func_train` (follows `path_corner`s), `func_wall`, `func_explosive` (shootable, chain reactions).
@@ -72,7 +72,7 @@ The project follows the structure of CGE's own templates (`3d_fps_game`) and the
 | **F1** | Help computer (objectives, kills / goals / secrets) |
 | **F6 / F9** | Quick save / quick load |
 | **F12** | Screenshot |
-| **~** | Console (`map`, `maps`, `save`, `load`, `god`, `give all`, `give quad`, `give invulnerability`, `noclip`, `kill`, `fps`, `lightstyle`, `quit`, `help`) |
+| **~** | Console (`map`, `maps`, `save`, `load`, `god`, `give all`, `give quad`, `give invulnerability`, `noclip`, `kill`, `fps`, `markers`, `lightstyle`, `quit`, `help`) |
 | **F8** (debug build) | CGE inspector: hierarchy and live properties |
 | **Escape** | Menu |
 

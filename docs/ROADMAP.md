@@ -38,7 +38,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 
 ### 3. CGE editor / inspectability
 - **Property editors** (under `{$ifdef CASTLE_DESIGN_MODE}`): a dropdown of maps found in the PAK for `TQuakeMap.MapName`, a file picker for `PakUrl`, and a component editor verb *Reload map* (like `TImageGridEditor` in the custom_component sample).
-- **Skybox from the map at design time**: let `TQuakeMap` fill a referenced `TCastleBackground` (published `Background` property) so the editor shows the sky too; the game currently does it in code.
+- ~~Skybox from the map at design time~~ — done: `TQuakeMap.Background`.
 - **Entity gizmos**: show triggers, `path_corner`s, teleporters and spawn points as wireframe boxes / `TCastleImageTransform` icons when `PreviewEntities` is on, selectable in the editor hierarchy with their key/value pairs as a read-only property.
 - **Prefab designs** (`.castle-transform`) per monster type with the `TQuakeMonster` behavior and tunables (speed, ranges, damage) as published read-write properties, instead of the Pascal `MonsterDefs` table, so balancing happens in the editor.
 - **Named sounds** like the template's `GameSound` / `NamedSound`: a `data/sounds.castle-component` mapping logical names to PAK sound URLs, editable in the editor.
@@ -97,7 +97,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] `TQuakeMap`, HUD, console and menu as registered editor components (`editor_units`)
 - [x] Monsters, items and movers as `TCastleBehavior`s with named transforms (F8 inspector)
 - [ ] Map dropdown / reload verb property editors
-- [ ] Design-time skybox and entity gizmos
+- [x] Design-time skybox (`TQuakeMap.Background`) and entity markers (`PreviewMarkers`: player starts, paths, speakers, trigger volumes)
 - [ ] Monster prefabs (`.castle-transform`) and named sounds
 - [x] CI autotests with screenshots (Linux, xvfb + Mesa)
 - [x] Parser unit tests (`tests/`, in CI)

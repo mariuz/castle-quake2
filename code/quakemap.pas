@@ -14,7 +14,7 @@ interface
 
 uses
   SysUtils, Classes, Generics.Collections, Math,
-  CastleVectors, CastleTransform, CastleClassUtils, CastleLog,
+  CastleVectors, CastleTransform, CastleClassUtils, CastleLog, CastleScene,
   QuakeBsp, QuakeGeometry, QuakeMd2;
 
 type
@@ -23,13 +23,18 @@ type
     FPakUrl: String;
     FMapName: String;
     FPreviewEntities: Boolean;
+    FPreviewMarkers: Boolean;
     FBsp: TQuakeBsp;
     FGeometry: TQuakeGeometry;
     FPreview: TCastleTransform;
     FPreviewModels: specialize TObjectList<TQuakeMd2Instance>;
+    FBackground: TCastleBackground;
+    procedure SetBackground(const Value: TCastleBackground);
     procedure SetPakUrl(const Value: String);
     procedure SetMapName(const Value: String);
     procedure SetPreviewEntities(const Value: Boolean);
+    procedure SetPreviewMarkers(const Value: Boolean);
+    procedure BuildMarkers;
     function GetSkyName: String;
     function GetEntityCount: Integer;
     function GetFaceCount: Integer;
@@ -39,6 +44,7 @@ type
     procedure BuildPreview;
   protected
     procedure Loaded; override;
+    procedure Notification(AComponent: TComponent; Operation: TOperation); override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -50,6 +56,10 @@ type
     { (Re)load a map, even if MapName didn't change (e.g. to restart a level).
       Returns False if the map couldn't be loaded. }
     function LoadMap(const AMapName: String): Boolean;
+
+    { Show the map's skybox (worldspawn "sky", env/<sky>rt.pcx ...) on
+      Background. Done automatically whenever the map is (re)built. }
+    procedure ApplySky;
 
     { Loaded map data, nil when no map is loaded. }
     property Bsp: TQuakeBsp read FBsp;
@@ -63,6 +73,15 @@ type
     { Show items and monsters as static models (for the editor; the game
       spawns live ones itself). }
     property PreviewEntities: Boolean read FPreviewEntities write SetPreviewEntities default False;
+    { Show entities without a model as markers (for the editor): player
+      starts (green, player-sized), path_corner / point_combat (yellow),
+      sound speakers (small, orange), other point entities like targets and
+      teleporter destinations (cyan)
+      and trigger brushes (translucent magenta). Lights are left out. }
+    property PreviewMarkers: Boolean read FPreviewMarkers write SetPreviewMarkers default False;
+    { Background (usually the viewport's) that shows the map's skybox,
+      also in the editor. }
+    property Background: TCastleBackground read FBackground write SetBackground;
     { Read-only information, visible in the editor's inspector. }
     property SkyName: String read GetSkyName;
     property EntityCount: Integer read GetEntityCount;
@@ -75,7 +94,7 @@ const
 implementation
 
 uses
-  CastleComponentSerialize, CastleUtils, CastleStringUtils, CastleUriUtils,
+  CastleComponentSerialize, CastleUtils, CastleStringUtils, CastleUriUtils, CastleImages, CastleColors, CastleRenderOptions,
   QuakePak, QuakePalette, QuakeLight, QuakeEntities;
 
 constructor TQuakeMap.Create(AOwner: TComponent);
@@ -94,8 +113,8 @@ end;
 
 function TQuakeMap.PropertySections(const PropertyName: String): TPropertySections;
 begin
-  if ArrayContainsString(PropertyName, ['PakUrl', 'MapName', 'PreviewEntities',
-    'SkyName', 'EntityCount', 'FaceCount']) then
+  if ArrayContainsString(PropertyName, ['PakUrl', 'MapName', 'PreviewEntities', 'PreviewMarkers',
+    'Background', 'SkyName', 'EntityCount', 'FaceCount']) then
     Result := [psBasic]
   else
     Result := inherited PropertySections(PropertyName);
@@ -137,11 +156,16 @@ var
   Pos: TVector3;
 begin
   ClearPreview;
-  if (FBsp = nil) or not FPreviewEntities then
+  if (FBsp = nil) or not (FPreviewEntities or FPreviewMarkers) then
     Exit;
   FPreview := TCastleTransform.Create(nil);
   FPreview.Name := 'EntityPreview';
+  FPreview.SetTransient;
   Add(FPreview);
+  if FPreviewMarkers then
+    BuildMarkers;
+  if not FPreviewEntities then
+    Exit;
   for Ent in FBsp.Entities do
   begin
     ItemDef := FindItemDef(Ent.ClassName);
@@ -194,9 +218,110 @@ begin
   FGeometry := TQuakeGeometry.Create(FBsp);
   FGeometry.AddToWorld(Self);
   Lighting.SetMap(FBsp);
-  if FPreviewEntities then
+  if FPreviewEntities or FPreviewMarkers then
     BuildPreview;
+  ApplySky;
 end;
+
+procedure TQuakeMap.SetBackground(const Value: TCastleBackground);
+begin
+  if FBackground = Value then
+    Exit;
+  if FBackground <> nil then
+    FBackground.RemoveFreeNotification(Self);
+  FBackground := Value;
+  if FBackground <> nil then
+  begin
+    FBackground.FreeNotification(Self);
+    if (FBsp <> nil) and not (csLoading in ComponentState) then
+      ApplySky;
+  end;
+end;
+
+procedure TQuakeMap.Notification(AComponent: TComponent; Operation: TOperation);
+begin
+  inherited Notification(AComponent, Operation);
+  if (Operation = opRemove) and (AComponent = FBackground) then
+    FBackground := nil;
+end;
+
+procedure TQuakeMap.ApplySky;
+var
+  Sky: String;
+
+  { Load env/<sky><suffix>.tga (or .pcx), re-oriented for TCastleBackground,
+    cache it and return its quaketex: URL ('' if missing).
+    Quake 2 side faces already match X3D (upright, seen from inside);
+    the up / down faces are rotated by 90 degrees relative to X3D. }
+  function SideUrl(const Suffix: String): String;
+  var
+    Base, Id: String;
+    Src, Dst: TCastleImage;
+    X, Y, N: Integer;
+  begin
+    Result := '';
+    Base := 'env/' + Sky + Suffix;
+    Id := 'sky/' + Sky + Suffix;
+    if not Palette.HasCachedImage(Id) then
+    begin
+      Src := nil;
+      try
+        if Pak.FileExists(Base + '.tga') then
+          Src := LoadImage('quakepak:/' + Base + '.tga', [TRGBImage, TRGBAlphaImage])
+        else
+        if Palette.LoadPcx(Base + '.pcx', False) then
+          Src := Palette.GetCachedImage(Base + '.pcx').MakeCopy;
+      except
+        on E: Exception do
+          WritelnWarning('QuakeMap', 'Cannot load sky "%s": %s', [Base, E.Message]);
+      end;
+      if Src = nil then
+        Exit;
+      WritelnLog('QuakeMap', 'Sky side %s: %dx%d %s', [Base, Src.Width, Src.Height, Src.ClassName]);
+      if (Suffix = 'up') or (Suffix = 'dn') then
+      begin
+        N := Min(Src.Width, Src.Height);
+        Dst := TRGBAlphaImage.Create(N, N);
+        for Y := 0 to N - 1 do
+          for X := 0 to N - 1 do
+            if Suffix = 'up' then
+              Dst.Colors[X, Y, 0] := Src.Colors[Y, N - 1 - X, 0]
+            else
+              Dst.Colors[X, Y, 0] := Src.Colors[N - 1 - Y, X, 0];
+        Src.Free;
+        Palette.CacheImage(Id, Dst);
+      end else
+        Palette.CacheImage(Id, Src);
+    end;
+    Result := 'quaketex:/' + Id;
+  end;
+
+begin
+  if FBackground = nil then
+    Exit;
+  Sky := GetSkyName;
+  FBackground.SkyTopColor := Vector3(0.05, 0.05, 0.08);
+  FBackground.SkyEquatorColor := Vector3(0.1, 0.1, 0.12);
+  if Sky = '' then
+  begin
+    FBackground.TexturePositiveX := '';
+    FBackground.TextureNegativeX := '';
+    FBackground.TexturePositiveY := '';
+    FBackground.TextureNegativeY := '';
+    FBackground.TextureNegativeZ := '';
+    FBackground.TexturePositiveZ := '';
+    Exit;
+  end;
+  { Quake 2: rt = +X, lf = -X, bk = Quake +Y (CGE -Z), ft = Quake -Y (CGE +Z).
+    Note TCastleBackground.TexturePositiveZ is the X3D "front", drawn at -Z. }
+  FBackground.TexturePositiveX := SideUrl('rt');
+  FBackground.TextureNegativeX := SideUrl('lf');
+  FBackground.TexturePositiveY := SideUrl('up');
+  FBackground.TextureNegativeY := SideUrl('dn');
+  FBackground.TexturePositiveZ := SideUrl('bk');
+  FBackground.TextureNegativeZ := SideUrl('ft');
+end;
+
 
 function TQuakeMap.LoadMap(const AMapName: String): Boolean;
 begin
@@ -232,18 +357,83 @@ begin
     Rebuild;
 end;
 
+procedure TQuakeMap.SetPreviewMarkers(const Value: Boolean);
+begin
+  if FPreviewMarkers = Value then
+    Exit;
+  FPreviewMarkers := Value;
+  if (FBsp <> nil) and not (csLoading in ComponentState) then
+    BuildPreview;
+end;
+
+procedure TQuakeMap.BuildMarkers;
+
+  procedure AddMarker(const Ent: TQuakeEntity; const Index: Integer;
+    const Center, Size: TVector3; const Color: TCastleColor);
+  var
+    Box: TCastleBox;
+  begin
+    Box := TCastleBox.Create(FPreview);
+    Box.Name := Format('Marker_%s_%d', [Ent.ClassName, Index]);
+    Box.Translation := Center;
+    Box.Size := Size;
+    Box.Color := Color;
+    Box.Material := pmUnlit; { the map has no real-time lights }
+    Box.Collides := False;
+    Box.Pickable := False;
+    FPreview.Add(Box);
+  end;
+
+var
+  I, ModelIdx: Integer;
+  Ent: TQuakeEntity;
+  CName: String;
+  A, B: TVector3;
+begin
+  for I := 0 to FBsp.Entities.Count - 1 do
+  begin
+    Ent := FBsp.Entities[I];
+    CName := Ent.ClassName;
+    if (FindItemDef(CName) <> nil) or (FindMonsterDef(CName) <> nil) or
+       (Copy(CName, 1, 5) = 'light') or (CName = 'worldspawn') then
+      Continue;
+    { Trigger brushes: their model's bounds }
+    if Copy(CName, 1, 8) = 'trigger_' then
+    begin
+      ModelIdx := StrToIntDef(Copy(Ent.Model, 2, MaxInt), -1);
+      if (Copy(Ent.Model, 1, 1) = '*') and (ModelIdx > 0) and (ModelIdx < FBsp.ModelCount) then
+      begin
+        A := QuakeToCge(FBsp.Models[ModelIdx].Mins);
+        B := QuakeToCge(FBsp.Models[ModelIdx].Maxs);
+        AddMarker(Ent, I, (A + B) / 2,
+          Vector3(Abs(B.X - A.X), Abs(B.Y - A.Y), Abs(B.Z - A.Z)), Vector4(1, 0, 1, 0.25));
+      end;
+      Continue;
+    end;
+    { Other brush entities are already drawn by the geometry }
+    if Ent.Model <> '' then
+      Continue;
+    if Copy(CName, 1, 12) = 'info_player_' then
+      { Quake 2 player box: 32 x 32 x 56, origin 24 above the feet }
+      AddMarker(Ent, I, QuakeToCge(Ent.Origin) + Vector3(0, 4, 0), Vector3(32, 56, 32), Vector4(0, 1, 0, 0.5))
+    else
+    if (CName = 'path_corner') or (CName = 'point_combat') then
+      AddMarker(Ent, I, QuakeToCge(Ent.Origin), Vector3(8, 8, 8), Vector4(1, 1, 0, 1))
+    else
+    if CName = 'target_speaker' then
+      AddMarker(Ent, I, QuakeToCge(Ent.Origin), Vector3(6, 6, 6), Vector4(1, 0.5, 0, 1))
+    else
+      AddMarker(Ent, I, QuakeToCge(Ent.Origin), Vector3(12, 12, 12), Vector4(0, 1, 1, 1));
+  end;
+end;
+
 procedure TQuakeMap.SetPreviewEntities(const Value: Boolean);
 begin
   if FPreviewEntities = Value then
     Exit;
   FPreviewEntities := Value;
   if not (csLoading in ComponentState) then
-  begin
-    if Value then
-      BuildPreview
-    else
-      ClearPreview;
-  end;
+    BuildPreview; { clears it when nothing is previewed }
 end;
 
 function TQuakeMap.GetSkyName: String;

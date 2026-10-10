@@ -36,6 +36,7 @@
           },
           {
             "$$ClassName" : "TQuakeMap",
+            "Background" : "Background",
             "MapName" : "demo1",
             "Name" : "QuakeMap",
             "PakUrl" : "castle-data:/paks/quake2_demo.pak"
