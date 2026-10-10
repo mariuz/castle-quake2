@@ -208,7 +208,10 @@ end;
 procedure TQuakeMap.Loaded;
 begin
   inherited Loaded;
-  Rebuild;
+  { In the editor, show the map right away. In the game TQuakeWorld calls
+    LoadMap with the level it wants, so don't build the design's map first. }
+  if CastleDesignMode then
+    Rebuild;
 end;
 
 procedure TQuakeMap.SetPakUrl(const Value: String);

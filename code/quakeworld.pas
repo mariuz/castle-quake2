@@ -64,6 +64,7 @@ type
     FHurtTimer: Single;
     FKeyIcons: TStringList;
     FUseDepth: Integer;
+    FHelpPrimary, FHelpSecondary: String;
     procedure ResetStats;
     procedure ChooseSpawnPoint(const SpawnName: String);
     procedure SpawnEntities(const SpawnName: String);
@@ -134,6 +135,10 @@ type
 
     { Called by the view after it moved the camera to a teleport destination }
     procedure TeleportDone;
+
+    { info_player_intermission camera (CGE position, Quake yaw / pitch).
+      False if the map has none. }
+    function IntermissionSpot(out Pos: TVector3; out Yaw, Pitch: Single): Boolean;
 
     property Hud: TQuakeHud read FHud write FHud;
     property Stats: TQuakePlayerStats read FStats;
@@ -417,6 +422,17 @@ begin
       Continue;
     end;
 
+    { Switchable lights (style 32+ assigned by the map compiler), START_OFF = 1 }
+    if (Copy(CName, 1, 5) = 'light') and (Ent.TargetName <> '') and
+       (Ent.GetInt('style', 0) >= 32) then
+    begin
+      if (SpawnFlags and 1) <> 0 then
+        Lighting.SetStyle(Ent.GetInt('style', 0), 'a')
+      else
+        Lighting.SetStyle(Ent.GetInt('style', 0), 'm');
+      Continue;
+    end;
+
     if CName = 'misc_explobox' then
       FProps.Add(TQuakeProp.CreateProp(FMap, pkExplobox, Ent))
     else
@@ -530,6 +546,18 @@ begin
 
   World := FBsp.FindEntity('worldspawn');
   Sounds.StopMusic;
+  FHelpPrimary := '';
+  FHelpSecondary := '';
+  if FHud <> nil then
+  begin
+    FHud.HelpPrimary := '';
+    FHud.HelpSecondary := '';
+    FHud.Intermission := False;
+    if World <> nil then
+      FHud.LevelName := World.MessageText
+    else
+      FHud.LevelName := FBsp.MapName;
+  end;
   if World <> nil then
   begin
     Sounds.PlayMusic(Sounds.TrackFileName(World.Sounds));
@@ -686,6 +714,8 @@ var
   Speaker: TQuakeSpeaker;
   Laser: TQuakeLaser;
   Prop: TQuakeProp;
+  Lights: TQuakeEntityList;
+  Light: TQuakeEntity;
 begin
   CName := Ent.ClassName;
   Msg := Ent.MessageText;
@@ -755,6 +785,37 @@ begin
       if Speaker.Entity = Ent then
         Speaker.Activate;
   end else
+  if (Copy(CName, 1, 5) = 'light') and (Ent.GetInt('style', 0) >= 32) then
+  begin
+    { Toggle a switchable light }
+    if Lighting.GetStyle(Ent.GetInt('style', 0)) = 'a' then
+      Lighting.SetStyle(Ent.GetInt('style', 0), 'm')
+    else
+      Lighting.SetStyle(Ent.GetInt('style', 0), 'a');
+  end else
+  if CName = 'target_lightramp' then
+  begin
+    { Ramp the targeted light's style between the two message letters over
+      "speed" seconds; each use reverses the direction (Quake 2 TOGGLE) }
+    Msg := LowerCase(Ent.GetField('message', 'az'));
+    if Length(Msg) = 2 then
+    begin
+      Lights := FBsp.FindByTargetName(Ent.Target);
+      try
+        for Light in Lights do
+          if Light.GetInt('style', 0) >= 32 then
+          begin
+            if Lighting.GetStyle(Light.GetInt('style', 0)) = Msg[2] then
+              Lighting.RampStyle(Light.GetInt('style', 0), Msg[2], Msg[1], Ent.GetFloat('speed', 1))
+            else
+              Lighting.RampStyle(Light.GetInt('style', 0), Msg[1], Msg[2], Ent.GetFloat('speed', 1));
+          end;
+      finally
+        Lights.Free;
+      end;
+    end;
+    Exit;
+  end else
   if CName = 'func_timer' then
   begin
     { Using a timer toggles it }
@@ -792,9 +853,18 @@ begin
   end else
   if CName = 'target_help' then
   begin
+    { spawnflags 1 = primary objective, else secondary }
+    if (Ent.SpawnFlags and 1) <> 0 then
+      FHelpPrimary := Msg
+    else
+      FHelpSecondary := Msg;
     Sounds.Play('sound/misc/pc_up.wav');
     if FHud <> nil then
-      FHud.ShowMessage('Help computer updated: ' + Msg, 4);
+    begin
+      FHud.HelpPrimary := FHelpPrimary;
+      FHud.HelpSecondary := FHelpSecondary;
+      FHud.ShowMessage('Help computer updated (F1)', 3);
+    end;
   end else
   if CName = 'target_earthquake' then
     Sounds.Play('sound/world/quake.wav')
@@ -1729,6 +1799,27 @@ begin
   if (Mover <> nil) and (Mover.Kind in [mkDoor, mkDoorRotating, mkButton, mkPlat]) and
      ((Mover.Kind = mkButton) or Mover.AutoOpen) then
     Mover.Use;
+end;
+
+function TQuakeWorld.IntermissionSpot(out Pos: TVector3; out Yaw, Pitch: Single): Boolean;
+var
+  Ent: TQuakeEntity;
+  A: TVector3;
+begin
+  Result := False;
+  Pos := FPlayerPos;
+  Yaw := 0;
+  Pitch := 0;
+  if FBsp = nil then
+    Exit;
+  Ent := FBsp.FindEntity('info_player_intermission');
+  if Ent = nil then
+    Exit;
+  A := Ent.GetVector('angles', Vector3(0, Ent.Angle, 0));
+  Pos := QuakeToCge(Ent.Origin);
+  Pitch := A.X;
+  Yaw := A.Y;
+  Result := True;
 end;
 
 procedure TQuakeWorld.TeleportDone;

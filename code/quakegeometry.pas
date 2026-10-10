@@ -25,6 +25,8 @@ type
     TexNode: TImageTextureNode;
     ScrollNode: TTextureTransformNode;
     Shape: TShapeNode;
+    { Uses the dynamic (light-style animated) lightmap atlas }
+    Dynamic: Boolean;
     constructor Create(const ATexName: String; const AFlags: Integer);
     destructor Destroy; override;
     function UsesLightmap: Boolean;
@@ -34,6 +36,27 @@ type
   end;
 
   TQuakeGeomBatchDict = specialize TObjectDictionary<String, TQuakeGeomBatch>;
+
+  { A face whose lightmap is the sum of animated light styles }
+  TQuakeDynFace = record
+    AtlasX, AtlasY, Width, Height: Integer;
+    LightmapOffset: Integer;
+    Styles: array[0..3] of Byte;
+  end;
+
+  { Lightmap atlas recomposed from light styles when their values change. }
+  TQuakeDynamicLightmap = class
+  public
+    Node: TPixelTextureNode;  { owned by the scene graph }
+    Faces: array of TQuakeDynFace;
+    FaceCount: Integer;
+    ComposedVersion: Cardinal;
+    procedure AddFace(const F: TQuakeDynFace);
+    { Write all faces' texels for the current Lighting style values }
+    procedure Compose(const Image: TRGBImage; const Lightmaps: TBytes);
+  end;
+
+  TQuakeDynamicLightmapList = specialize TObjectList<TQuakeDynamicLightmap>;
 
   { Packs per-face RGB lightmaps into one atlas texture. }
   TQuakeLightmapAtlas = class
@@ -146,6 +169,7 @@ type
     FMovers: TQuakeMoverList;
     FAnimTextures: TQuakeAnimTexList;
     FScrollNodes: specialize TList<TTextureTransformNode>;
+    FDynLightmaps: TQuakeDynamicLightmapList;
     FTime: Single;
     FAnimFrame: Integer;
     FSkyName: String;
@@ -163,6 +187,9 @@ type
 
     { Advance animated textures and movers }
     procedure Update(const SecondsPassed: Single);
+
+    { Number of faces lit by animated / switchable light styles }
+    function DynamicFaceCount: Integer;
 
     { Fire OnFireTargets (used by movers) }
     procedure FireTargets(const ATarget: String);
@@ -219,6 +246,23 @@ begin
     Result := Vector3(0, -1, 0)
   else
     Result := YawToCgeDir(AngleVal);
+end;
+
+var
+  GammaTable: array[Byte] of Byte;
+  GammaTableFor: Single = -1;
+
+function ApplyGamma(const V: Byte): Byte;
+var
+  I: Integer;
+begin
+  if GammaTableFor <> LightmapGamma then
+  begin
+    for I := 0 to 255 do
+      GammaTable[I] := Round(255 * Power(I / 255, 1 / Max(0.1, LightmapGamma)));
+    GammaTableFor := LightmapGamma;
+  end;
+  Result := GammaTable[V];
 end;
 
 { TQuakeGeomBatch }
@@ -428,23 +472,6 @@ begin
   Result := True;
 end;
 
-var
-  GammaTable: array[Byte] of Byte;
-  GammaTableFor: Single = -1;
-
-function ApplyGamma(const V: Byte): Byte;
-var
-  I: Integer;
-begin
-  if GammaTableFor <> LightmapGamma then
-  begin
-    for I := 0 to 255 do
-      GammaTable[I] := Round(255 * Power(I / 255, 1 / Max(0.1, LightmapGamma)));
-    GammaTableFor := LightmapGamma;
-  end;
-  Result := GammaTable[V];
-end;
-
 procedure TQuakeLightmapAtlas.SetTexel(const X, Y: Integer; const R, G, B: Byte);
 begin
   if (X >= 0) and (X < FWidth) and (Y >= 0) and (Y < FHeight) then
@@ -467,6 +494,59 @@ begin
   Result.RepeatS := False;
   Result.RepeatT := False;
   Result.TextureProperties := TexProps;
+end;
+
+{ TQuakeDynamicLightmap }
+
+procedure TQuakeDynamicLightmap.AddFace(const F: TQuakeDynFace);
+begin
+  if FaceCount = Length(Faces) then
+    SetLength(Faces, Max(64, FaceCount * 2));
+  Faces[FaceCount] := F;
+  Inc(FaceCount);
+end;
+
+procedure TQuakeDynamicLightmap.Compose(const Image: TRGBImage; const Lightmaps: TBytes);
+var
+  I, S, Row, Col, Size, Ofs, LayerCount: Integer;
+  Scale: array[0..3] of Single;
+  R, G, B: Single;
+  P: PVector3Byte;
+begin
+  for I := 0 to FaceCount - 1 do
+  begin
+    Size := Faces[I].Width * Faces[I].Height;
+    LayerCount := 0;
+    for S := 0 to 3 do
+      if Faces[I].Styles[S] <> 255 then
+      begin
+        Scale[S] := Lighting.StyleValue(Faces[I].Styles[S]);
+        LayerCount := S + 1;
+      end;
+    for Row := 0 to Faces[I].Height - 1 do
+    begin
+      P := Image.PixelPtr(Faces[I].AtlasX, Faces[I].AtlasY + Row);
+      for Col := 0 to Faces[I].Width - 1 do
+      begin
+        R := 0; G := 0; B := 0;
+        Ofs := Faces[I].LightmapOffset + (Row * Faces[I].Width + Col) * 3;
+        for S := 0 to LayerCount - 1 do
+        begin
+          if Ofs + 2 < Length(Lightmaps) then
+          begin
+            R := R + Lightmaps[Ofs] * Scale[S];
+            G := G + Lightmaps[Ofs + 1] * Scale[S];
+            B := B + Lightmaps[Ofs + 2] * Scale[S];
+          end;
+          Ofs := Ofs + Size * 3;
+        end;
+        P^ := Vector3Byte(ApplyGamma(Min(255, Round(R))), ApplyGamma(Min(255, Round(G))),
+          ApplyGamma(Min(255, Round(B))));
+        Inc(P);
+      end;
+    end;
+  end;
+  ComposedVersion := Lighting.Version;
 end;
 
 { TQuakeAnimTex }
@@ -869,6 +949,7 @@ begin
   FMovers := TQuakeMoverList.Create(True);
   FAnimTextures := TQuakeAnimTexList.Create(True);
   FScrollNodes := specialize TList<TTextureTransformNode>.Create;
+  FDynLightmaps := TQuakeDynamicLightmapList.Create(True);
 
   World := FBsp.FindEntity('worldspawn');
   if World <> nil then
@@ -883,6 +964,7 @@ begin
   FWorldTransform.Free;
   FAnimTextures.Free;
   FScrollNodes.Free;
+  FDynLightmaps.Free;
   inherited Destroy;
 end;
 
@@ -929,8 +1011,12 @@ var
   PolyVerts: array of TVector3;
   PolyUVs, PolyLMUVs: array of TVector2;
   RawVert: TVector3;
-  Atlas: TQuakeLightmapAtlas;
-  LightmapTex: TPixelTextureNode;
+  Atlas, DynAtlas: TQuakeLightmapAtlas;
+  LightmapTex, DynTex: TPixelTextureNode;
+  Dyn: TQuakeDynamicLightmap;
+  DynFace: TQuakeDynFace;
+  IsDynamic: Boolean;
+  StyleIdx: Integer;
   Ext: TQuakeFaceExtents;
   LmW, LmH, AtlasX, AtlasY: Integer;
   AllocOk: Boolean;
@@ -945,6 +1031,8 @@ begin
     Atlas := TQuakeLightmapAtlas.Create(512, 512);
   Batches := TQuakeGeomBatchDict.Create([doOwnsValues]);
   SkyBatch := TQuakeGeomBatch.Create('sky', SURF_SKY);
+  DynAtlas := nil;
+  Dyn := nil;
   try
     for FaceIdx := Mdl.FirstFace to Mdl.FirstFace + Mdl.NumFaces - 1 do
     begin
@@ -974,10 +1062,20 @@ begin
       if (TexInfo.Flags and SURF_NODRAW) <> 0 then
         Continue;
 
+      { Faces lit by animated or switchable light styles go to the dynamic atlas }
+      IsDynamic := False;
+      for StyleIdx := 0 to 3 do
+        if (Face.Styles[StyleIdx] <> 0) and (Face.Styles[StyleIdx] <> 255) then
+          IsDynamic := True;
+      IsDynamic := IsDynamic and ((TexInfo.Flags and (SURF_WARP or SURF_TRANS33 or SURF_TRANS66)) = 0);
+
       Key := TexName + '|' + IntToStr(TexInfo.Flags and BatchFlagMask);
+      if IsDynamic then
+        Key := Key + '|dyn';
       if not Batches.TryGetValue(Key, Batch) then
       begin
         Batch := TQuakeGeomBatch.Create(TexName, TexInfo.Flags and BatchFlagMask);
+        Batch.Dynamic := IsDynamic;
         Batches.Add(Key, Batch);
       end;
 
@@ -986,7 +1084,45 @@ begin
       LmW := Ext.LightmapWidth;
       LmH := Ext.LightmapHeight;
       AllocOk := False;
-      if Batch.UsesLightmap and (Face.LightmapOffset >= 0) and (LmW <= 256) and (LmH <= 256) and
+      if IsDynamic and (Face.LightmapOffset >= 0) and (LmW <= 256) and (LmH <= 256) then
+      begin
+        if DynAtlas = nil then
+        begin
+          if ModelIdx = 0 then
+            DynAtlas := TQuakeLightmapAtlas.Create(1024, 1024)
+          else
+            DynAtlas := TQuakeLightmapAtlas.Create(256, 256);
+          Dyn := TQuakeDynamicLightmap.Create;
+        end;
+        AllocOk := DynAtlas.Allocate(LmW, LmH, AtlasX, AtlasY);
+        if AllocOk then
+        begin
+          DynFace.AtlasX := AtlasX;
+          DynFace.AtlasY := AtlasY;
+          DynFace.Width := LmW;
+          DynFace.Height := LmH;
+          DynFace.LightmapOffset := Face.LightmapOffset;
+          for StyleIdx := 0 to 3 do
+            DynFace.Styles[StyleIdx] := Face.Styles[StyleIdx];
+          Dyn.AddFace(DynFace);
+          for V := 0 to VertCount - 1 do
+          begin
+            RawVert := FBsp.GetFaceVertex(FaceIdx, V);
+            PolyLMUVs[V] := Vector2(
+              (AtlasX + (FBsp.TexS(RawVert, Face.TexInfoId) - Ext.TexMinS) / 16 + 0.5) / DynAtlas.Width,
+              (AtlasY + (FBsp.TexT(RawVert, Face.TexInfoId) - Ext.TexMinT) / 16 + 0.5) / DynAtlas.Height);
+          end;
+        end else
+        begin
+          { Atlas full: keep the neutral UVs (the reserved mid-gray block of
+            this atlas), as the batch samples the dynamic atlas anyway }
+          WritelnWarning('QuakeGeometry', 'Light-style atlas full, face %d unlit', [FaceIdx]);
+          AllocOk := True;
+        end;
+      end;
+
+      if (not AllocOk) and Batch.UsesLightmap and (Face.LightmapOffset >= 0) and
+         (LmW <= 256) and (LmH <= 256) and
          (Face.LightmapOffset + LmW * LmH * 3 <= Length(Lightmaps)) then
       begin
         AllocOk := Atlas.Allocate(LmW, LmH, AtlasX, AtlasY);
@@ -1013,10 +1149,20 @@ begin
     end;
 
     LightmapTex := Atlas.CreateTextureNode;
+    DynTex := nil;
+    if DynAtlas <> nil then
+    begin
+      DynTex := DynAtlas.CreateTextureNode;
+      Dyn.Node := DynTex;
+      Dyn.Compose(DynTex.FdImage.Value as TRGBImage, Lightmaps);
+    end;
     for BatchPair in Batches do
     begin
       Batch := BatchPair.Value;
-      Batch.CreateNodes(LightmapTex);
+      if Batch.Dynamic and (DynTex <> nil) then
+        Batch.CreateNodes(DynTex)
+      else
+        Batch.CreateNodes(LightmapTex);
       if Batch.Shape = nil then
         Continue;
       RootNode.AddChildren(Batch.Shape);
@@ -1027,6 +1173,15 @@ begin
     { Nobody used the atlas (e.g. only sky / water): free it }
     if LightmapTex.ParentFieldsCount = 0 then
       LightmapTex.Free;
+    if DynTex <> nil then
+    begin
+      if DynTex.ParentFieldsCount = 0 then
+      begin
+        DynTex.Free;
+        Dyn.Free;
+      end else
+        FDynLightmaps.Add(Dyn);
+    end;
 
     if (SkyRoot <> nil) and (SkyBatch.Coords.Count > 0) then
     begin
@@ -1037,6 +1192,7 @@ begin
     SkyBatch.Free;
     Batches.Free;
     Atlas.Free;
+    DynAtlas.Free;
   end;
 end;
 
@@ -1100,8 +1256,17 @@ begin
   FSceneSkyClip.Load(RootSky, True);
   Parent.Add(FWorldTransform);
   SetupMovers(Parent);
-  WritelnLog('QuakeGeometry', '%d animated texture chains, %d flowing surfaces, sky "%s"',
-    [FAnimTextures.Count, FScrollNodes.Count, FSkyName]);
+  WritelnLog('QuakeGeometry', '%d animated texture chains, %d flowing surfaces, %d light-style faces, sky "%s"',
+    [FAnimTextures.Count, FScrollNodes.Count, DynamicFaceCount, FSkyName]);
+end;
+
+function TQuakeGeometry.DynamicFaceCount: Integer;
+var
+  Dyn: TQuakeDynamicLightmap;
+begin
+  Result := 0;
+  for Dyn in FDynLightmaps do
+    Result := Result + Dyn.FaceCount;
 end;
 
 procedure TQuakeGeometry.FireTargets(const ATarget: String);
@@ -1117,11 +1282,20 @@ var
   Node: TImageTextureNode;
   Frame: Integer;
   Scroll: TTextureTransformNode;
+  Dyn: TQuakeDynamicLightmap;
 begin
   FTime := FTime + SecondsPassed;
 
   for Mover in FMovers do
     Mover.Update(SecondsPassed);
+
+  { Relight faces with animated light styles when any style value changed }
+  for Dyn in FDynLightmaps do
+    if Dyn.ComposedVersion <> Lighting.Version then
+    begin
+      Dyn.Compose(Dyn.Node.FdImage.Value as TRGBImage, FBsp.Lightmaps);
+      Dyn.Node.FdImage.Changed;
+    end;
 
   { Quake 2 animates wall textures at 2 frames per second }
   Frame := Trunc(FTime * 2);

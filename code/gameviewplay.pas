@@ -45,6 +45,10 @@ type
     FDemoIndex: Integer;
     FDemoTimer: Single;
     FDemoFireHeld: Boolean;
+    FIntermission: Boolean;
+    FIntermissionTime: Single;
+    procedure BeginIntermission;
+    procedure EndIntermission;
     procedure SetupSky(const SkyName: String);
     procedure PlaceCamera(const Pos: TVector3; const YawDeg: Single);
     procedure HandleConsoleCommand(const Cmd, Args: String);
@@ -98,7 +102,8 @@ procedure TViewPlay.SetCameraMode(const Mode: TCameraMode);
 begin
   FCameraMode := Mode;
   WalkNavigation.Gravity := Mode = cmFirstPerson;
-  WalkNavigation.MouseLook := True;
+  { Autotests must not depend on where the desktop mouse happens to be }
+  WalkNavigation.MouseLook := FAutoTestMap = '';
   if Mode = cmNoclip then
   begin
     Menu.CameraModeName := 'Noclip Fly';
@@ -385,6 +390,9 @@ begin
     if Ignore <> nil then
       Ignore.Exists := True;
   end else
+  if Action = 'F' then { Toggle the help computer (F1) }
+    Hud.HelpVisible := not Hud.HelpVisible
+  else
   if Action = 'O' then { Run a console command, e.g. "O:kill" or "O:map demo2" }
   begin
     P := Pos(' ', Param);
@@ -472,6 +480,37 @@ begin
   WritelnWarning('GameViewPlay', 'GoNear %s: no free spot found', [Target.ToString]);
 end;
 
+procedure TViewPlay.BeginIntermission;
+var
+  Pos, Dir: TVector3;
+  Yaw, Pitch: Single;
+begin
+  FIntermission := True;
+  FIntermissionTime := 0;
+  Hud.Intermission := True;
+  Hud.HelpVisible := False;
+  WalkNavigation.Exists := False;
+  if FWorld.WeaponTransform <> nil then
+    FWorld.WeaponTransform.Exists := False;
+  if FWorld.IntermissionSpot(Pos, Yaw, Pitch) then
+  begin
+    { Quake pitch: positive looks down }
+    Dir := YawToCgeDir(Yaw) * Cos(DegToRad(Pitch)) + Vector3(0, -Sin(DegToRad(Pitch)), 0);
+    MainViewport.Camera.SetWorldView(Pos, Dir.Normalize, Vector3(0, 1, 0));
+  end;
+  Sounds.Play('sound/misc/secret.wav');
+end;
+
+procedure TViewPlay.EndIntermission;
+begin
+  FIntermission := False;
+  Hud.Intermission := False;
+  WalkNavigation.Exists := True;
+  if FWorld.WeaponTransform <> nil then
+    FWorld.WeaponTransform.Exists := True;
+  LoadLevel(FWorld.NextMap);
+end;
+
 procedure TViewPlay.CycleWeapon(const Delta: Integer);
 var
   I, Slot: Integer;
@@ -503,6 +542,15 @@ begin
   if LabelFps.Exists then
     LabelFps.Caption := 'FPS: ' + Container.Fps.ToString;
 
+  { Intermission: world frozen until a key press (or 8 seconds) }
+  if FIntermission then
+  begin
+    FIntermissionTime := FIntermissionTime + SecondsPassed;
+    if FIntermissionTime > 8 then
+      EndIntermission;
+    Exit;
+  end;
+
   FWorld.Update(SecondsPassed, MainViewport.Camera.Translation, MainViewport.Camera.Direction);
   WalkNavigation.Exists := not FWorld.Dead;
 
@@ -516,7 +564,7 @@ begin
     LoadLevel(FMapName)
   else
   if FWorld.LevelExited and (FWorld.NextMap <> '') then
-    LoadLevel(FWorld.NextMap);
+    BeginIntermission;
 
   { Hold to fire (left mouse / Ctrl) }
   Firing := FDemoFireHeld;
@@ -533,6 +581,13 @@ var
   Slot: Integer;
 begin
   Result := False;
+
+  if FIntermission then
+  begin
+    if FIntermissionTime > 1 then
+      EndIntermission;
+    Exit(True);
+  end;
 
   if Console.IsOpen then
     Exit(Console.Press(Event));
@@ -585,10 +640,9 @@ begin
 
   if Event.IsKey(keyF1) then
   begin
-    if FCameraMode = cmFirstPerson then
-      SetCameraMode(cmNoclip)
-    else
-      SetCameraMode(cmFirstPerson);
+    { Quake 2 help computer }
+    Hud.HelpVisible := not Hud.HelpVisible;
+    Sounds.Play('sound/misc/pc_up.wav');
     Exit(True);
   end;
 
@@ -603,6 +657,7 @@ end;
 procedure TViewPlay.HandleConsoleCommand(const Cmd, Args: String);
 var
   Maps: TStringList;
+  P: Integer;
 begin
   if (Cmd = 'map') or (Cmd = 'gamemap') then
   begin
@@ -624,6 +679,15 @@ begin
   if Cmd = 'fps' then
     LabelFps.Exists := not LabelFps.Exists
   else
+  if Cmd = 'lightstyle' then
+  begin
+    { lightstyle <n> <pattern of a..z>, e.g. "lightstyle 0 z" for full bright }
+    P := Pos(' ', Args);
+    if P > 0 then
+      Lighting.SetStyle(StrToIntDef(Copy(Args, 1, P - 1), 0), LowerCase(Trim(Copy(Args, P + 1, MaxInt))))
+    else
+      Console.Print('Usage: lightstyle <0..255> <pattern a..z>');
+  end else
   if Cmd = 'god' then
     FWorld.CheatGodMode
   else
@@ -652,6 +716,7 @@ begin
     Console.Print('  give all     - All weapons, ammo, armor, keys');
     Console.Print('  noclip       - Toggle fly mode');
     Console.Print('  fps          - Toggle FPS counter');
+    Console.Print('  lightstyle n p - Set light style n to pattern p (a = dark .. z = bright)');
     Console.Print('  kill         - Suicide');
     Console.Print('  quit         - Exit game');
   end else

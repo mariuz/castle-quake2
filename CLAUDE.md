@@ -27,7 +27,7 @@ The log goes to `%LOCALAPPDATA%\castle-quake2\castle-quake2.log`. Audio needs `O
 .\castle-quake2.exe --autotest demo1 test_output\shot --demo "W:1.5,S,K,C:9,N:3,W:0.5,X,W:0.2,S,Q"
 ```
 
-Demo script actions: `W:sec` wait, `S` screenshot (logs FPS + camera), `X` fire, `H` hold-fire toggle, `U` use, `C:slot` weapon (1 blaster .. 10 BFG), `K` give all, `Y` god, `A:deg` absolute yaw, `T:deg` turn, `P:deg` pitch, `M:units` move, `N:i`/`I:i`/`D:i` stand near monster/item/mover i, `G:x y z` goto (Quake coords), `E:targetname` fire targets, `O:command` console command, `V` log mover states, `L:map` load map, `Q` quit.
+Demo script actions: `W:sec` wait, `S` screenshot (logs FPS + camera), `X` fire, `H` hold-fire toggle, `U` use, `C:slot` weapon (1 blaster .. 10 BFG), `K` give all, `Y` god, `A:deg` absolute yaw, `T:deg` turn, `P:deg` pitch, `M:units` move, `N:i`/`I:i`/`D:i`/`R:i` stand near monster/item/mover/prop i, `F` help computer, `G:x y z` goto (Quake coords), `E:targetname` fire targets, `O:command` console command, `V` log mover states, `L:map` load map, `Q` quit.
 
 ## CGE editor integration
 
@@ -45,4 +45,7 @@ Demo script actions: `W:sec` wait, `S` screenshot (logs FPS + camera), `X` fire,
 - CGE images are bottom-to-top; PCX/WAL decoders flip rows, so UV `v = 1 - t/height`.
 - `TCastleBackground.TexturePositiveZ` is the X3D "front" drawn at **-Z** (and `TextureNegativeZ` at +Z).
 - Billboards need `Scene.ProcessEvents := True`.
+- Light styles: `TQuakeLighting` owns style patterns/values (`Version` bumps on change); `TQuakeDynamicLightmap` recomposes the light-style atlas and calls `Node.FdImage.Changed`. Lightmaps of a face are `styles` consecutive RGB blocks.
+- `TQuakeMd2Instance.PlayAnim('')` plays all frames (banners, effects).
+- Autotests disable mouse look (results must not depend on the desktop mouse). CI runs the same scripts on Linux under xvfb + Mesa (`.github/workflows/build.yml`, job `autotest`).
 - Model scenes that must not block ray casts (items, projectiles, view weapon) set `Collides := False`, `Pickable := False`; monsters keep `Collides` and are found by `TQuakeMonster.OwnsTransform` from `WorldRayCast` results.

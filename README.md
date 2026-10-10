@@ -17,6 +17,7 @@ A port of **Quake 2** to the **Castle Game Engine** (Object Pascal / Free Pascal
   - **Baked RGB lightmaps** packed into one atlas per model and applied with `TMultiTextureNode` (`MODULATE` + `MODULATE2X`), like Quake 2's GL renderer.
   - Surface flags: `SURF_SKY` (invisible but solid), `SURF_NODRAW`, `SURF_WARP`, `SURF_TRANS33/66` (blended), `SURF_FLOWING` (scrolling `TTextureTransformNode`).
   - **Animated textures** following the WAL `animname` chains at 2 frames/second.
+  - **Light styles**: flickering, pulsing and switchable lights. Faces lit by animated styles live in a separate lightmap atlas that is recomposed from their up to 4 style layers (10 Hz, only when a style changes) and re-uploaded; `light` entities with a `targetname` switch on/off, `target_lightramp` fades them.
 - **Skybox** from `env/<sky>{rt,lf,up,dn,bk,ft}.tga|pcx` via `TCastleBackground`.
 - **MD2 models** (IDP2 v8): monsters, items, weapons, projectiles and the first-person view weapon, with **interpolated frame animation**, PCX skins (index 255 transparent) and per-model tint sampled from the lightmaps below them (Quake 2's `R_LightPoint`, done by walking the BSP nodes).
 - **Brush entities** as `TCastleTransform`s: `func_door`, `func_door_rotating`, `func_plat`, `func_button`, `func_rotating`, `func_train` (follows `path_corner`s), `func_wall`, `func_explosive` (shootable, chain reactions).
@@ -26,13 +27,16 @@ A port of **Quake 2** to the **Castle Game Engine** (Object Pascal / Free Pascal
 - **Monsters** (19 types defined; the demo has soldiers, enforcers, gunners, berserkers, flyers, parasites and tanks): sight via line-of-sight checks, chase with wall sliding (`TCastleTransform.Move`), floor following, melee / hitscan / blaster / rocket / grenade / railgun attacks, pain and death animations, gibbing; monster projectiles can hurt other monsters.
 - **Player**: Quake 2 dimensions (eye 46 above the floor, 18-unit steps, 300 u/s run), crouch, noclip, damage with armor absorption, death and level restart.
 - **HUD** drawn with the original `pics/*.pcx` big numbers, ammo/health/armor/weapon/key icons and crosshair (`TDrawableImage`), pickup notices and damage / quad / invulnerability screen blends.
-- **Spatial audio** from the PAK's WAVs via `TCastleSoundSource`; optional CD-music replacement as `data/music/trackNN.ogg`.
-- **Billboard particles** (`TBillboardNode`): bullet impacts, blood, blaster sparks, explosions, rail trails, BFG blasts, teleport fountains.
+- **Spatial audio** from the PAK's WAVs via `TCastleSoundSource`, with Quake 2's distance attenuation mapped to OpenAL's linear model; **ambient `target_speaker` loops** (80–90 per demo map) and triggered sounds; optional CD-music replacement as `data/music/trackNN.ogg`.
+- **Props and effects**: exploding barrels (`misc_explobox`, chain reactions), waving banners, corpses, the satellite dish, flying Strogg ships along their `path_corner`s, `func_timer`, `target_splash` sparks, `target_laser` beams, and Quake 2's animated, skin-fading explosion model.
+- **Help computer (F1)** with the original `help.pcx`, level name, primary / secondary objectives and kills / goals / secrets, and an **intermission** at `info_player_intermission` before the next unit loads.
+- **Billboard particles** (`TBillboardNode`, soft round sprites): bullet impacts, blood, blaster sparks, splashes, rail trails, BFG blasts, teleport fountains.
 - Drop-down **console**, **menu** with the map list read from the loaded PAKs, and a headless **autotest / demo-script harness**.
 
 | | |
 |---|---|
 | ![Soldier](docs/screenshot-soldier.png) | ![Railgun](docs/screenshot-railgun.png) |
+| ![Help computer](docs/screenshot-help-computer.png) | ![Barrel explosion](docs/screenshot-explosion.png) |
 
 ---
 
@@ -57,9 +61,9 @@ The project follows the structure of CGE's own templates (`3d_fps_game`) and the
 | **Space** / **C** | Jump / Crouch |
 | **E** | Use (doors, buttons) |
 | **1 .. 9, 0** / Mouse wheel | Select weapon (Blaster .. BFG10K) |
-| **F1** | Toggle noclip fly mode |
+| **F1** | Help computer (objectives, kills / goals / secrets) |
 | **F12** | Screenshot |
-| **~** | Console (`map`, `maps`, `god`, `give all`, `noclip`, `kill`, `fps`, `quit`, `help`) |
+| **~** | Console (`map`, `maps`, `god`, `give all`, `noclip`, `kill`, `fps`, `lightstyle`, `quit`, `help`) |
 | **F8** (debug build) | CGE inspector: hierarchy and live properties |
 | **Escape** | Menu |
 
@@ -92,7 +96,7 @@ PAKs are loaded in this order (later ones override earlier ones):
 .\castle-quake2.exe --autotest demo1 shot --demo "W:1,S,K,C:9,N:3,X,W:0.2,S,Q"
 ```
 
-Demo script actions (comma separated): `W:sec` wait, `S` screenshot, `X` fire, `H` toggle hold-fire, `U` use, `C:slot` weapon, `K` give all, `Y` god, `A:deg` yaw, `T:deg` turn, `P:deg` pitch, `M:units` move, `N:i` / `I:i` / `D:i` stand near monster / item / brush entity number i, `G:x y z` go to Quake coordinates, `E:targetname` fire targets, `O:command` run a console command (e.g. `O:kill`), `V` log mover states, `L:map` load map, `Q` quit.
+Demo script actions (comma separated): `W:sec` wait, `S` screenshot, `X` fire, `H` toggle hold-fire, `U` use, `C:slot` weapon, `K` give all, `Y` god, `A:deg` yaw, `T:deg` turn, `P:deg` pitch, `M:units` move, `N:i` / `I:i` / `D:i` / `R:i` stand near monster / item / brush entity / prop number i, `F` toggle the help computer, `G:x y z` go to Quake coordinates, `E:targetname` fire targets, `O:command` run a console command (e.g. `O:kill`), `V` log mover, prop and laser states, `L:map` load map, `Q` quit.
 
 ---
 

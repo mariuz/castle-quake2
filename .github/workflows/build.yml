@@ -52,6 +52,52 @@ jobs:
           path: "*-linux-x86_64.tar.gz"
           if-no-files-found: error
 
+  autotest:
+    name: Autotest (Linux, Mesa software OpenGL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container: kambi/castle-engine-cloud-builds-tools:cge-unstable
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install virtual display and Mesa
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl1
+
+      - name: Compile (Linux)
+        run: castle-engine compile --os=linux --cpu=x86_64 --mode=release
+
+      - name: Run autotest scripts
+        run: |
+          set -eu
+          mkdir -p test_output
+          run_test() {
+            map="$1"; demo="$2"
+            echo "::group::autotest $map"
+            timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest "$map" "test_output/$map" --demo "$demo"
+            LOG=$(find / -name castle-quake2.log -newer CastleEngineManifest.xml 2>/dev/null | head -1)
+            tail -n 40 "$LOG"
+            cp "$LOG" "test_output/$map.log"
+            if grep -q "Exception" "$LOG"; then
+              echo "::error::Exception in autotest $map"; exit 1
+            fi
+            echo "::endgroup::"
+          }
+          run_test demo1 "W:2,S,K,N:3,C:9,W:0.5,X,W:0.3,S,R:14,C:7,W:0.5,X,W:0.5,S,O:kill,W:3.5,S,Q"
+          run_test demo2 "W:2,S,F,W:0.3,S,F,E:t37,W:1,Q"
+          run_test demo3 "W:2,S,O:lightstyle 6 z,W:0.5,S,O:map demo1,W:1,S,Q"
+          ls -l test_output
+          test "$(ls test_output/*.png | wc -l)" -ge 9
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autotest-screenshots
+          path: test_output/
+          if-no-files-found: warn
+
   release:
     name: GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')

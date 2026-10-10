@@ -49,6 +49,10 @@ type
     FPickupFlash: Single;
     FWeaponIcon, FAmmoIcon: String;
     FKeyIcons: TStringList;
+    FHelpVisible: Boolean;
+    FIntermission: Boolean;
+    FLevelName, FHelpPrimary, FHelpSecondary: String;
+    procedure RenderHelpComputer;
     function Pic(const AName: String): TDrawableImage;
     function DrawNumber(const X, Y: Single; const Value, Digits: Integer;
       const Alt: Boolean; const Scale: Single): Boolean;
@@ -72,6 +76,13 @@ type
     procedure Render; override;
 
     property CrosshairVisible: Boolean read FCrosshairVisible write FCrosshairVisible;
+    { Quake 2 help computer (F1): objectives and level statistics }
+    property HelpVisible: Boolean read FHelpVisible write FHelpVisible;
+    { End of level: the help computer layout as a mission summary, no status bar }
+    property Intermission: Boolean read FIntermission write FIntermission;
+    property LevelName: String read FLevelName write FLevelName;
+    property HelpPrimary: String read FHelpPrimary write FHelpPrimary;
+    property HelpSecondary: String read FHelpSecondary write FHelpSecondary;
   end;
 
 implementation
@@ -233,6 +244,67 @@ begin
   FStatsLabel.Caption := S;
 end;
 
+procedure TQuakeHud.RenderHelpComputer;
+const
+  Green: TVector4 = (X: 0.35; Y: 1.0; Z: 0.35; W: 1.0);
+var
+  Sc, PanelLeft, PanelTop, CX: Single;
+  Img: TDrawableImage;
+
+  { Quake 2 layout coordinates are in a 320x240 screen; y grows downwards }
+  function PY(const Y: Single): Single;
+  begin
+    Result := PanelTop - Y * Sc;
+  end;
+
+  procedure CenterText(const Y: Single; const S: String);
+  var
+    Lines: TStringList;
+    I: Integer;
+  begin
+    Lines := TStringList.Create;
+    try
+      Lines.Text := StringReplace(S, '\n', LineEnding, [rfReplaceAll]);
+      for I := 0 to Lines.Count - 1 do
+        UIFont.Print(CX - UIFont.TextWidth(Lines[I]) / 2,
+          PY(Y + I * 9) - UIFont.Height, Green, Lines[I]);
+    finally
+      Lines.Free;
+    end;
+  end;
+
+  procedure BoxText(const X, Y: Single; const S: String);
+  begin
+    UIFont.Print(PanelLeft + X * Sc - UIFont.TextWidth(S) / 2, PY(Y) - UIFont.Height / 2, Green, S);
+  end;
+
+begin
+  Sc := PicScale * UIScale * 0.8;
+  CX := RenderRect.Width / 2;
+  PanelLeft := CX - 160 * Sc;
+  PanelTop := RenderRect.Height / 2 + 120 * Sc;
+  Img := Pic('help');
+  if Img <> nil then
+    Img.Draw(FloatRectangle(PanelLeft + 32 * Sc, PY(8 + 192), 256 * Sc, 192 * Sc))
+  else
+    DrawRectangle(FloatRectangle(PanelLeft + 32 * Sc, PY(8 + 192), 256 * Sc, 192 * Sc),
+      Vector4(0.05, 0.12, 0.05, 0.9));
+  if FIntermission then
+    UIFont.Print(PanelLeft + 202 * Sc - UIFont.TextWidth('complete'), PY(12) - UIFont.Height, Green, 'complete')
+  else
+    UIFont.Print(PanelLeft + 202 * Sc - UIFont.TextWidth('medium'), PY(12) - UIFont.Height, Green, 'medium');
+  CenterText(26, FLevelName);
+  CenterText(56, FHelpPrimary);
+  CenterText(112, FHelpSecondary);
+  { help.pcx has KILLS / GOALS / SECRETS boxes; centre the numbers in them }
+  BoxText(32 + 48, 172, Format('%d/%d', [FStats.Kills, FStats.TotalKills]));
+  BoxText(32 + 128, 172, Format('%d/%d', [FStats.Goals, FStats.TotalGoals]));
+  BoxText(32 + 208, 172, Format('%d/%d', [FStats.Secrets, FStats.TotalSecrets]));
+  if FIntermission then
+    CenterText(186, Format('time %.2d:%.2d - press a key to continue',
+      [Trunc(FStats.LevelTime) div 60, Trunc(FStats.LevelTime) mod 60]));
+end;
+
 procedure TQuakeHud.Render;
 var
   R: TFloatRectangle;
@@ -248,6 +320,12 @@ begin
   W := R.Width;
   H := R.Height;
   Sc := PicScale * UIScale;
+
+  if FIntermission then
+  begin
+    RenderHelpComputer;
+    Exit;
+  end;
 
   { Screen blends: damage (red), quad (blue), pickup (yellow) }
   if FDamageFlash > 0 then
@@ -355,6 +433,9 @@ begin
       DrawRectangle(FloatRectangle(CX - 1, CY + 3, 2, 5), Vector4(1, 1, 1, 0.75));
     end;
   end;
+
+  if FHelpVisible then
+    RenderHelpComputer;
 end;
 
 initialization

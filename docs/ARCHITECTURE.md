@@ -71,6 +71,7 @@ Decoded images are cached and served as uncompressed TGA streams through the `qu
 - **Sky**: `SURF_SKY` faces go to a separate invisible (`Visible := False`) but colliding scene, so the player can't leave the map while the skybox (`TCastleBackground`, built from `worldspawn.sky`) shows through.
 - **Translucent / warp / flowing**: `SURF_TRANS33/66` become blended with 0.67 / 0.34 transparency; `SURF_FLOWING` gets a `TTextureTransformNode` scrolled like Quake 2 GL (`-64 * frac(t/40)`).
 - **Animated textures** follow WAL `animname` chains and are switched at 2 frames/second by changing `TImageTextureNode` URLs.
+- **Light styles**: a face stores up to 4 style indices and one RGB lightmap block per style. Faces whose styles are all 0 use the static atlas. Others go into a separate dynamic atlas (1024² for the world, 256² for brush models) with their own batches; `TQuakeDynamicLightmap.Compose` sums `block[i] * StyleValue(style[i])` per texel, applies the gamma and calls `FdImage.Changed` to re-upload. `TQuakeLighting` evaluates Quake 2's style strings (`'a'` = 0, `'m'` = 1, `'z'` ≈ 2) at 10 Hz, switchable lights (styles 32+) and `target_lightramp` ramps, and increments `Version` only when a value changes, so static frames cost nothing.
 
 ### Movers
 
@@ -89,6 +90,10 @@ Brush entities (`model "*N"`, classname `func_*`) are separate `TCastleScene`s i
 
 ---
 
+## 4b. Sound
+
+`target_speaker`s become `TQuakeSpeaker` behaviors next to a `TCastleSoundSource`: looped speakers set `Source.Sound` (always looping) and toggle `SoundPlaying` when used; one-shot speakers call `Source.Play`. Quake 2's attenuation (full volume up to 80 units, then `0.0005 × attenuation` per unit) maps onto `SoundEngine.DistanceModel := dmLinear` with `ReferenceDistance = 80` and `MaxDistance = 80 + 1 / (0.0005 × attenuation)`; `TCastleSound` instances are cached per path and attenuation.
+
 ## 5. Models (`QuakeMd2`)
 
 - MD2 indexes positions and texture coordinates separately; triangle corners are "unwelded" into unique (xyz, st) pairs so X3D can use one index list.
@@ -104,6 +109,9 @@ Brush entities (`model "*N"`, classname `func_*`) are separate `TCastleScene`s i
 - **Targets**: `UseTargets(targetname)` implements `G_UseTargets` for movers, `trigger_relay`, `trigger_counter`, `trigger_key`, `target_changelevel` (`map$spawn`), `target_secret`, `target_goal`, `target_help`, `target_speaker`, `target_explosion`, monsters (wake up) and `TRIGGERED` triggers (enable); `delay` is queued.
 - **Triggers** use the brush model bounds; `misc_teleporter` uses a box around its origin and moves the camera to `misc_teleporter_dest`.
 - **Weapons**: hitscan pellets with Quake 2 spreads (`SpreadDir`, units at 8192), resolved with `TCastleAbstractRootTransform.WorldRayCast`; the leaf transform hit is mapped back to a monster (`OwnsTransform`) or a shootable mover. The railgun pierces. Projectiles step with a ray cast per frame; grenades bounce and explode on a fuse.
+- **Props** (`TQuakeProp`): `misc_explobox` (10 health, `dmg`+40 radius explosion, chain reactions), `misc_banner` (looping animation), `misc_deadsoldier` (pose from spawnflags), `misc_satellite_dish` (animates when used), `misc_strogg_ship` (hidden until used, then flies its `path_corner`s), `misc_gib_head`.
+- **Timers and effects**: `func_timer` (`wait` ± `random`, START_ON, toggled by use), `target_splash` (particle colours by `sounds`), `target_laser` (`TCastleBox` beam stretched to the first wall hit, damages the player in it, toggled by use).
+- **Help computer / intermission**: `target_help` fills the primary / secondary objectives; on `target_changelevel` the view moves the camera to `info_player_intermission`, freezes the world and shows the help-computer layout as a mission summary until a key press.
 - **Damage**: armor absorbs `protection × damage` (jacket 0.3, combat 0.6, body 0.8), quad damage ×4, invulnerability; death restarts the level.
 - **Monsters**: idle → sight (throttled `LineOfSight`) → chase (`TCastleTransform.Move` with `CollisionSphereRadius`, floor via `TCastleTransform.Height`) → attack (callback into the world: melee, hitscan, pellets, rail, blaster bolt, rocket, grenade) → pain → death / gib. Dead monsters fire their `target`.
 
