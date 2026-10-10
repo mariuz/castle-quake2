@@ -12,7 +12,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Liquids | Warped water / lava (`SURF_WARP`), contents | Non-solid liquid surfaces, point contents from BSP leafs, swimming, drowning, lava / slime damage, underwater tints | Warp shader. |
 | Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp and skins | Powerup shells, glow, bobbing items. |
 | Sprites | SP2 (BFG, explosions) | SP2 loader, BFG ball / explosion sprites | Other sprite users (bubbles, flashes). |
-| Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove essentials as `TQuakePlayerMovement` (friction, accel, air control, steps, crouch, jump pads, falling damage) | Exact box (not sphere) collision. |
+| Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove as `TQuakePlayerMovement` (friction, accel, air control, steps, crouch, jump pads, falling damage, water, ladders, player box) | Swept box traces with plane clipping (`PM_StepSlideMove`) instead of overlap tests. |
 | Weapons | 10 + hand grenades | 10 + hand grenades, chaingun spin-up | Frame-accurate timing. |
 | Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses) | Sight / chase / attack / pain / death, 19 definitions | Pathing, ambush flag, dodging, attack frames, bosses. |
 | Props / effects | Barrels, banners, ships, lasers, splashes, explosion models | All of these used by the demo maps | Gib models with velocities, `misc_viper`, `target_blaster`. |
@@ -23,7 +23,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 ## Suggested improvements (prioritised)
 
 ### 1. Feel of the game (highest impact)
-- ~~Port Quake 2 `pmove`~~ — essentials done (`TQuakePlayerMovement`); still missing: water, ladders, and colliding with a box instead of the eye sphere + ground height test.
+- ~~Port Quake 2 `pmove`~~ — done (`TQuakePlayerMovement`, with water, ladders and the player box); a swept box trace with plane clipping would make sliding along diagonal walls exact.
 - **Per-frame weapon and monster timing** driven by MD2 frame indices (Quake 2 fires on specific animation frames), instead of cooldown timers.
 - **Monster navigation**: wall-follow / step-around when `Move` is blocked, ledge checks so monsters don't walk off cliffs, `ambush` spawnflag, dodge from rockets.
 - ~~Help computer (F1) and intermission~~ — done.
