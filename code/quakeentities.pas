@@ -133,6 +133,9 @@ type
     function IsAlive: Boolean;
     { Owns the scene: used to map ray hits back to monsters }
     function OwnsTransform(const T: TCastleTransform): Boolean;
+    { Restore from a savegame: position, facing, health, alive / dead / gibbed }
+    procedure RestoreState(const APos: TVector3; const AFacing: Single; const AHealth: Integer;
+      const AState: TMonsterState; const AAlerted, AGibbed: Boolean);
   published
     property EntityClass: String read GetEntityClass;
     property MonsterState: TMonsterState read State;
@@ -520,6 +523,34 @@ begin
   FreeAndNil(Model);
   FreeAndNil(Transform);
   inherited Destroy;
+end;
+
+procedure TQuakeMonster.RestoreState(const APos: TVector3; const AFacing: Single;
+  const AHealth: Integer; const AState: TMonsterState; const AAlerted, AGibbed: Boolean);
+begin
+  Transform.Translation := APos;
+  FacingAngle := AFacing;
+  Transform.Rotation := Vector4(0, 1, 0, DegToRad(AFacing));
+  Health := AHealth;
+  Alerted := AAlerted;
+  Gibbed := AGibbed;
+  if AState in [msDying, msDead] then
+  begin
+    KillCounted := True;
+    if Model <> nil then
+    begin
+      Model.Scene.Collides := False;
+      { Jump to the last frame of the death animation }
+      Model.PlayAnim('death,die,dead', False, 10);
+      Model.Update(30);
+    end;
+    State := msDead;
+    Transform.Exists := not AGibbed;
+  end else
+  if AAlerted then
+    SetState(msChase)
+  else
+    SetState(msIdle);
 end;
 
 function TQuakeMonster.GetEntityClass: String;

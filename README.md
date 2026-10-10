@@ -32,6 +32,7 @@ A port of **Quake 2** to the **Castle Game Engine** (Object Pascal / Free Pascal
 - **Props and effects**: exploding barrels (`misc_explobox`, chain reactions), waving banners, corpses, the satellite dish, flying Strogg ships along their `path_corner`s, `func_timer`, `target_splash` sparks, `target_laser` beams, and Quake 2's animated, skin-fading explosion model.
 - **Help computer (F1)** with the original `help.pcx`, level name, primary / secondary objectives and kills / goals / secrets, and an **intermission** at `info_player_intermission` before the next unit loads.
 - **Billboard particles** (`TBillboardNode`, soft round sprites): bullet impacts, blood, blaster sparks, splashes, rail trails, BFG blasts, teleport fountains.
+- **Savegames** (F6 / F9 quick save / load, `save` / `load <name>` in the console): the whole level state as JSON in the user config directory (`castle-config:/saves/`) — player, inventory, monsters, items, doors / plats / trains, barrels, ships, triggers, counters, timers, lasers, speakers, switchable lights, objectives.
 - Drop-down **console**, **menu** with the map list read from the loaded PAKs, and a headless **autotest / demo-script harness**.
 
 | | |
@@ -64,8 +65,9 @@ The project follows the structure of CGE's own templates (`3d_fps_game`) and the
 | **E** | Use (doors, buttons) |
 | **1 .. 9, 0** / Mouse wheel | Select weapon (Blaster .. BFG10K) |
 | **F1** | Help computer (objectives, kills / goals / secrets) |
+| **F6 / F9** | Quick save / quick load |
 | **F12** | Screenshot |
-| **~** | Console (`map`, `maps`, `god`, `give all`, `noclip`, `kill`, `fps`, `lightstyle`, `quit`, `help`) |
+| **~** | Console (`map`, `maps`, `save`, `load`, `god`, `give all`, `noclip`, `kill`, `fps`, `lightstyle`, `quit`, `help`) |
 | **F8** (debug build) | CGE inspector: hierarchy and live properties |
 | **Escape** | Menu |
 

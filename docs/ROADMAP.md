@@ -16,7 +16,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Weapons | 10 + hand grenades | 10 weapons | Hand grenades, chaingun spin-up, frame-accurate timing. |
 | Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses) | Sight / chase / attack / pain / death, 19 definitions | Pathing, ambush flag, dodging, attack frames, bosses. |
 | Props / effects | Barrels, banners, ships, lasers, splashes, explosion models | All of these used by the demo maps | Gib models with velocities, `misc_viper`, `target_blaster`. |
-| Level flow | Units, cross-level triggers, help computer, intermission | Changelevel with spawn points, help computer (F1), intermission | Cross-level triggers / state, savegames. |
+| Level flow | Units, cross-level triggers, help computer, intermission, savegames | Changelevel with spawn points, help computer (F1), intermission, savegames | Cross-level triggers / state. |
 | Audio | 3D sounds, looping speakers / entity sounds, CD music | 3D sounds with Quake 2 attenuation, looping / triggered speakers, OGG tracks | Mover move loops, monster idle sounds. |
 | Tooling | Console, `+map`, demos | Console, autotest scripts in CI (Linux, xvfb + Mesa), CGE editor components, F8 inspector | Editor property editors, screenshot diffing. |
 
@@ -46,7 +46,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 ### 4. Engineering
 - ~~CI autotests~~ — done (`autotest` job); next: compare screenshots against references.
 - **Unit tests** for the parsers (BSP lumps, MD2 unwelding, PCX RLE, WAL) with small fixture files, using CGE's test framework (`castle-tester`).
-- **Savegames**: published behavior state already exists; serialize world + behaviors with `ComponentSave` / `ComponentLoad`.
+- ~~Savegames~~ — done as JSON (entities matched by spawn order); projectiles and pending delayed events are not saved.
 - **PVS culling**: decompress the visibility lump and toggle per-cluster shapes, important for the larger full-game maps.
 - **Performance**: batch particles into one scene (currently one `TCastleScene` per particle); cache `LineOfSight` results across monsters; merge mover scenes that never move (`func_wall`).
 - **Platforms**: verify the WebAssembly workflow end to end; Android / iOS with CGE's touch navigation; gamepad input via `Controllers`.
@@ -82,8 +82,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 ### Phase 3 – Flow
 - [x] Help computer (F1) and intermission screens
 - [x] Looping ambient sounds (`target_speaker`), `func_timer`
-- [ ] Savegames
-- [ ] Cross-level triggers
+- [x] Savegames (JSON, quick save / load)
+- [ ] Cross-level triggers and carrying level state across units
 
 ### Phase 4 – Editor & tooling
 - [x] Views loaded from `.castle-user-interface` designs with published components

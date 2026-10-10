@@ -15,7 +15,7 @@ uses
   CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound,
   QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap,
-  QuakePlayer;
+  QuakePlayer, fpjson, jsonparser, CastleDownload;
 
 type
   TCameraMode = (cmFirstPerson, cmNoclip);
@@ -69,6 +69,9 @@ type
     procedure RunDemoStep(const SecondsPassed: Single);
     procedure CaptureScreenshot(const Prefix: String);
     procedure CycleWeapon(const Delta: Integer);
+    { Savegames in castle-config:/saves/<name>.json }
+    procedure SaveGame(const SaveName: String);
+    procedure LoadGame(const SaveName: String);
     { Autotest helper: stand on a floor near Target, looking at it }
     procedure GoNear(const Target: TVector3);
     procedure QuitNow;
@@ -599,6 +602,102 @@ begin
   LoadLevel(FWorld.NextMap);
 end;
 
+function SaveUrl(const SaveName: String): String;
+begin
+  Result := 'castle-config:/saves/' + LowerCase(SaveName) + '.json';
+end;
+
+procedure TViewPlay.SaveGame(const SaveName: String);
+var
+  Obj: TJSONObject;
+  Stream: TStream;
+  Text: String;
+begin
+  if (FWorld = nil) or (FWorld.Bsp = nil) or FWorld.Dead or FIntermission then
+  begin
+    Hud.ShowMessage('Can''t save now');
+    Exit;
+  end;
+  Obj := FWorld.SaveState;
+  try
+    Obj.Add('camera', TJSONArray.Create([MainViewport.Camera.Translation.X,
+      MainViewport.Camera.Translation.Y, MainViewport.Camera.Translation.Z]));
+    Obj.Add('direction', TJSONArray.Create([MainViewport.Camera.Direction.X,
+      MainViewport.Camera.Direction.Y, MainViewport.Camera.Direction.Z]));
+    Text := Obj.FormatJSON;
+  finally
+    Obj.Free;
+  end;
+  try
+    Stream := UrlSaveStream(SaveUrl(SaveName));
+    try
+      if Text <> '' then
+        Stream.WriteBuffer(Text[1], Length(Text));
+    finally
+      Stream.Free;
+    end;
+    Hud.ShowMessage('Game saved: ' + SaveName);
+    WritelnLog('GameViewPlay', 'Saved game to %s', [SaveUrl(SaveName)]);
+  except
+    on E: Exception do
+      Hud.ShowMessage('Save failed: ' + E.Message);
+  end;
+end;
+
+procedure TViewPlay.LoadGame(const SaveName: String);
+var
+  Stream: TStream;
+  Data: TJSONData;
+  Obj: TJSONObject;
+  Text: String;
+  Arr: TJSONArray;
+  Dir: TVector3;
+begin
+  try
+    Stream := Download(SaveUrl(SaveName));
+    try
+      SetLength(Text, Stream.Size);
+      if Stream.Size > 0 then
+        Stream.ReadBuffer(Text[1], Stream.Size);
+    finally
+      Stream.Free;
+    end;
+  except
+    Hud.ShowMessage('No savegame "' + SaveName + '"');
+    Exit;
+  end;
+  Data := GetJSON(Text);
+  try
+    if not (Data is TJSONObject) then
+      Exit;
+    Obj := TJSONObject(Data);
+    if FIntermission then
+    begin
+      FIntermission := False;
+      Hud.Intermission := False;
+    end;
+    LoadLevel(Obj.Get('map', 'demo1'));
+    if FWorld.Bsp = nil then
+      Exit;
+    FWorld.LoadState(Obj);
+    Arr := Obj.Get('camera', TJSONArray(nil));
+    if (Arr <> nil) and (Arr.Count = 3) then
+    begin
+      Dir := Vector3(0, 0, -1);
+      if (Obj.Get('direction', TJSONArray(nil)) <> nil) and (Obj.Arrays['direction'].Count = 3) then
+        Dir := Vector3(Obj.Arrays['direction'].Floats[0], Obj.Arrays['direction'].Floats[1],
+          Obj.Arrays['direction'].Floats[2]);
+      MainViewport.Camera.SetWorldView(Vector3(Arr.Floats[0], Arr.Floats[1], Arr.Floats[2]),
+        Dir, Vector3(0, 1, 0));
+      PlayerMovement.ResetVelocity;
+    end;
+    Hud.ShowMessage('Game loaded: ' + SaveName);
+    WritelnLog('GameViewPlay', 'Loaded game from %s', [SaveUrl(SaveName)]);
+  finally
+    Data.Free;
+  end;
+end;
+
 procedure TViewPlay.CycleWeapon(const Delta: Integer);
 var
   I, Slot: Integer;
@@ -735,6 +834,18 @@ begin
     Exit(True);
   end;
 
+  if Event.IsKey(keyF6) then
+  begin
+    SaveGame('quick');
+    Exit(True);
+  end;
+
+  if Event.IsKey(keyF9) then
+  begin
+    LoadGame('quick');
+    Exit(True);
+  end;
+
   if Event.IsKey(keyF12) then
   begin
     CaptureScreenshot('screenshot');
@@ -768,6 +879,20 @@ begin
   if Cmd = 'fps' then
     LabelFps.Exists := not LabelFps.Exists
   else
+  if Cmd = 'save' then
+  begin
+    if Args = '' then
+      SaveGame('quick')
+    else
+      SaveGame(Args);
+  end else
+  if Cmd = 'load' then
+  begin
+    if Args = '' then
+      LoadGame('quick')
+    else
+      LoadGame(Args);
+  end else
   if Cmd = 'lightstyle' then
   begin
     { lightstyle <n> <pattern of a..z>, e.g. "lightstyle 0 z" for full bright }
@@ -805,6 +930,8 @@ begin
     Console.Print('  give all     - All weapons, ammo, armor, keys');
     Console.Print('  noclip       - Toggle fly mode');
     Console.Print('  fps          - Toggle FPS counter');
+    Console.Print('  save [name]  - Save the game (F6 = quick save)');
+    Console.Print('  load [name]  - Load a saved game (F9 = quick load)');
     Console.Print('  lightstyle n p - Set light style n to pattern p (a = dark .. z = bright)');
     Console.Print('  kill         - Suicide');
     Console.Print('  quit         - Exit game');

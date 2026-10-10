@@ -7,7 +7,7 @@ unit QuakeWorld;
 interface
 
 uses
-  SysUtils, Classes, Math, Generics.Collections,
+  SysUtils, Classes, Math, Generics.Collections, fpjson, jsonparser,
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes,
   QuakePak, QuakeBsp, QuakeGeometry, QuakeMap, QuakeMd2, QuakePlayer, QuakeLight, QuakeSound, QuakeHud,
   QuakeParticles, QuakeEntities;
@@ -144,6 +144,11 @@ type
 
     { Called by the view after it moved the camera to a teleport destination }
     procedure TeleportDone;
+
+    { Savegame: the whole level state (the map must already be loaded for
+      LoadState). The view adds the camera. }
+    function SaveState: TJSONObject;
+    procedure LoadState(const Obj: TJSONObject);
 
     { info_player_intermission camera (CGE position, Quake yaw / pitch).
       False if the map has none. }
@@ -1819,6 +1824,307 @@ begin
   if (Mover <> nil) and (Mover.Kind in [mkDoor, mkDoorRotating, mkButton, mkPlat]) and
      ((Mover.Kind = mkButton) or Mover.AutoOpen) then
     Mover.Use;
+end;
+
+function VecToJson(const V: TVector3): TJSONArray;
+begin
+  Result := TJSONArray.Create([V.X, V.Y, V.Z]);
+end;
+
+function JsonToVec(const A: TJSONData): TVector3;
+begin
+  Result := TVector3.Zero;
+  if (A <> nil) and (A.JSONType = jtArray) and (A.Count = 3) then
+    Result := Vector3(A.Items[0].AsFloat, A.Items[1].AsFloat, A.Items[2].AsFloat);
+end;
+
+function TQuakeWorld.SaveState: TJSONObject;
+var
+  Arr: TJSONArray;
+  O: TJSONObject;
+  I: Integer;
+  A: TAmmoType;
+  Pair: specialize TPair<TQuakeEntity, Single>;
+  CPair: specialize TPair<TQuakeEntity, Integer>;
+begin
+  Result := TJSONObject.Create;
+  Result.Add('map', FBsp.MapName);
+  Result.Add('time', FTime);
+  { Player inventory }
+  O := TJSONObject.Create;
+  O.Add('health', FStats.Health);
+  O.Add('maxHealth', FStats.MaxHealth);
+  O.Add('armor', FStats.Armor);
+  O.Add('armorType', FStats.ArmorType);
+  O.Add('weaponMask', Int64(FStats.WeaponMask));
+  O.Add('weapon', FStats.CurrentWeapon);
+  O.Add('keys', Int64(FStats.Keys));
+  O.Add('kills', FStats.Kills);
+  O.Add('secrets', FStats.Secrets);
+  O.Add('goals', FStats.Goals);
+  O.Add('levelTime', FStats.LevelTime);
+  O.Add('quad', FStats.QuadTime);
+  O.Add('invuln', FStats.InvulnTime);
+  Arr := TJSONArray.Create;
+  for A := Low(TAmmoType) to High(TAmmoType) do
+    Arr.Add(FStats.Ammo[A]);
+  O.Add('ammo', Arr);
+  Arr := TJSONArray.Create;
+  for A := Low(TAmmoType) to High(TAmmoType) do
+    Arr.Add(FStats.MaxAmmo[A]);
+  O.Add('maxAmmo', Arr);
+  O.Add('helpPrimary', FHelpPrimary);
+  O.Add('helpSecondary', FHelpSecondary);
+  Result.Add('player', O);
+
+  { Entities, matched by their deterministic spawn order }
+  Arr := TJSONArray.Create;
+  for I := 0 to FMonsters.Count - 1 do
+  begin
+    O := TJSONObject.Create;
+    O.Add('pos', VecToJson(FMonsters[I].Transform.Translation));
+    O.Add('facing', FMonsters[I].FacingAngle);
+    O.Add('health', FMonsters[I].Health);
+    O.Add('state', Ord(FMonsters[I].State));
+    O.Add('alerted', FMonsters[I].Alerted);
+    O.Add('gibbed', FMonsters[I].Gibbed);
+    Arr.Add(O);
+  end;
+  Result.Add('monsters', Arr);
+
+  Arr := TJSONArray.Create;
+  for I := 0 to FPickups.Count - 1 do
+    Arr.Add(FPickups[I].Collected);
+  Result.Add('pickups', Arr);
+
+  Arr := TJSONArray.Create;
+  for I := 0 to FGeometry.Movers.Count - 1 do
+  begin
+    O := TJSONObject.Create;
+    O.Add('state', Ord(FGeometry.Movers[I].State));
+    O.Add('progress', FGeometry.Movers[I].Progress);
+    O.Add('timer', FGeometry.Movers[I].StateTimer);
+    O.Add('health', FGeometry.Movers[I].Health);
+    O.Add('exists', FGeometry.Movers[I].Transform.Exists);
+    O.Add('spinning', FGeometry.Movers[I].Spinning);
+    O.Add('spin', FGeometry.Movers[I].SpinAngle);
+    O.Add('trainRunning', FGeometry.Movers[I].TrainRunning);
+    O.Add('pos', VecToJson(FGeometry.Movers[I].Transform.Translation));
+    O.Add('trainFrom', VecToJson(FGeometry.Movers[I].TrainFrom));
+    O.Add('trainTo', VecToJson(FGeometry.Movers[I].TrainTo));
+    O.Add('moveLength', FGeometry.Movers[I].MoveLength);
+    if FGeometry.Movers[I].TrainCorner <> nil then
+      O.Add('trainCorner', FBsp.Entities.IndexOf(FGeometry.Movers[I].TrainCorner))
+    else
+      O.Add('trainCorner', -1);
+    Arr.Add(O);
+  end;
+  Result.Add('movers', Arr);
+
+  Arr := TJSONArray.Create;
+  for I := 0 to FProps.Count - 1 do
+  begin
+    O := TJSONObject.Create;
+    O.Add('health', FProps[I].Health);
+    O.Add('destroyed', FProps[I].Destroyed);
+    O.Add('exists', FProps[I].Transform.Exists);
+    O.Add('flying', FProps[I].Flying);
+    O.Add('pos', VecToJson(FProps[I].Transform.Translation));
+    O.Add('flyTarget', VecToJson(FProps[I].FlyTarget));
+    if FProps[I].FlyCorner <> nil then
+      O.Add('flyCorner', FBsp.Entities.IndexOf(FProps[I].FlyCorner))
+    else
+      O.Add('flyCorner', -1);
+    Arr.Add(O);
+  end;
+  Result.Add('props', Arr);
+
+  Arr := TJSONArray.Create;
+  for I := 0 to FTriggers.Count - 1 do
+    Arr.Add(FTriggers[I].Enabled);
+  Result.Add('triggers', Arr);
+
+  Arr := TJSONArray.Create;
+  for I := 0 to FLasers.Count - 1 do
+    Arr.Add(FLasers[I].IsOn);
+  Result.Add('lasers', Arr);
+
+  Arr := TJSONArray.Create;
+  for I := 0 to FSpeakers.Count - 1 do
+    Arr.Add(FSpeakers[I].Playing);
+  Result.Add('speakers', Arr);
+
+  O := TJSONObject.Create;
+  for Pair in FTimers do
+    if Pair.Value < 0 then
+      O.Add(IntToStr(FBsp.Entities.IndexOf(Pair.Key)), -1)
+    else
+      O.Add(IntToStr(FBsp.Entities.IndexOf(Pair.Key)), Pair.Value - FTime);
+  Result.Add('timers', O);
+
+  O := TJSONObject.Create;
+  for CPair in FCounters do
+    O.Add(IntToStr(FBsp.Entities.IndexOf(CPair.Key)), CPair.Value);
+  Result.Add('counters', O);
+
+  Arr := TJSONArray.Create;
+  for I := 32 to 62 do
+    Arr.Add(Lighting.GetStyle(I));
+  Result.Add('lightStyles', Arr);
+end;
+
+procedure TQuakeWorld.LoadState(const Obj: TJSONObject);
+var
+  O: TJSONObject;
+  Arr: TJSONArray;
+  I, Idx: Integer;
+  A: TAmmoType;
+  Mover: TQuakeMover;
+  Prop: TQuakeProp;
+  Key: String;
+begin
+  O := Obj.Get('player', TJSONObject(nil));
+  if O <> nil then
+  begin
+    FStats.Health := O.Get('health', FStats.Health);
+    FStats.MaxHealth := O.Get('maxHealth', FStats.MaxHealth);
+    FStats.Armor := O.Get('armor', FStats.Armor);
+    FStats.ArmorType := O.Get('armorType', FStats.ArmorType);
+    FStats.WeaponMask := O.Get('weaponMask', Int64(FStats.WeaponMask));
+    FStats.Keys := O.Get('keys', Int64(FStats.Keys));
+    FStats.Kills := O.Get('kills', 0);
+    FStats.Secrets := O.Get('secrets', 0);
+    FStats.Goals := O.Get('goals', 0);
+    FStats.LevelTime := O.Get('levelTime', 0.0);
+    FStats.QuadTime := O.Get('quad', 0.0);
+    FStats.InvulnTime := O.Get('invuln', 0.0);
+    Arr := O.Get('ammo', TJSONArray(nil));
+    if Arr <> nil then
+      for A := Low(TAmmoType) to High(TAmmoType) do
+        if Ord(A) < Arr.Count then
+          FStats.Ammo[A] := Arr.Integers[Ord(A)];
+    Arr := O.Get('maxAmmo', TJSONArray(nil));
+    if Arr <> nil then
+      for A := Low(TAmmoType) to High(TAmmoType) do
+        if Ord(A) < Arr.Count then
+          FStats.MaxAmmo[A] := Arr.Integers[Ord(A)];
+    FHelpPrimary := O.Get('helpPrimary', '');
+    FHelpSecondary := O.Get('helpSecondary', '');
+    if FHud <> nil then
+    begin
+      FHud.HelpPrimary := FHelpPrimary;
+      FHud.HelpSecondary := FHelpSecondary;
+    end;
+    FStats.CurrentWeapon := 1;
+    SelectWeapon(O.Get('weapon', 1));
+    FWeaponCooldown := 0;
+  end;
+
+  Arr := Obj.Get('monsters', TJSONArray(nil));
+  if Arr <> nil then
+    for I := 0 to Min(Arr.Count, FMonsters.Count) - 1 do
+    begin
+      O := Arr.Objects[I];
+      FMonsters[I].RestoreState(JsonToVec(O.Find('pos')), O.Get('facing', 0.0),
+        O.Get('health', 0), TMonsterState(O.Get('state', 0)),
+        O.Get('alerted', False), O.Get('gibbed', False));
+    end;
+
+  Arr := Obj.Get('pickups', TJSONArray(nil));
+  if Arr <> nil then
+    for I := 0 to Min(Arr.Count, FPickups.Count) - 1 do
+      FPickups[I].Collected := Arr.Booleans[I];
+
+  Arr := Obj.Get('movers', TJSONArray(nil));
+  if Arr <> nil then
+    for I := 0 to Min(Arr.Count, FGeometry.Movers.Count) - 1 do
+    begin
+      O := Arr.Objects[I];
+      Mover := FGeometry.Movers[I];
+      Mover.State := TQuakeMoverState(O.Get('state', 0));
+      Mover.Progress := O.Get('progress', 0.0);
+      Mover.StateTimer := O.Get('timer', 0.0);
+      Mover.Health := O.Get('health', Mover.Health);
+      Mover.Transform.Exists := O.Get('exists', True);
+      Mover.Spinning := O.Get('spinning', Mover.Spinning);
+      Mover.SpinAngle := O.Get('spin', 0.0);
+      Mover.TrainRunning := O.Get('trainRunning', Mover.TrainRunning);
+      Mover.MoveLength := O.Get('moveLength', Mover.MoveLength);
+      Mover.TrainFrom := JsonToVec(O.Find('trainFrom'));
+      Mover.TrainTo := JsonToVec(O.Find('trainTo'));
+      Idx := O.Get('trainCorner', -1);
+      if (Idx >= 0) and (Idx < FBsp.Entities.Count) then
+        Mover.TrainCorner := FBsp.Entities[Idx];
+      if Mover.Kind = mkTrain then
+        Mover.Transform.Translation := JsonToVec(O.Find('pos'));
+      Mover.ApplyPose;
+    end;
+
+  Arr := Obj.Get('props', TJSONArray(nil));
+  if Arr <> nil then
+    for I := 0 to Min(Arr.Count, FProps.Count) - 1 do
+    begin
+      O := Arr.Objects[I];
+      Prop := FProps[I];
+      Prop.Health := O.Get('health', Prop.Health);
+      Prop.Destroyed := O.Get('destroyed', False);
+      Prop.Transform.Exists := O.Get('exists', True);
+      Prop.Flying := O.Get('flying', False);
+      Prop.Transform.Translation := JsonToVec(O.Find('pos'));
+      Prop.FlyTarget := JsonToVec(O.Find('flyTarget'));
+      Idx := O.Get('flyCorner', -1);
+      if (Idx >= 0) and (Idx < FBsp.Entities.Count) then
+        Prop.FlyCorner := FBsp.Entities[Idx];
+    end;
+
+  Arr := Obj.Get('triggers', TJSONArray(nil));
+  if Arr <> nil then
+    for I := 0 to Min(Arr.Count, FTriggers.Count) - 1 do
+      FTriggers[I].Enabled := Arr.Booleans[I];
+
+  Arr := Obj.Get('lasers', TJSONArray(nil));
+  if Arr <> nil then
+    for I := 0 to Min(Arr.Count, FLasers.Count) - 1 do
+      FLasers[I].IsOn := Arr.Booleans[I];
+
+  Arr := Obj.Get('speakers', TJSONArray(nil));
+  if Arr <> nil then
+    for I := 0 to Min(Arr.Count, FSpeakers.Count) - 1 do
+      if FSpeakers[I].Looped and (FSpeakers[I].Playing <> Arr.Booleans[I]) then
+        FSpeakers[I].Activate;
+
+  O := Obj.Get('timers', TJSONObject(nil));
+  if O <> nil then
+    for I := 0 to O.Count - 1 do
+    begin
+      Key := O.Names[I];
+      Idx := StrToIntDef(Key, -1);
+      if (Idx >= 0) and (Idx < FBsp.Entities.Count) and FTimers.ContainsKey(FBsp.Entities[Idx]) then
+      begin
+        if O.Items[I].AsFloat < 0 then
+          FTimers[FBsp.Entities[Idx]] := -1
+        else
+          FTimers[FBsp.Entities[Idx]] := FTime + O.Items[I].AsFloat;
+      end;
+    end;
+
+  O := Obj.Get('counters', TJSONObject(nil));
+  if O <> nil then
+    for I := 0 to O.Count - 1 do
+    begin
+      Idx := StrToIntDef(O.Names[I], -1);
+      if (Idx >= 0) and (Idx < FBsp.Entities.Count) then
+        FCounters.AddOrSetValue(FBsp.Entities[Idx], O.Items[I].AsInteger);
+    end;
+
+  Arr := Obj.Get('lightStyles', TJSONArray(nil));
+  if Arr <> nil then
+    for I := 0 to Min(Arr.Count, 31) - 1 do
+      Lighting.SetStyle(32 + I, Arr.Strings[I]);
+
+  { Pending events from before the save are not restored }
+  FDelayed.Clear;
+  FProjectiles.Clear;
 end;
 
 function TQuakeWorld.IntermissionSpot(out Pos: TVector3; out Yaw, Pitch: Single): Boolean;

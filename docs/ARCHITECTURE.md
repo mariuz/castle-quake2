@@ -121,6 +121,10 @@ Brush entities (`model "*N"`, classname `func_*`) are separate `TCastleScene`s i
 
 ---
 
+## 6b. Savegames
+
+`TQuakeWorld.SaveState` / `LoadState` write and read a `fpjson` object: player stats and inventory, then arrays per entity list (monsters, pickups, movers, props, triggers, lasers, speakers) in spawn order, plus `func_timer` / `trigger_counter` state keyed by BSP entity index and light styles 32–62. Loading reloads the map fresh and applies the state on top (`TQuakeMonster.RestoreState`, `TQuakeMover.ApplyPose`). The view adds the camera and stores the file with `UrlSaveStream('castle-config:/saves/<name>.json')`.
+
 ## 7. Castle Game Engine editor integration
 
 | CGE convention (from templates / samples) | How Castle Quake 2 follows it |

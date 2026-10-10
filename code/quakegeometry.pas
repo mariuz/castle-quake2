@@ -130,6 +130,8 @@ type
     function Use: Boolean;
     { For plats: player stepped on it. }
     procedure PlayerOnTop;
+    { Re-apply Transform from State / Progress / SpinAngle (after loading a save) }
+    procedure ApplyPose;
   published
     property EntityClass: String read GetEntityClass;
     property EntityTargetName: String read TargetName;
@@ -738,6 +740,22 @@ begin
   { In the TQuakeMap coordinate system (the map itself is kept at identity),
     so this works also while the design is being loaded }
   Result := Transform.BoundingBox;
+end;
+
+procedure TQuakeMover.ApplyPose;
+begin
+  case Kind of
+    mkDoorRotating:
+      Transform.Rotation := Vector4(RotAxis, Angle1 + (Angle2 - Angle1) * Progress);
+    mkRotating:
+      Transform.Rotation := Vector4(RotAxis, SpinAngle);
+    mkTrain:
+      ; { trains save their translation directly }
+    mkStatic:
+      ;
+    else
+      Transform.Translation := BaseOffset + Pos1 + (Pos2 - Pos1) * Progress;
+  end;
 end;
 
 function TQuakeMover.Center: TVector3;
