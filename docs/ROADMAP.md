@@ -80,8 +80,9 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Player-clip brushes as invisible walls (polygons built from the brush planes)
 - [ ] Box-shaped player collision
 - [x] Monster steering around obstacles (±45° / ±90° detours) and ledge checks
+- [x] `path_corner` patrols and `point_combat` (hold) combat points; player-clip doesn't block monsters
 - [x] Attacks happen partway through the attack animation (wind-up; pain cancels the shot)
-- [ ] Medic revive, bosses, real pathfinding
+- [ ] Medic revive, bosses, real pathfinding (needs the full game data: no medic or bosses in the demo)
 - [x] Hand grenades (cook, throw speed by hold time, explode in hand), chaingun spin-up
 
 ### Phase 3 – Flow

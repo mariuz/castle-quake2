@@ -97,6 +97,8 @@ type
     function PlayerBox: TBox3D;
     function GiveItem(const Def: PQuakeItemDef): Boolean;
     procedure MonsterAttack(const Monster: TQuakeMonster);
+    { Random entity with this targetname (Quake 2 G_PickTarget), nil if none }
+    function PickTarget(const ATargetName: String): TQuakeEntity;
     function DamageMultiplier: Integer;
     procedure FireHitscan(const Origin, Dir: TVector3; const Damage: Integer;
       const HSpread, VSpread: Single; const Rail: Boolean = False);
@@ -438,6 +440,9 @@ begin
     begin
       Monster := TQuakeMonster.CreateMonster(FMap, MonsterDef, Ent, Pos, Ent.Angle);
       Monster.OnAttack := @MonsterAttack;
+      Monster.OnPickTarget := @PickTarget;
+      Monster.OnUseTargets := @UseTargets;
+      Monster.ResolveTargets;
       FMonsters.Add(Monster);
       Inc(FStats.TotalKills);
       Continue;
@@ -1193,6 +1198,22 @@ begin
   end;
 end;
 
+function TQuakeWorld.PickTarget(const ATargetName: String): TQuakeEntity;
+var
+  List: TQuakeEntityList;
+begin
+  Result := nil;
+  if (ATargetName = '') or (FBsp = nil) then
+    Exit;
+  List := FBsp.FindByTargetName(ATargetName);
+  try
+    if List.Count > 0 then
+      Result := List[Random(List.Count)];
+  finally
+    List.Free;
+  end;
+end;
+
 procedure TQuakeWorld.UseTargets(const ATarget: String);
 var
   List: TQuakeEntityList;
@@ -1858,6 +1879,8 @@ begin
     CheckMovers;
   end;
 
+  { Player-clip brushes only block the player (Quake 2 MASK_MONSTERSOLID) }
+  FGeometry.ScenePlayerClip.Collides := False;
   for M in FMonsters do
   begin
     M.UpdateAI(SecondsPassed, FPlayerPos);
@@ -1866,9 +1889,10 @@ begin
       M.KillCounted := True;
       Inc(FStats.Kills);
       { Dead monsters fire their targets (Quake 2 monster_death_use) }
-      UseTargets(M.Entity.Target);
+      UseTargets(M.DeathTarget);
     end;
   end;
+  FGeometry.ScenePlayerClip.Collides := True;
 
   UpdateTimersAndLasers(SecondsPassed);
   UpdateLiquids(SecondsPassed);

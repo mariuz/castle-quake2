@@ -505,11 +505,17 @@ begin
         BoolToStr(FWorld.Props[J].Destroyed, True), BoolToStr(FWorld.Props[J].Flying, True),
         BoolToStr(FWorld.Props[J].Transform.Exists, True)]);
     for J := 0 to FWorld.Monsters.Count - 1 do
-      if FWorld.Monsters[J].Alerted and FWorld.Monsters[J].IsAlive then
-        WritelnLog('Demo', 'Monster %d %s state %d dist %.0f y %.0f', [J,
+      if FWorld.Monsters[J].IsAlive and (FWorld.Monsters[J].Alerted or
+         (FWorld.Monsters[J].MoveTarget <> nil) or (FWorld.Monsters[J].GoalEntity <> nil) or
+         (FWorld.Monsters[J].CombatTarget <> '')) then
+        WritelnLog('Demo', 'Monster %d %s state %d dist %.0f pos %s alerted %s patrol %s combatpoint %s %s hold %s', [J,
           FWorld.Monsters[J].Def^.ClassName, Ord(FWorld.Monsters[J].State),
           PointsDistance(FWorld.Monsters[J].Transform.Translation, MainViewport.Camera.Translation),
-          FWorld.Monsters[J].Transform.Translation.Y]);
+          CgeToQuake(FWorld.Monsters[J].Transform.Translation).ToString,
+          BoolToStr(FWorld.Monsters[J].Alerted, True),
+          BoolToStr(FWorld.Monsters[J].MoveTarget <> nil, True),
+          BoolToStr(FWorld.Monsters[J].GoalEntity <> nil, True), FWorld.Monsters[J].CombatTarget,
+          BoolToStr(FWorld.Monsters[J].HoldGround, True)]);
     for J := 0 to FWorld.Lasers.Count - 1 do
       WritelnLog('Demo', 'Laser %d on %s length %.0f', [J,
         BoolToStr(FWorld.Lasers[J].IsOn, True), FWorld.Lasers[J].Length]);

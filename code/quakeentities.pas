@@ -89,6 +89,9 @@ type
 
   TQuakeMonster = class;
   TMonsterAttackEvent = procedure(const Monster: TQuakeMonster) of object;
+  { Pick an entity by targetname (random one if several, like G_PickTarget) }
+  TPickTargetEvent = function(const ATargetName: String): TQuakeEntity of object;
+  TUseTargetsEvent = procedure(const ATarget: String) of object;
 
   { Active 3D monster in the world.
     A TCastleBehavior of its Transform, inspectable in the CGE inspector. }
@@ -104,12 +107,26 @@ type
     FIdleTimer: Single;
     FLostSightTime: Single;
     FSearched: Boolean;
+    FWalking: Boolean;
+    { Seconds to stand at the current path_corner ("wait") }
+    FPauseTime: Single;
     { Fraction of the attack animation at which the attack happens }
     function AttackFirePoint: Single;
     { Move along Dir (with wall sliding) unless it walks off a ledge }
-    function TryMove(const Dir: TVector3; const SecondsPassed: Single): Boolean;
+    function TryMove(const Dir: TVector3; const SecondsPassed: Single;
+      const SpeedScale: Single = 1): Boolean;
     { Move towards WantDir, detouring around obstacles }
-    procedure Steer(const WantDir: TVector3; const SecondsPassed: Single);
+    procedure Steer(const WantDir: TVector3; const SecondsPassed: Single;
+      const SpeedScale: Single = 1);
+    { Turn (at most 360 degrees per second) to look along Delta }
+    procedure FaceTowards(const Delta: TVector3; const SecondsPassed: Single);
+    { Distance to an entity's origin (horizontal unless flying); Delta = CGE vector to it }
+    function DistanceTo(const Ent: TQuakeEntity; out Delta: TVector3): Single;
+    { Idle: walk the path_corner chain (Quake 2 ai_walk / path_corner_touch) }
+    procedure Patrol(const SecondsPassed: Single);
+    { Alerted with a point_combat goal: run there without attacking }
+    procedure GoToCombatPoint(const SecondsPassed: Single);
+    procedure SetWalking(const Value: Boolean);
     function GetEntityClass: String;
     procedure SetState(const NewState: TMonsterState);
     procedure StickToFloor(const SecondsPassed: Single);
@@ -127,12 +144,26 @@ type
     CanSeePlayer: Boolean;
     Gibbed: Boolean;
     KillCounted: Boolean;
+    { Targets fired on death (monster_death_use); empty when "target" was a path }
+    DeathTarget: String;
+    { path_corner walked to while idle }
+    MoveTarget: TQuakeEntity;
+    { point_combat targetname to run to when alerted; GoalEntity while running }
+    CombatTarget: String;
+    GoalEntity: TQuakeEntity;
+    { Reached a "hold" point_combat: attack from here, don't chase (AI_STAND_GROUND) }
+    HoldGround: Boolean;
     OnAttack: TMonsterAttackEvent;
+    OnPickTarget: TPickTargetEvent;
+    OnUseTargets: TUseTargetsEvent;
     constructor CreateMonster(const AParent: TCastleTransform; const ADef: PQuakeMonsterDef;
       const AEntity: TQuakeEntity; const Pos: TVector3; const Yaw: Single);
     destructor Destroy; override;
     { Eye position in CGE space }
     function EyePos: TVector3;
+    { Sort "target" into a patrol path, a combat point or death targets,
+      like Quake 2 monster_start_go. Call once OnPickTarget is set. }
+    procedure ResolveTargets;
     procedure UpdateAI(const SecondsPassed: Single; const PlayerPos: TVector3);
     procedure TakeDamage(const Dmg: Integer);
     procedure Alert;
@@ -657,7 +688,126 @@ begin
     Exit;
   Alerted := True;
   Sounds.PlayAt(MonsterSound(Def, Def^.SightSound), Transform);
+  { Quake 2 FoundTarget: stop patrolling, run to the combat point first }
+  MoveTarget := nil;
+  if (CombatTarget <> '') and Assigned(OnPickTarget) then
+    GoalEntity := OnPickTarget(CombatTarget);
+  CombatTarget := '';
   SetState(msChase);
+end;
+
+procedure TQuakeMonster.ResolveTargets;
+var
+  Ent: TQuakeEntity;
+begin
+  DeathTarget := Entity.Target;
+  CombatTarget := Entity.GetField('combattarget');
+  if (Entity.Target = '') or not Assigned(OnPickTarget) then
+    Exit;
+  Ent := OnPickTarget(Entity.Target);
+  if Ent = nil then
+    Exit;
+  if Ent.ClassName = 'point_combat' then
+  begin
+    CombatTarget := Entity.Target;
+    DeathTarget := '';
+  end else
+  if Ent.ClassName = 'path_corner' then
+  begin
+    MoveTarget := Ent;
+    DeathTarget := '';
+  end;
+end;
+
+procedure TQuakeMonster.SetWalking(const Value: Boolean);
+begin
+  if FWalking = Value then
+    Exit;
+  FWalking := Value;
+  if Model = nil then
+    Exit;
+  if Value then
+    Model.PlayAnim('walk,run', True, 10)
+  else
+    Model.PlayAnim('stand,idle,fidget', True, 10);
+end;
+
+procedure TQuakeMonster.FaceTowards(const Delta: TVector3; const SecondsPassed: Single);
+var
+  TargetYaw, Diff: Single;
+begin
+  TargetYaw := RadToDeg(ArcTan2(-Delta.Z, Delta.X));
+  Diff := FloatModulo(TargetYaw - FacingAngle + 540, 360) - 180;
+  FacingAngle := FacingAngle + EnsureRange(Diff, -360 * SecondsPassed, 360 * SecondsPassed);
+  Transform.Rotation := Vector4(0, 1, 0, DegToRad(FacingAngle));
+end;
+
+function TQuakeMonster.DistanceTo(const Ent: TQuakeEntity; out Delta: TVector3): Single;
+begin
+  Delta := QuakeToCge(Ent.Origin) - Transform.Translation;
+  if not Def^.Flying then
+    Delta.Y := 0;
+  Result := Delta.Length;
+end;
+
+procedure TQuakeMonster.Patrol(const SecondsPassed: Single);
+var
+  Delta: TVector3;
+  Wait: Single;
+  Corner: TQuakeEntity;
+begin
+  if FPauseTime > 0 then
+  begin
+    FPauseTime := FPauseTime - SecondsPassed;
+    SetWalking(False);
+    Exit;
+  end;
+  if DistanceTo(MoveTarget, Delta) > 24 then
+  begin
+    SetWalking(True);
+    FaceTowards(Delta, SecondsPassed);
+    Steer(Delta.Normalize, SecondsPassed, 0.4);
+    Exit;
+  end;
+
+  { Reached the corner (path_corner_touch) }
+  Corner := MoveTarget;
+  if Assigned(OnUseTargets) then
+    OnUseTargets(Corner.GetField('pathtarget'));
+  Wait := Corner.GetFloat('wait', 0);
+  if (Corner.Target <> '') and (Wait >= 0) then
+    MoveTarget := OnPickTarget(Corner.Target)
+  else
+    MoveTarget := nil;
+  if Wait > 0 then
+    FPauseTime := Wait;
+  if MoveTarget = nil then
+    SetWalking(False);
+end;
+
+procedure TQuakeMonster.GoToCombatPoint(const SecondsPassed: Single);
+var
+  Delta: TVector3;
+  Point: TQuakeEntity;
+begin
+  if DistanceTo(GoalEntity, Delta) > 24 then
+  begin
+    FaceTowards(Delta, SecondsPassed);
+    Steer(Delta.Normalize, SecondsPassed);
+    Exit;
+  end;
+
+  { Reached it (point_combat_touch): next point, or hold / resume the fight }
+  Point := GoalEntity;
+  if Assigned(OnUseTargets) then
+    OnUseTargets(Point.GetField('pathtarget'));
+  if Point.Target <> '' then
+    GoalEntity := OnPickTarget(Point.Target)
+  else
+  begin
+    GoalEntity := nil;
+    HoldGround := (Point.GetInt('spawnflags') and 1) <> 0;
+  end;
 end;
 
 procedure TQuakeMonster.TakeDamage(const Dmg: Integer);
@@ -802,15 +952,24 @@ begin
       if MonsterIdleSound(Def) <> '' then
         Sounds.PlayAt(MonsterIdleSound(Def), Transform, 1, 2);
     end;
+    if MoveTarget <> nil then
+      Patrol(SecondsPassed)
+    else
+      SetWalking(False);
+    StickToFloor(SecondsPassed);
+    Exit;
+  end;
+  FWalking := False;
+
+  if (GoalEntity <> nil) and (State <> msAttack) then
+  begin
+    GoToCombatPoint(SecondsPassed);
     StickToFloor(SecondsPassed);
     Exit;
   end;
 
   { Turn towards the player }
-  TargetYaw := RadToDeg(ArcTan2(-Delta.Z, Delta.X));
-  Diff := FloatModulo(TargetYaw - FacingAngle + 540, 360) - 180;
-  FacingAngle := FacingAngle + EnsureRange(Diff, -360 * SecondsPassed, 360 * SecondsPassed);
-  Transform.Rotation := Vector4(0, 1, 0, DegToRad(FacingAngle));
+  FaceTowards(Delta, SecondsPassed);
 
   AttackCooldown := AttackCooldown - SecondsPassed;
 
@@ -840,7 +999,13 @@ begin
     Exit;
   end;
 
-  { Chase: melee monsters close in, ranged ones keep some distance }
+  { Chase: melee monsters close in, ranged ones keep some distance
+    (not when holding a combat point) }
+  if HoldGround then
+  begin
+    StickToFloor(SecondsPassed);
+    Exit;
+  end else
   if (Def^.Attack = akMelee) or (Dist > Def^.AttackRange * 0.6) or not CanSeePlayer then
   begin
     MoveVec := Delta;
@@ -863,7 +1028,8 @@ begin
     Result := 0.35;
 end;
 
-function TQuakeMonster.TryMove(const Dir: TVector3; const SecondsPassed: Single): Boolean;
+function TQuakeMonster.TryMove(const Dir: TVector3; const SecondsPassed: Single;
+  const SpeedScale: Single): Boolean;
 var
   Probe: TVector3;
   Above: Single;
@@ -875,10 +1041,11 @@ begin
     if (not Transform.Height(Probe, Above)) or (Above > 24 + 64) then
       Exit(False);
   end;
-  Result := Transform.Move(Dir * Def^.Speed * SecondsPassed, False, True);
+  Result := Transform.Move(Dir * Def^.Speed * SpeedScale * SecondsPassed, False, True);
 end;
 
-procedure TQuakeMonster.Steer(const WantDir: TVector3; const SecondsPassed: Single);
+procedure TQuakeMonster.Steer(const WantDir: TVector3; const SecondsPassed: Single;
+  const SpeedScale: Single);
 const
   DetourAngles: array[0..3] of Single = (Pi / 4, -Pi / 4, Pi / 2, -Pi / 2);
 var
@@ -889,17 +1056,17 @@ begin
   if FDetourTime > 0 then
   begin
     FDetourTime := FDetourTime - SecondsPassed;
-    if TryMove(FDetourDir, SecondsPassed) then
+    if TryMove(FDetourDir, SecondsPassed, SpeedScale) then
       Exit;
     FDetourTime := 0;
   end;
-  if TryMove(WantDir, SecondsPassed) then
+  if TryMove(WantDir, SecondsPassed, SpeedScale) then
     Exit;
   { Blocked: try turning left / right, alternating which side first }
   for I := 0 to High(DetourAngles) do
   begin
     Dir := RotatePointAroundAxisRad(DetourAngles[I] * FDetourSide, WantDir, Vector3(0, 1, 0));
-    if TryMove(Dir, SecondsPassed) then
+    if TryMove(Dir, SecondsPassed, SpeedScale) then
     begin
       FDetourDir := Dir;
       FDetourTime := 0.6;

@@ -232,6 +232,8 @@ type
 
     property Bsp: TQuakeBsp read FBsp;
     property SceneWorld: TCastleScene read FSceneWorld;
+    { Invisible player-clip walls (they don't block monsters) }
+    property ScenePlayerClip: TCastleScene read FScenePlayerClip;
     property WorldTransform: TCastleTransform read FWorldTransform;
     property Movers: TQuakeMoverList read FMovers;
     { Worldspawn "sky" key, e.g. "unit1_" (env/unit1_rt.pcx ...) }
