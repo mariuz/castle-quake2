@@ -102,6 +102,8 @@ type
     FDetourSide: Single;
     FAttackFired: Boolean;
     FIdleTimer: Single;
+    FLostSightTime: Single;
+    FSearched: Boolean;
     { Fraction of the attack animation at which the attack happens }
     function AttackFirePoint: Single;
     { Move along Dir (with wall sliding) unless it walks off a ledge }
@@ -385,8 +387,9 @@ function FindMonsterDef(const AClassName: String): PQuakeMonsterDef;
 
 { Full sound path for a monster sound name }
 function MonsterSound(const Def: PQuakeMonsterDef; const Name: String): String;
-{ The monster's idle sound found in the PAK ('' if none) }
+{ The monster's idle / search sound found in the PAK ('' if none) }
 function MonsterIdleSound(const Def: PQuakeMonsterDef): String;
+function MonsterSearchSound(const Def: PQuakeMonsterDef): String;
 
 implementation
 
@@ -413,22 +416,24 @@ end;
 var
   IdleSounds: TStringList;
 
-function MonsterIdleSound(const Def: PQuakeMonsterDef): String;
+{ First sound/<dir>/*<Part>*.wav in the PAKs, looked up once per directory and part }
+function MonsterSoundLike(const Def: PQuakeMonsterDef; const Part: String): String;
 var
   Files: TStringList;
   I: Integer;
+  Key: String;
 begin
-  { First sound/<dir>/*idle*.wav in the PAKs, looked up once per directory }
   if IdleSounds = nil then
     IdleSounds := TStringList.Create;
-  I := IdleSounds.IndexOfName(Def^.SoundDir);
+  Key := Def^.SoundDir + '/' + Part;
+  I := IdleSounds.IndexOfName(Key);
   if I >= 0 then
     Exit(IdleSounds.ValueFromIndex[I]);
   Result := '';
   Files := Pak.FindFiles('sound/' + Def^.SoundDir + '/', '.wav');
   try
     for I := 0 to Files.Count - 1 do
-      if Pos('idle', ExtractFileName(Files[I])) > 0 then
+      if Pos(Part, ExtractFileName(Files[I])) > 0 then
       begin
         Result := Files[I];
         Break;
@@ -436,10 +441,20 @@ begin
   finally
     Files.Free;
   end;
-  WritelnLog('QuakeEntities', 'Idle sound for "%s": "%s"', [Def^.SoundDir, Result]);
-  IdleSounds.Values[Def^.SoundDir] := Result;
+  WritelnLog('QuakeEntities', 'Sound "%s" for "%s": "%s"', [Part, Def^.SoundDir, Result]);
+  IdleSounds.Add(Key + '=' + Result);
+end;
+
+function MonsterIdleSound(const Def: PQuakeMonsterDef): String;
+begin
+  Result := MonsterSoundLike(Def, 'idle');
+end;
+
+function MonsterSearchSound(const Def: PQuakeMonsterDef): String;
+begin
+  Result := MonsterSoundLike(Def, 'srch');
   if Result = '' then
-    IdleSounds.Add(Def^.SoundDir + '=');
+    Result := MonsterSoundLike(Def, 'search');
 end;
 
 function MonsterSound(const Def: PQuakeMonsterDef; const Name: String): String;
@@ -752,6 +767,22 @@ begin
   begin
     FSightTimer := 0.2;
     CanSeePlayer := (Dist < 2000) and Transform.LineOfSight(EyePos, PlayerPos);
+    { Alerted but lost the player for a while: search sound, once per loss }
+    if CanSeePlayer then
+    begin
+      FLostSightTime := 0;
+      FSearched := False;
+    end else
+    if Alerted then
+    begin
+      FLostSightTime := FLostSightTime + 0.2;
+      if (FLostSightTime > 3) and not FSearched then
+      begin
+        FSearched := True;
+        if MonsterSearchSound(Def) <> '' then
+          Sounds.PlayAt(MonsterSearchSound(Def), Transform, 1, 2);
+      end;
+    end;
     if (not Alerted) and CanSeePlayer and (Dist < 1200) then
       Alert;
   end;
