@@ -9,7 +9,7 @@ uses
   SysUtils, Classes, Generics.Collections, Math,
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions, CastleUtils,
   CastleSoundEngine, CastleBehaviors, CastleColors, CastleRenderOptions,
-  QuakeBsp, QuakeMd2, QuakeLight, QuakeSound, QuakeHud;
+  QuakeBsp, QuakeMd2, QuakeLight, QuakeSound, QuakeHud, QuakeParticles;
 
 type
   TItemCategory = (icWeapon, icAmmo, icHealth, icArmor, icPowerup, icKey);
@@ -97,6 +97,13 @@ type
     FLightTimer: Single;
     FSightTimer: Single;
     FFallSpeed: Single;
+    FDetourDir: TVector3;
+    FDetourTime: Single;
+    FDetourSide: Single;
+    { Move along Dir (with wall sliding) unless it walks off a ledge }
+    function TryMove(const Dir: TVector3; const SecondsPassed: Single): Boolean;
+    { Move towards WantDir, detouring around obstacles }
+    procedure Steer(const WantDir: TVector3; const SecondsPassed: Single);
     function GetEntityClass: String;
     procedure SetState(const NewState: TMonsterState);
     procedure StickToFloor(const SecondsPassed: Single);
@@ -485,6 +492,7 @@ begin
   FacingAngle := Yaw;
   FLightTimer := Random * 0.25;
   FSightTimer := Random * 0.2;
+  FDetourSide := 1;
 
   Transform := TCastleTransform.Create(nil);
   Transform.Name := Format('Monster%.3d_%s', [NextEntityNumber, Def^.ClassName]);
@@ -571,6 +579,7 @@ begin
     begin
       Gibbed := True;
       Sounds.PlayAt('sound/misc/udeath.wav', Transform);
+      Particles.SpawnGibs(Transform.Translation);
       Transform.Exists := False;
     end;
     Exit;
@@ -586,6 +595,7 @@ begin
     begin
       Gibbed := True;
       Sounds.PlayAt('sound/misc/udeath.wav', Transform);
+      Particles.SpawnGibs(Transform.Translation);
       Transform.Exists := False;
       State := msDead;
     end else
@@ -717,9 +727,55 @@ begin
       { Flyers hover a bit above the player's eyes }
       MoveVec.Y := (PlayerPos.Y + 24) - Transform.Translation.Y;
     if (MoveVec.Length > 1) and (Dist > 40) then
-      Transform.Move(MoveVec.Normalize * Def^.Speed * SecondsPassed, False, True);
+      Steer(MoveVec.Normalize, SecondsPassed);
   end;
   StickToFloor(SecondsPassed);
+end;
+
+function TQuakeMonster.TryMove(const Dir: TVector3; const SecondsPassed: Single): Boolean;
+var
+  Probe: TVector3;
+  Above: Single;
+begin
+  { Don't walk off ledges higher than 64 units (Quake 2 M_CheckBottom-like) }
+  if not Def^.Flying then
+  begin
+    Probe := Transform.Translation + Dir * 24;
+    if (not Transform.Height(Probe, Above)) or (Above > 24 + 64) then
+      Exit(False);
+  end;
+  Result := Transform.Move(Dir * Def^.Speed * SecondsPassed, False, True);
+end;
+
+procedure TQuakeMonster.Steer(const WantDir: TVector3; const SecondsPassed: Single);
+const
+  DetourAngles: array[0..3] of Single = (Pi / 4, -Pi / 4, Pi / 2, -Pi / 2);
+var
+  I: Integer;
+  Dir: TVector3;
+begin
+  { Keep following a detour that worked, for a short time }
+  if FDetourTime > 0 then
+  begin
+    FDetourTime := FDetourTime - SecondsPassed;
+    if TryMove(FDetourDir, SecondsPassed) then
+      Exit;
+    FDetourTime := 0;
+  end;
+  if TryMove(WantDir, SecondsPassed) then
+    Exit;
+  { Blocked: try turning left / right, alternating which side first }
+  for I := 0 to High(DetourAngles) do
+  begin
+    Dir := RotatePointAroundAxisRad(DetourAngles[I] * FDetourSide, WantDir, Vector3(0, 1, 0));
+    if TryMove(Dir, SecondsPassed) then
+    begin
+      FDetourDir := Dir;
+      FDetourTime := 0.6;
+      Exit;
+    end;
+  end;
+  FDetourSide := -FDetourSide;
 end;
 
 { TQuakeProjectile }

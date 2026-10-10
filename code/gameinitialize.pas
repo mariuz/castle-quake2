@@ -162,5 +162,10 @@ initialization
   Window.ParseParameters;
 
 finalization
+  { Stop the current view before the Quake* units finalize (they finalize
+    before CastleWindow, which frees the views): this frees the world, the
+    design and its scenes while the model / texture caches still exist. }
+  if (Window <> nil) and (Window.Container <> nil) then
+    Window.Container.View := nil;
   CmdPaks.Free;
 end.

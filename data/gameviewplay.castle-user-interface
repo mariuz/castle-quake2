@@ -58,6 +58,28 @@
       ]
     },
     {
+      "$$ClassName" : "TCastleViewport",
+      "Camera" : "WeaponCamera",
+      "FullSize" : true,
+      "Name" : "WeaponViewport",
+      "Transparent" : true,
+      "Items" : {
+        "$$ClassName" : "TCastleRootTransform",
+        "$Children" : [
+          {
+            "$$ClassName" : "TCastleCamera",
+            "Name" : "WeaponCamera",
+            "ProjectionNear" : 1.0000000000000000E+000,
+            "Perspective" : {
+              "$$ClassName" : "TCastlePerspective",
+              "FieldOfView" : 1.5707963267948966E+000,
+              "FieldOfViewAxis" : "faHorizontal"
+            }
+          }
+        ]
+      }
+    },
+    {
       "$$ClassName" : "TQuakeHud",
       "FullSize" : true,
       "Name" : "Hud"

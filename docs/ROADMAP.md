@@ -34,7 +34,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - **Water / lava warp** shader for `SURF_WARP` surfaces and an underwater `TCastleScreenEffect` tint + wobble.
 - **Powerup shells** (quad blue, invulnerability yellow) as an extra MD2 shape with additive blending.
 - **SP2 sprites** for the BFG ball; **gib models** (`models/objects/gibs/*`) with simple physics. (Explosions already use the `r_explode` model.)
-- **Weapon in its own viewport** (a second transparent `TCastleViewport` sharing the camera) so the gun never clips into walls, and to allow a different FOV for it.
+- ~~Weapon in its own viewport~~ — done (`WeaponViewport` in the design).
 
 ### 3. CGE editor / inspectability
 - **Property editors** (under `{$ifdef CASTLE_DESIGN_MODE}`): a dropdown of maps found in the PAK for `TQuakeMap.MapName`, a file picker for `PakUrl`, and a component editor verb *Reload map* (like `TImageGridEditor` in the custom_component sample).
@@ -62,8 +62,9 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [ ] Dynamic lights on world surfaces (shader effect)
 - [ ] Water warp shader and underwater screen effect
 - [x] Explosion model, soft particles, splashes, lasers, props (barrels, banners, ships, dish, corpses)
-- [ ] SP2 sprites, powerup shells, gibs
-- [ ] Weapon viewport (no wall clipping)
+- [x] Gibs and barrel debris with gravity and bounce
+- [ ] SP2 sprites, powerup shells
+- [x] Weapon viewport (no wall clipping)
 
 ### Phase 2 – Play
 - [x] All 10 weapons, items, armor rules, keys, powerups
@@ -71,7 +72,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Target / trigger chains, counters, keys, secrets, goals, teleporters, level changes
 - [x] Monster sight / chase / attack / pain / death
 - [ ] Pmove player physics (jump pads, ladders, swimming, falling damage)
-- [ ] Monster navigation, per-frame attack timing, medic revive, bosses
+- [x] Monster steering around obstacles (±45° / ±90° detours) and ledge checks
+- [ ] Per-frame attack timing, medic revive, bosses, real pathfinding
 - [ ] Hand grenades, chaingun spin-up
 
 ### Phase 3 – Flow

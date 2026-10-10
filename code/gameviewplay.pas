@@ -9,7 +9,7 @@ unit GameViewPlay;
 interface
 
 uses
-  Classes, SysUtils, Math, {$ifdef MSWINDOWS} Windows, {$endif}
+  Classes, SysUtils, Math,
   CastleVectors, CastleUIControls, CastleControls, CastleKeysMouse,
   CastleViewport, CastleCameras, CastleTransform, CastleColors, CastleLog,
   CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene,
@@ -25,6 +25,9 @@ type
     { Components designed using CGE editor.
       These fields will be automatically initialized at Start. }
     MainViewport: TCastleViewport;
+    { Draws only the view weapon, on top of MainViewport with a cleared depth
+      buffer, so the gun never sticks into walls (like Quake 2's depth hack) }
+    WeaponViewport: TCastleViewport;
     WalkNavigation: TCastleWalkNavigation;
     Background: TCastleBackground;
     QuakeMap: TQuakeMap;
@@ -195,7 +198,7 @@ begin
   WalkNavigation.FallingEffect := False; { Quake doesn't roll the camera when falling }
 
   FWorld := TQuakeWorld.Create(MainViewport.Items, QuakeMap);
-  FWorld.AttachWeaponToCamera(MainViewport.Camera);
+  FWorld.AttachWeaponToCamera(WeaponViewport.Camera);
   FWorld.Hud := Hud;
   Particles.SetParent(MainViewport.Items);
   Console.OnCommand := @HandleConsoleCommand;
@@ -266,11 +269,11 @@ end;
 
 procedure TViewPlay.QuitNow;
 begin
-  {$ifdef MSWINDOWS}
-  ExitProcess(0);
-  {$else}
-  Halt(0);
-  {$endif}
+  { Leave through the normal main loop exit, so views stop and everything is
+    freed in order (Halt / ExitProcess skipped or broke unit finalization) }
+  FDemoCommands.Clear;
+  FAutoTestActive := False;
+  Application.Terminate;
 end;
 
 procedure TViewPlay.ParseDemoScript(const Script: String);
@@ -415,6 +418,12 @@ begin
         FWorld.Props[J].Entity.ClassName, FWorld.Props[J].Health,
         BoolToStr(FWorld.Props[J].Destroyed, True), BoolToStr(FWorld.Props[J].Flying, True),
         BoolToStr(FWorld.Props[J].Transform.Exists, True)]);
+    for J := 0 to FWorld.Monsters.Count - 1 do
+      if FWorld.Monsters[J].Alerted and FWorld.Monsters[J].IsAlive then
+        WritelnLog('Demo', 'Monster %d %s state %d dist %.0f y %.0f', [J,
+          FWorld.Monsters[J].Def^.ClassName, Ord(FWorld.Monsters[J].State),
+          PointsDistance(FWorld.Monsters[J].Transform.Translation, MainViewport.Camera.Translation),
+          FWorld.Monsters[J].Transform.Translation.Y]);
     for J := 0 to FWorld.Lasers.Count - 1 do
       WritelnLog('Demo', 'Laser %d on %s length %.0f', [J,
         BoolToStr(FWorld.Lasers[J].IsOn, True), FWorld.Lasers[J].Length]);
@@ -446,10 +455,8 @@ begin
   else
   if Action = 'Q' then
   begin
-    if FAutoTestActive then
-      QuitNow
-    else
-      Application.Terminate;
+    QuitNow;
+    Exit;
   end;
   Inc(FDemoIndex);
 end;

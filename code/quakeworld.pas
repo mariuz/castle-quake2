@@ -1026,6 +1026,7 @@ begin
   { Barrel explosion: Quake 2 barrel_explode, radius damage dmg (default 150) }
   Prop.Destroyed := True;
   Prop.Transform.Exists := False;
+  Particles.SpawnDebris(Prop.Transform.Translation + Vector3(0, 16, 0));
   Dmg := Prop.Entity.GetInt('dmg', 150);
   Explode(Prop.Transform.Translation + Vector3(0, 16, 0), Dmg, Dmg + 40, False);
   UseTargets(Prop.Entity.Target);

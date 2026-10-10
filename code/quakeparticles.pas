@@ -49,17 +49,35 @@ type
 
   TQuakeExplosionModelList = specialize TObjectList<TQuakeExplosionModel>;
 
+  { Flying gib / debris model with gravity and simple floor bounce }
+  TQuakeGib = class
+  public
+    Transform: TCastleTransform;
+    Model: TQuakeMd2Instance;
+    Velocity, Spin: TVector3;
+    Angle: Single;
+    Life: Single;
+    Resting: Boolean;
+    constructor Create(const Parent: TCastleTransform; const ModelPath: String;
+      const Pos, Vel: TVector3);
+    destructor Destroy; override;
+  end;
+
+  TQuakeGibList = specialize TObjectList<TQuakeGib>;
+
   { Particle effects manager }
   TQuakeParticleManager = class
   private
     FParticles: TQuakeParticleList;
     FExplosions: TQuakeExplosionModelList;
+    FGibs: TQuakeGibList;
     FParent: TCastleTransform;
   public
     constructor Create;
     destructor Destroy; override;
 
     procedure SetParent(const AParent: TCastleTransform);
+    procedure UpdateGibs(const SecondsPassed: Single);
     procedure Update(const SecondsPassed: Single);
     procedure Clear;
 
@@ -83,6 +101,12 @@ type
 
     { Blaster bolt impact (yellow sparks) }
     procedure SpawnBlasterImpact(const Pos, Normal: TVector3);
+
+    { Monster gibbed: flying meat, bones and a head, plus blood }
+    procedure SpawnGibs(const Pos: TVector3);
+
+    { Barrel / brush debris }
+    procedure SpawnDebris(const Pos: TVector3);
 
     { Large green BFG explosion }
     procedure SpawnBfgExplosion(const Pos: TVector3);
@@ -114,6 +138,36 @@ begin
       PVector4Byte(Img.PixelPtr(X, Y))^ := Vector4Byte(255, 255, 255, Round(255 * Sqrt(A)));
     end;
   Palette.CacheImage(Result, Img);
+end;
+
+{ TQuakeGib }
+
+constructor TQuakeGib.Create(const Parent: TCastleTransform; const ModelPath: String;
+  const Pos, Vel: TVector3);
+begin
+  inherited Create;
+  Transform := TCastleTransform.Create(nil);
+  Transform.Name := 'Gib';
+  Transform.Translation := Pos;
+  Velocity := Vel;
+  Spin := Vector3(Random - 0.5, Random - 0.5, Random - 0.5).Normalize;
+  Life := 8 + Random * 4;
+  Model := Md2Manager.CreateInstance(ModelPath);
+  if Model <> nil then
+  begin
+    Model.Scene.Collides := False;
+    Model.Scene.Pickable := False;
+    Model.SetTint(Vector3(0.8, 0.8, 0.8));
+    Transform.Add(Model.Scene);
+  end;
+  Parent.Add(Transform);
+end;
+
+destructor TQuakeGib.Destroy;
+begin
+  FreeAndNil(Model);
+  FreeAndNil(Transform);
+  inherited Destroy;
 end;
 
 { TQuakeExplosionModel }
@@ -282,6 +336,7 @@ begin
   inherited Create;
   FParticles := TQuakeParticleList.Create(True);
   FExplosions := TQuakeExplosionModelList.Create(True);
+  FGibs := TQuakeGibList.Create(True);
   FParent := nil;
 end;
 
@@ -289,6 +344,7 @@ destructor TQuakeParticleManager.Destroy;
 begin
   FParticles.Free;
   FExplosions.Free;
+  FGibs.Free;
   inherited Destroy;
 end;
 
@@ -302,6 +358,7 @@ procedure TQuakeParticleManager.Clear;
 begin
   FParticles.Clear;
   FExplosions.Clear;
+  FGibs.Clear;
 end;
 
 procedure TQuakeParticleManager.Update(const SecondsPassed: Single);
@@ -313,6 +370,7 @@ begin
     if not FParticles[I].Update(SecondsPassed) then
       FParticles.Delete(I);
   end;
+  UpdateGibs(SecondsPassed);
   for I := FExplosions.Count - 1 downto 0 do
   begin
     FExplosions[I].Life := FExplosions[I].Life - SecondsPassed;
@@ -500,6 +558,84 @@ begin
       pkSparks, 0.3 + Random * 0.2, 1.5, 0.4, Vector3(1.0, 0.9, 0.2));
     FParticles.Add(P);
   end;
+end;
+
+procedure TQuakeParticleManager.UpdateGibs(const SecondsPassed: Single);
+var
+  I: Integer;
+  G: TQuakeGib;
+  Dist: Single;
+  NewPos: TVector3;
+  Hit: TCastleTransform;
+begin
+  for I := FGibs.Count - 1 downto 0 do
+  begin
+    G := FGibs[I];
+    G.Life := G.Life - SecondsPassed;
+    if G.Life <= 0 then
+    begin
+      FGibs.Delete(I);
+      Continue;
+    end;
+    if G.Resting then
+      Continue;
+    G.Velocity.Y := G.Velocity.Y - 800 * SecondsPassed;
+    NewPos := G.Transform.Translation + G.Velocity * SecondsPassed;
+    { Stop on the first surface below / ahead (ray cast along the motion) }
+    if (G.Velocity.Length > 0.01) and (G.Transform.World <> nil) then
+    begin
+      Hit := G.Transform.World.WorldRayCast(G.Transform.Translation, G.Velocity.Normalize, Dist);
+      if (Hit <> nil) and (Dist <= (G.Velocity * SecondsPassed).Length + 2) then
+      begin
+        if G.Velocity.Y < 0 then
+        begin
+          { Floor: bounce once, then rest }
+          if Abs(G.Velocity.Y) > 150 then
+            G.Velocity := Vector3(G.Velocity.X * 0.5, -G.Velocity.Y * 0.3, G.Velocity.Z * 0.5)
+          else
+            G.Resting := True;
+        end else
+          G.Velocity := Vector3(-G.Velocity.X * 0.3, G.Velocity.Y, -G.Velocity.Z * 0.3);
+        Continue;
+      end;
+    end;
+    G.Transform.Translation := NewPos;
+    G.Angle := G.Angle + 6 * SecondsPassed;
+    G.Transform.Rotation := Vector4(G.Spin, G.Angle);
+  end;
+end;
+
+procedure TQuakeParticleManager.SpawnGibs(const Pos: TVector3);
+const
+  Gibs: array[0..5] of String = ('models/objects/gibs/sm_meat/tris.md2',
+    'models/objects/gibs/sm_meat/tris.md2', 'models/objects/gibs/bone/tris.md2',
+    'models/objects/gibs/sm_meat/tris.md2', 'models/objects/gibs/bone2/tris.md2',
+    'models/objects/gibs/head2/tris.md2');
+var
+  I: Integer;
+begin
+  if FParent = nil then
+    Exit;
+  for I := 0 to High(Gibs) do
+    FGibs.Add(TQuakeGib.Create(FParent, Gibs[I], Pos + Vector3(0, 8, 0),
+      Vector3((Random - 0.5) * 400, 200 + Random * 300, (Random - 0.5) * 400)));
+  SpawnBlood(Pos, Vector3(0, 1, 0));
+  SpawnBlood(Pos + Vector3(0, 16, 0), Vector3(0, 1, 0));
+end;
+
+procedure TQuakeParticleManager.SpawnDebris(const Pos: TVector3);
+const
+  Debris: array[0..3] of String = ('models/objects/debris1/tris.md2',
+    'models/objects/debris2/tris.md2', 'models/objects/debris3/tris.md2',
+    'models/objects/debris2/tris.md2');
+var
+  I: Integer;
+begin
+  if FParent = nil then
+    Exit;
+  for I := 0 to High(Debris) do
+    FGibs.Add(TQuakeGib.Create(FParent, Debris[I], Pos,
+      Vector3((Random - 0.5) * 500, 250 + Random * 300, (Random - 0.5) * 500)));
 end;
 
 procedure TQuakeParticleManager.SpawnBfgExplosion(const Pos: TVector3);
