@@ -405,7 +405,10 @@ const
   AmmoIcons: array[TAmmoType] of String = ('', 'a_shells', 'a_bullets', 'a_grenades',
     'a_rockets', 'a_cells', 'a_slugs');
 
-  MonsterDefs: array[0..18] of TQuakeMonsterDef = (
+  { Built-in monster definitions. At startup data/monsters.castle-transform
+    (TQuakeMonsterType components, editable in the CGE editor) overrides
+    and extends them in MonsterDefs. }
+  DefaultMonsterDefs: array[0..18] of TQuakeMonsterDef = (
     (ClassName: 'monster_soldier_light'; Model: 'models/monsters/soldier/tris.md2'; Skin: 0; Health: 20; Speed: 120; Attack: akBlaster; Damage: 5; AttackRange: 900; AttackCooldown: 1.6; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain2'; DeathSound: 'soldeth1'; AttackSound: 'solatck2'),
     (ClassName: 'monster_soldier'; Model: 'models/monsters/soldier/tris.md2'; Skin: 2; Health: 30; Speed: 120; Attack: akPellets; Damage: 2; AttackRange: 700; AttackCooldown: 1.6; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain1'; DeathSound: 'soldeth1'; AttackSound: 'solatck1'),
     (ClassName: 'monster_soldier_ss'; Model: 'models/monsters/soldier/tris.md2'; Skin: 4; Health: 40; Speed: 120; Attack: akHitscan; Damage: 2; AttackRange: 900; AttackCooldown: 0.9; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain3'; DeathSound: 'soldeth3'; AttackSound: 'solatck3'),
@@ -426,6 +429,12 @@ const
     (ClassName: 'monster_flipper'; Model: 'models/monsters/flipper/tris.md2'; Skin: 0; Health: 50; Speed: 150; Attack: akMelee; Damage: 5; AttackRange: 70; AttackCooldown: 0.6; Flying: True; SoundDir: 'flipper'; SightSound: 'flpsght1'; PainSound: 'flppain1'; DeathSound: 'flpdeth1'; AttackSound: 'flpatck1'),
     (ClassName: 'monster_supertank'; Model: 'models/monsters/boss1/tris.md2'; Skin: 0; Health: 1500; Speed: 80; Attack: akRocket; Damage: 50; AttackRange: 1500; AttackCooldown: 1.2; Flying: False; SoundDir: 'bosstank'; SightSound: 'btkunqv1'; PainSound: 'btkpain1'; DeathSound: 'btkdeth1'; AttackSound: 'btkunqv2')
   );
+
+var
+  { Monster definitions in use: DefaultMonsterDefs, then the overrides of
+    the monster types design. Change only before monsters are created
+    (FindMonsterDef returns pointers into it). }
+  MonsterDefs: array of TQuakeMonsterDef;
 
 { Lookup tables (nil when the classname is unknown) }
 function FindItemDef(const AClassName: String): PQuakeItemDef;
@@ -458,7 +467,7 @@ function FindMonsterDef(const AClassName: String): PQuakeMonsterDef;
 var
   I: Integer;
 begin
-  for I := Low(MonsterDefs) to High(MonsterDefs) do
+  for I := 0 to High(MonsterDefs) do
     if MonsterDefs[I].ClassName = AClassName then
       Exit(@MonsterDefs[I]);
   Result := nil;
@@ -1447,6 +1456,17 @@ begin
             (Pos.Z + Radius >= Box.Data[0].Z) and (Pos.Z - Radius <= Box.Data[1].Z);
 end;
 
+procedure InitMonsterDefs;
+var
+  I: Integer;
+begin
+  SetLength(MonsterDefs, Length(DefaultMonsterDefs));
+  for I := 0 to High(DefaultMonsterDefs) do
+    MonsterDefs[I] := DefaultMonsterDefs[I];
+end;
+
+initialization
+  InitMonsterDefs;
 finalization
   FreeAndNil(IdleSounds);
 end.

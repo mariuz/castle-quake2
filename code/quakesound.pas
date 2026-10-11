@@ -8,13 +8,31 @@ interface
 uses
   SysUtils, Classes, Generics.Collections,
   CastleVectors, CastleSoundEngine, CastleSoundBase, CastleTransform, CastleBehaviors, CastleLog, CastleUriUtils,
+  CastleClassUtils, CastleComponentSerialize, CastleStringUtils,
   QuakePak;
 
 type
+  { A sound of data/sounds.castle-component: a TCastleSound (edit its Url,
+    Volume, Pitch... in the CGE editor) used whenever the game plays
+    QuakePath. Its component Name is the sound's readable name. }
+  TQuakeNamedSound = class(TCastleSound)
+  strict private
+    FQuakePath: String;
+    procedure SetQuakePath(const Value: String);
+  public
+    function PropertySections(const PropertyName: String): TPropertySections; override;
+  published
+    { Path the game code plays, e.g. "sound/items/pkup.wav" }
+    property QuakePath: String read FQuakePath write SetQuakePath;
+  end;
+
   { Sound manager for Quake SFX and music }
   TQuakeSounds = class
   private
     FSoundCache: specialize TObjectDictionary<String, TCastleSound>;
+    { Owns the components of the named sounds design }
+    FNamedOwner: TComponent;
+    FNamedSounds: specialize TDictionary<String, TQuakeNamedSound>;
     FMusicSound: TCastleSound;
     FCurrentMusicTrack: String;
     FEnabled: Boolean;
@@ -34,6 +52,16 @@ type
     { Sound for a path with Quake 2 distance attenuation (<= 0: heard everywhere).
       nil if the sound isn't in the PAK. Cached per path and attenuation. }
     function SpatialSound(const APath: String; const Attenuation: Single): TCastleSound;
+
+    { Use the TQuakeNamedSound components of a design (by default
+      data/sounds.castle-component) for their QuakePath. Returns their number. }
+    function LoadNamedSounds(const Url: String = 'castle-data:/sounds.castle-component'): Integer;
+
+    { Named sound for a path (nil if the design doesn't name it) }
+    function NamedSound(const APath: String): TQuakeNamedSound;
+
+    { Sound played for a path: the named sound or the PAK file (nil if neither) }
+    function SoundFor(const APath: String): TCastleSound;
 
     { Use Quake-like linear distance attenuation for all spatial sounds }
     procedure ConfigureEngine;
@@ -63,6 +91,7 @@ constructor TQuakeSounds.Create;
 begin
   inherited Create;
   FSoundCache := specialize TObjectDictionary<String, TCastleSound>.Create([doOwnsValues]);
+  FNamedSounds := specialize TDictionary<String, TQuakeNamedSound>.Create;
   FEnabled := True;
   FMusicSound := nil;
   FCurrentMusicTrack := '';
@@ -72,6 +101,8 @@ destructor TQuakeSounds.Destroy;
 begin
   StopMusic;
   FSoundCache.Free;
+  FNamedSounds.Free;
+  FNamedOwner.Free;
   inherited Destroy;
 end;
 
@@ -82,6 +113,8 @@ begin
   NormPath := LowerCase(APath);
   if NormPath = '' then
     Exit(nil);
+  if FNamedSounds.ContainsKey(NormPath) then
+    Exit(FNamedSounds[NormPath]);
   if not FSoundCache.TryGetValue(NormPath, Result) then
   begin
     { Missing sounds are cached as nil, so they are reported only once }
@@ -135,6 +168,8 @@ begin
   begin
     Result := TCastleSound.Create(nil);
     Result.Url := Base.Url;
+    Result.Volume := Base.Volume;
+    Result.Pitch := Base.Pitch;
     { Quake 2 S_SpatializeOrigin: full volume up to 80 units (SOUND_FULLVOLUME),
       then linear falloff of 0.0005 * attenuation per unit }
     Result.ReferenceDistance := 80;
@@ -144,6 +179,45 @@ begin
       Result.MaxDistance := 100000;
     FSoundCache.Add(Key, Result);
   end;
+end;
+
+function TQuakeSounds.LoadNamedSounds(const Url: String): Integer;
+var
+  I: Integer;
+  Named: TQuakeNamedSound;
+begin
+  Result := 0;
+  if not UriFileExists(Url) then
+    Exit;
+  FNamedSounds.Clear;
+  FreeAndNil(FNamedOwner);
+  FNamedOwner := TComponent.Create(nil);
+  ComponentLoad(Url, FNamedOwner);
+  for I := 0 to FNamedOwner.ComponentCount - 1 do
+    if FNamedOwner.Components[I] is TQuakeNamedSound then
+    begin
+      Named := TQuakeNamedSound(FNamedOwner.Components[I]);
+      if Named.QuakePath = '' then
+        Continue;
+      { A sound left in the PAK path must exist there }
+      if IsPrefix('quakepak:/', Named.Url, True) and
+         not Pak.FileExists(PrefixRemove('quakepak:/', Named.Url, True)) then
+        Continue;
+      FNamedSounds.AddOrSetValue(Named.QuakePath, Named);
+      Inc(Result);
+    end;
+  WritelnLog('QuakeSound', 'Loaded %d named sounds from "%s"', [Result, Url]);
+end;
+
+function TQuakeSounds.NamedSound(const APath: String): TQuakeNamedSound;
+begin
+  if not FNamedSounds.TryGetValue(LowerCase(APath), Result) then
+    Result := nil;
+end;
+
+function TQuakeSounds.SoundFor(const APath: String): TCastleSound;
+begin
+  Result := GetSound(APath);
 end;
 
 procedure TQuakeSounds.ConfigureEngine;
@@ -250,7 +324,23 @@ begin
   GetSound('sound/doors/dr1_end.wav');
 end;
 
+{ TQuakeNamedSound }
+
+procedure TQuakeNamedSound.SetQuakePath(const Value: String);
+begin
+  FQuakePath := LowerCase(Value);
+end;
+
+function TQuakeNamedSound.PropertySections(const PropertyName: String): TPropertySections;
+begin
+  if PropertyName = 'QuakePath' then
+    Result := [psBasic]
+  else
+    Result := inherited PropertySections(PropertyName);
+end;
+
 initialization
+  RegisterSerializableComponent(TQuakeNamedSound, 'Quake 2 Named Sound');
   Sounds := TQuakeSounds.Create;
 
 finalization

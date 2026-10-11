@@ -11,7 +11,7 @@ uses
   SysUtils, Classes,
   CastleWindow, CastleLog, CastleUIControls, CastleApplicationProperties, CastleParameters,
   CastleUtils, CastleFilesUtils, CastleUriUtils,
-  QuakePak, QuakePalette, QuakeSound, QuakeGeometry
+  QuakePak, QuakePalette, QuakeSound, QuakeGeometry, QuakeMonsterTypes
   {$region 'Castle Initialization Uses'}
   // The content here may be automatically updated by CGE editor.
   , GameViewMenu
@@ -121,6 +121,9 @@ begin
       'or pass -basedir <quake2 dir> / -pak <file>');
 
   Palette.LoadFromPak;
+  { Designs editable in the CGE editor: monster tunables, named sounds }
+  LoadMonsterTypes;
+  Sounds.LoadNamedSounds;
   Sounds.ConfigureEngine;
   Sounds.PreloadCommonSounds;
 

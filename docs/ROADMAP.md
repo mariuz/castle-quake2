@@ -40,8 +40,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - **Property editors** (under `{$ifdef CASTLE_DESIGN_MODE}`): a dropdown of maps found in the PAK for `TQuakeMap.MapName`, a file picker for `PakUrl`, and a component editor verb *Reload map* (like `TImageGridEditor` in the custom_component sample).
 - ~~Skybox from the map at design time~~ — done: `TQuakeMap.Background`.
 - **Entity gizmos**: show triggers, `path_corner`s, teleporters and spawn points as wireframe boxes / `TCastleImageTransform` icons when `PreviewEntities` is on, selectable in the editor hierarchy with their key/value pairs as a read-only property.
-- **Prefab designs** (`.castle-transform`) per monster type with the `TQuakeMonster` behavior and tunables (speed, ranges, damage) as published read-write properties, instead of the Pascal `MonsterDefs` table, so balancing happens in the editor.
-- **Named sounds** like the template's `GameSound` / `NamedSound`: a `data/sounds.castle-component` mapping logical names to PAK sound URLs, editable in the editor.
+- ~~Prefab designs~~ — done as `data/monsters.castle-transform` (`TQuakeMonsterType` per monster class, tunables published, model shown in the editor; applied over the table at startup). Originally planned: **Prefab designs** (`.castle-transform`) per monster type with the `TQuakeMonster` behavior and tunables (speed, ranges, damage) as published read-write properties, instead of the Pascal `MonsterDefs` table, so balancing happens in the editor.
+- ~~Named sounds~~ — done: `data/sounds.castle-component` (`TQuakeNamedSound`, a `TCastleSound` per path the code plays). Originally planned: **Named sounds** like the template's `GameSound` / `NamedSound`: a `data/sounds.castle-component` mapping logical names to PAK sound URLs, editable in the editor.
 
 ### 4. Engineering
 - ~~CI autotests~~ — done (`autotest` job); next: compare screenshots against references.
@@ -101,7 +101,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Monsters, items and movers as `TCastleBehavior`s with named transforms (F8 inspector)
 - [ ] Map dropdown / reload verb property editors
 - [x] Design-time skybox (`TQuakeMap.Background`) and entity markers (`PreviewMarkers`: player starts, paths, speakers, trigger volumes)
-- [ ] Monster prefabs (`.castle-transform`) and named sounds
+- [x] Monster types (`data/monsters.castle-transform`) and named sounds (`data/sounds.castle-component`) editable in the editor
 - [x] CI autotests with screenshots (Linux, xvfb + Mesa)
 - [x] Parser unit tests (`tests/`, in CI)
 - [x] Screenshot comparison in CI (64x36 block averages against `tests/reference`)

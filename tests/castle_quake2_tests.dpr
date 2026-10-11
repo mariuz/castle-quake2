@@ -2,6 +2,10 @@
   shareware demo PAK. Exit code 0 = all passed. Run from this directory:
     castle-engine compile && ./castle-quake2-tests
 
+  Regenerates data/monsters.castle-transform (from DefaultMonsterDefs) and
+  data/sounds.castle-component (from DesignSoundPaths), overwriting edits:
+    ./castle-quake2-tests --generate-designs ../data
+
   Also compares autotest screenshots with reference images (used by CI):
     ./castle-quake2-tests --compare reference.png screenshot.png diff.png [max-mean-diff]
   Both images are averaged into 64x36 blocks (robust to tiny camera shifts
@@ -16,8 +20,11 @@ program castle_quake2_tests;
 uses
   {$ifdef UNIX} CThreads, {$endif}
   SysUtils, Math,
-  CastleVectors, CastleLog, CastleImages,
-  QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight;
+  Classes,
+  CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
+  CastleTransform, CastleUriUtils,
+  QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
+  QuakeMonsterTypes, QuakeSound;
 
 var
   Passed, Failed: Integer;
@@ -301,8 +308,196 @@ begin
 end;
 
 const
+  { Sounds the game code plays by literal path, named in the sounds design }
+  DesignSoundPaths: array[0..62] of String = (
+    'sound/doors/dr1_end.wav',
+    'sound/doors/dr1_mid.wav',
+    'sound/doors/dr1_strt.wav',
+    'sound/items/damage3.wav',
+    'sound/items/l_health.wav',
+    'sound/items/m_health.wav',
+    'sound/items/n_health.wav',
+    'sound/items/pkup.wav',
+    'sound/items/s_health.wav',
+    'sound/misc/am_pkup.wav',
+    'sound/misc/ar1_pkup.wav',
+    'sound/misc/ar2_pkup.wav',
+    'sound/misc/ar3_pkup.wav',
+    'sound/misc/keytry.wav',
+    'sound/misc/keyuse.wav',
+    'sound/misc/menu1.wav',
+    'sound/misc/menu2.wav',
+    'sound/misc/menu3.wav',
+    'sound/misc/pc_up.wav',
+    'sound/misc/secret.wav',
+    'sound/misc/talk1.wav',
+    'sound/misc/tele1.wav',
+    'sound/misc/udeath.wav',
+    'sound/misc/w_pkup.wav',
+    'sound/misc/windfly.wav',
+    'sound/plats/pt1_end.wav',
+    'sound/plats/pt1_mid.wav',
+    'sound/plats/pt1_strt.wav',
+    'sound/player/gasp1.wav',
+    'sound/player/land1.wav',
+    'sound/player/lava_in.wav',
+    'sound/player/male/death1.wav',
+    'sound/player/male/fall1.wav',
+    'sound/player/male/fall2.wav',
+    'sound/player/male/jump1.wav',
+    'sound/player/male/pain100_1.wav',
+    'sound/player/male/pain25_1.wav',
+    'sound/player/male/pain50_1.wav',
+    'sound/player/male/pain75_1.wav',
+    'sound/player/watr_in.wav',
+    'sound/player/watr_out.wav',
+    'sound/player/watr_un.wav',
+    'sound/switches/butn2.wav',
+    'sound/weapons/bfg__f1y.wav',
+    'sound/weapons/bfg__x1b.wav',
+    'sound/weapons/blastf1a.wav',
+    'sound/weapons/chngnd1a.wav',
+    'sound/weapons/chngnu1a.wav',
+    'sound/weapons/grenlb1b.wav',
+    'sound/weapons/grenlf1a.wav',
+    'sound/weapons/hgrena1b.wav',
+    'sound/weapons/hgrent1a.wav',
+    'sound/weapons/hyprbf1a.wav',
+    'sound/weapons/lashit.wav',
+    'sound/weapons/machgf1b.wav',
+    'sound/weapons/machgf2b.wav',
+    'sound/weapons/noammo.wav',
+    'sound/weapons/railgf1a.wav',
+    'sound/weapons/rocklf1a.wav',
+    'sound/weapons/rocklx1a.wav',
+    'sound/weapons/shotgf1b.wav',
+    'sound/weapons/sshotf1b.wav',
+    'sound/world/quake.wav'
+  );
+
+{ Readable component name for a sound path: sound/items/pkup.wav -> Items_pkup }
+function SoundComponentName(const Path: String): String;
+var
+  I: Integer;
+begin
+  Result := Copy(ChangeFileExt(Path, ''), Length('sound/') + 1, MaxInt);
+  for I := 1 to Length(Result) do
+    if not (Result[I] in ['a'..'z', 'A'..'Z', '0'..'9']) then
+      Result[I] := '_';
+  Result[1] := UpCase(Result[1]);
+end;
+
+procedure GenerateDesigns(const Dir: String);
+var
+  Owner: TComponent;
+  Root: TCastleComponent;
+  Sound: TQuakeNamedSound;
+  Path: String;
+begin
+  Owner := TComponent.Create(nil);
+  try
+    TransformSave(CreateDefaultMonsterTypes(Owner), FilenameToUriSafe(Dir + '/monsters.castle-transform'));
+  finally
+    Owner.Free;
+  end;
+  Owner := TComponent.Create(nil);
+  try
+    Root := TCastleComponent.Create(Owner);
+    Root.Name := 'NamedSounds';
+    for Path in DesignSoundPaths do
+    begin
+      Sound := TQuakeNamedSound.Create(Owner);
+      Sound.Name := SoundComponentName(Path);
+      Sound.Url := 'quakepak:/' + Path;
+      Sound.QuakePath := Path;
+      Root.AddNonVisualComponent(Sound);
+    end;
+    ComponentSave(Root, FilenameToUriSafe(Dir + '/sounds.castle-component'));
+  finally
+    Owner.Free;
+  end;
+  Writeln('Wrote monsters.castle-transform and sounds.castle-component to ', Dir);
+end;
+
+procedure TestDesigns;
+var
+  I, PreviewCount: Integer;
+  Same: Boolean;
+  Owner: TComponent;
+  Named: TQuakeNamedSound;
+  Root: TCastleTransform;
+  MonsterType: TQuakeMonsterType;
+  TempUrl: String;
+begin
+  CheckEquals(Length(DefaultMonsterDefs),
+    LoadMonsterTypes(FilenameToUriSafe('../data/monsters.castle-transform')), 'monster types in the design');
+  CheckEquals(Length(DefaultMonsterDefs), Length(MonsterDefs), 'design adds no unknown monsters');
+  Same := True;
+  for I := 0 to High(DefaultMonsterDefs) do
+    Same := Same and (MonsterDefs[I].ClassName = DefaultMonsterDefs[I].ClassName) and
+      (MonsterDefs[I].Model = DefaultMonsterDefs[I].Model) and (MonsterDefs[I].Skin = DefaultMonsterDefs[I].Skin) and
+      (MonsterDefs[I].Health = DefaultMonsterDefs[I].Health) and SameValue(MonsterDefs[I].Speed, DefaultMonsterDefs[I].Speed) and
+      (MonsterDefs[I].Attack = DefaultMonsterDefs[I].Attack) and (MonsterDefs[I].Damage = DefaultMonsterDefs[I].Damage) and
+      SameValue(MonsterDefs[I].AttackRange, DefaultMonsterDefs[I].AttackRange) and
+      SameValue(MonsterDefs[I].AttackCooldown, DefaultMonsterDefs[I].AttackCooldown) and
+      (MonsterDefs[I].Flying = DefaultMonsterDefs[I].Flying) and (MonsterDefs[I].SoundDir = DefaultMonsterDefs[I].SoundDir) and
+      (MonsterDefs[I].PainSound = DefaultMonsterDefs[I].PainSound) and (MonsterDefs[I].AttackSound = DefaultMonsterDefs[I].AttackSound);
+  Check(Same, 'monster types design matches DefaultMonsterDefs');
+
+  { As in the editor: every type shows its model }
+  PreviewMonsterTypes := True;
+  Owner := TComponent.Create(nil);
+  try
+    TransformLoad(FilenameToUriSafe('../data/monsters.castle-transform'), Owner);
+    PreviewCount := 0;
+    for I := 0 to Owner.ComponentCount - 1 do
+      if (Owner.Components[I] is TQuakeMonsterType) and (TQuakeMonsterType(Owner.Components[I]).Count = 1) then
+        Inc(PreviewCount);
+    { Not all models are in the demo PAK }
+    Check(PreviewCount >= 10, Format('monster type previews (%d)', [PreviewCount]));
+  finally
+    Owner.Free;
+    PreviewMonsterTypes := False;
+  end;
+
+  { A design overrides a type by MonsterClass and adds unknown ones }
+  Owner := TComponent.Create(nil);
+  try
+    Root := TCastleTransform.Create(Owner);
+    MonsterType := TQuakeMonsterType.Create(Owner);
+    MonsterType.Assign(FindMonsterDef('monster_soldier')^);
+    MonsterType.Health := 999;
+    Root.Add(MonsterType);
+    MonsterType := TQuakeMonsterType.Create(Owner);
+    MonsterType.MonsterClass := 'Monster_Test';
+    MonsterType.Health := 7;
+    Root.Add(MonsterType);
+    TempUrl := FilenameToUriSafe(GetTempDir + 'castle_quake2_test_monsters.castle-transform');
+    TransformSave(Root, TempUrl);
+  finally
+    Owner.Free;
+  end;
+  CheckEquals(2, LoadMonsterTypes(TempUrl), 'monster types in the test design');
+  DeleteFile(UriToFilenameSafe(TempUrl));
+  CheckEquals(999, FindMonsterDef('monster_soldier')^.Health, 'design overrides monster_soldier health');
+  Check((FindMonsterDef('monster_test') <> nil) and (FindMonsterDef('monster_test')^.Health = 7),
+    'design adds monster_test');
+
+  Check(Sounds.LoadNamedSounds(FilenameToUriSafe('../data/sounds.castle-component')) >= 40, 'named sounds loaded');
+  Named := Sounds.NamedSound('SOUND/items/pkup.wav');
+  Check((Named <> nil) and (Named.Name = 'Items_pkup'), 'named sound for sound/items/pkup.wav');
+  Check(Sounds.SoundFor('sound/items/pkup.wav') = Named, 'playing the path uses the named sound');
+  Check(Sounds.SoundFor('sound/misc/does_not_exist.wav') = nil, 'unknown sound');
+end;
+
+const
   PakPath = '../data/paks/quake2_demo.pak';
 begin
+  if (ParamCount >= 2) and (ParamStr(1) = '--generate-designs') then
+  begin
+    GenerateDesigns(ParamStr(2));
+    Exit;
+  end;
   if (ParamCount >= 4) and (ParamStr(1) = '--compare') then
   begin
     RunCompare;
@@ -322,6 +517,7 @@ begin
   TestMd2;
   TestSprite;
   TestCoordinates;
+  TestDesigns;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then

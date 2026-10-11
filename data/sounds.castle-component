@@ -1,0 +1,384 @@
+{
+  "$$ClassName" : "TCastleComponent",
+  "Name" : "NamedSounds",
+  "$NonVisualComponents" : [
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Doors_dr1_end",
+      "QuakePath" : "sound/doors/dr1_end.wav",
+      "Url" : "quakepak:/sound/doors/dr1_end.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Doors_dr1_mid",
+      "QuakePath" : "sound/doors/dr1_mid.wav",
+      "Url" : "quakepak:/sound/doors/dr1_mid.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Doors_dr1_strt",
+      "QuakePath" : "sound/doors/dr1_strt.wav",
+      "Url" : "quakepak:/sound/doors/dr1_strt.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Items_damage3",
+      "QuakePath" : "sound/items/damage3.wav",
+      "Url" : "quakepak:/sound/items/damage3.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Items_l_health",
+      "QuakePath" : "sound/items/l_health.wav",
+      "Url" : "quakepak:/sound/items/l_health.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Items_m_health",
+      "QuakePath" : "sound/items/m_health.wav",
+      "Url" : "quakepak:/sound/items/m_health.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Items_n_health",
+      "QuakePath" : "sound/items/n_health.wav",
+      "Url" : "quakepak:/sound/items/n_health.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Items_pkup",
+      "QuakePath" : "sound/items/pkup.wav",
+      "Url" : "quakepak:/sound/items/pkup.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Items_s_health",
+      "QuakePath" : "sound/items/s_health.wav",
+      "Url" : "quakepak:/sound/items/s_health.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_am_pkup",
+      "QuakePath" : "sound/misc/am_pkup.wav",
+      "Url" : "quakepak:/sound/misc/am_pkup.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_ar1_pkup",
+      "QuakePath" : "sound/misc/ar1_pkup.wav",
+      "Url" : "quakepak:/sound/misc/ar1_pkup.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_ar2_pkup",
+      "QuakePath" : "sound/misc/ar2_pkup.wav",
+      "Url" : "quakepak:/sound/misc/ar2_pkup.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_ar3_pkup",
+      "QuakePath" : "sound/misc/ar3_pkup.wav",
+      "Url" : "quakepak:/sound/misc/ar3_pkup.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_keytry",
+      "QuakePath" : "sound/misc/keytry.wav",
+      "Url" : "quakepak:/sound/misc/keytry.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_keyuse",
+      "QuakePath" : "sound/misc/keyuse.wav",
+      "Url" : "quakepak:/sound/misc/keyuse.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_menu1",
+      "QuakePath" : "sound/misc/menu1.wav",
+      "Url" : "quakepak:/sound/misc/menu1.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_menu2",
+      "QuakePath" : "sound/misc/menu2.wav",
+      "Url" : "quakepak:/sound/misc/menu2.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_menu3",
+      "QuakePath" : "sound/misc/menu3.wav",
+      "Url" : "quakepak:/sound/misc/menu3.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_pc_up",
+      "QuakePath" : "sound/misc/pc_up.wav",
+      "Url" : "quakepak:/sound/misc/pc_up.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_secret",
+      "QuakePath" : "sound/misc/secret.wav",
+      "Url" : "quakepak:/sound/misc/secret.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_talk1",
+      "QuakePath" : "sound/misc/talk1.wav",
+      "Url" : "quakepak:/sound/misc/talk1.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_tele1",
+      "QuakePath" : "sound/misc/tele1.wav",
+      "Url" : "quakepak:/sound/misc/tele1.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_udeath",
+      "QuakePath" : "sound/misc/udeath.wav",
+      "Url" : "quakepak:/sound/misc/udeath.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_w_pkup",
+      "QuakePath" : "sound/misc/w_pkup.wav",
+      "Url" : "quakepak:/sound/misc/w_pkup.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_windfly",
+      "QuakePath" : "sound/misc/windfly.wav",
+      "Url" : "quakepak:/sound/misc/windfly.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Plats_pt1_end",
+      "QuakePath" : "sound/plats/pt1_end.wav",
+      "Url" : "quakepak:/sound/plats/pt1_end.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Plats_pt1_mid",
+      "QuakePath" : "sound/plats/pt1_mid.wav",
+      "Url" : "quakepak:/sound/plats/pt1_mid.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Plats_pt1_strt",
+      "QuakePath" : "sound/plats/pt1_strt.wav",
+      "Url" : "quakepak:/sound/plats/pt1_strt.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Player_gasp1",
+      "QuakePath" : "sound/player/gasp1.wav",
+      "Url" : "quakepak:/sound/player/gasp1.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Player_land1",
+      "QuakePath" : "sound/player/land1.wav",
+      "Url" : "quakepak:/sound/player/land1.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Player_lava_in",
+      "QuakePath" : "sound/player/lava_in.wav",
+      "Url" : "quakepak:/sound/player/lava_in.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Player_male_death1",
+      "QuakePath" : "sound/player/male/death1.wav",
+      "Url" : "quakepak:/sound/player/male/death1.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Player_male_fall1",
+      "QuakePath" : "sound/player/male/fall1.wav",
+      "Url" : "quakepak:/sound/player/male/fall1.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Player_male_fall2",
+      "QuakePath" : "sound/player/male/fall2.wav",
+      "Url" : "quakepak:/sound/player/male/fall2.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Player_male_jump1",
+      "QuakePath" : "sound/player/male/jump1.wav",
+      "Url" : "quakepak:/sound/player/male/jump1.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Player_male_pain100_1",
+      "QuakePath" : "sound/player/male/pain100_1.wav",
+      "Url" : "quakepak:/sound/player/male/pain100_1.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Player_male_pain25_1",
+      "QuakePath" : "sound/player/male/pain25_1.wav",
+      "Url" : "quakepak:/sound/player/male/pain25_1.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Player_male_pain50_1",
+      "QuakePath" : "sound/player/male/pain50_1.wav",
+      "Url" : "quakepak:/sound/player/male/pain50_1.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Player_male_pain75_1",
+      "QuakePath" : "sound/player/male/pain75_1.wav",
+      "Url" : "quakepak:/sound/player/male/pain75_1.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Player_watr_in",
+      "QuakePath" : "sound/player/watr_in.wav",
+      "Url" : "quakepak:/sound/player/watr_in.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Player_watr_out",
+      "QuakePath" : "sound/player/watr_out.wav",
+      "Url" : "quakepak:/sound/player/watr_out.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Player_watr_un",
+      "QuakePath" : "sound/player/watr_un.wav",
+      "Url" : "quakepak:/sound/player/watr_un.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Switches_butn2",
+      "QuakePath" : "sound/switches/butn2.wav",
+      "Url" : "quakepak:/sound/switches/butn2.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_bfg__f1y",
+      "QuakePath" : "sound/weapons/bfg__f1y.wav",
+      "Url" : "quakepak:/sound/weapons/bfg__f1y.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_bfg__x1b",
+      "QuakePath" : "sound/weapons/bfg__x1b.wav",
+      "Url" : "quakepak:/sound/weapons/bfg__x1b.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_blastf1a",
+      "QuakePath" : "sound/weapons/blastf1a.wav",
+      "Url" : "quakepak:/sound/weapons/blastf1a.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_chngnd1a",
+      "QuakePath" : "sound/weapons/chngnd1a.wav",
+      "Url" : "quakepak:/sound/weapons/chngnd1a.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_chngnu1a",
+      "QuakePath" : "sound/weapons/chngnu1a.wav",
+      "Url" : "quakepak:/sound/weapons/chngnu1a.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_grenlb1b",
+      "QuakePath" : "sound/weapons/grenlb1b.wav",
+      "Url" : "quakepak:/sound/weapons/grenlb1b.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_grenlf1a",
+      "QuakePath" : "sound/weapons/grenlf1a.wav",
+      "Url" : "quakepak:/sound/weapons/grenlf1a.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_hgrena1b",
+      "QuakePath" : "sound/weapons/hgrena1b.wav",
+      "Url" : "quakepak:/sound/weapons/hgrena1b.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_hgrent1a",
+      "QuakePath" : "sound/weapons/hgrent1a.wav",
+      "Url" : "quakepak:/sound/weapons/hgrent1a.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_hyprbf1a",
+      "QuakePath" : "sound/weapons/hyprbf1a.wav",
+      "Url" : "quakepak:/sound/weapons/hyprbf1a.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_lashit",
+      "QuakePath" : "sound/weapons/lashit.wav",
+      "Url" : "quakepak:/sound/weapons/lashit.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_machgf1b",
+      "QuakePath" : "sound/weapons/machgf1b.wav",
+      "Url" : "quakepak:/sound/weapons/machgf1b.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_machgf2b",
+      "QuakePath" : "sound/weapons/machgf2b.wav",
+      "Url" : "quakepak:/sound/weapons/machgf2b.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_noammo",
+      "QuakePath" : "sound/weapons/noammo.wav",
+      "Url" : "quakepak:/sound/weapons/noammo.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_railgf1a",
+      "QuakePath" : "sound/weapons/railgf1a.wav",
+      "Url" : "quakepak:/sound/weapons/railgf1a.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_rocklf1a",
+      "QuakePath" : "sound/weapons/rocklf1a.wav",
+      "Url" : "quakepak:/sound/weapons/rocklf1a.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_rocklx1a",
+      "QuakePath" : "sound/weapons/rocklx1a.wav",
+      "Url" : "quakepak:/sound/weapons/rocklx1a.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_shotgf1b",
+      "QuakePath" : "sound/weapons/shotgf1b.wav",
+      "Url" : "quakepak:/sound/weapons/shotgf1b.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Weapons_sshotf1b",
+      "QuakePath" : "sound/weapons/sshotf1b.wav",
+      "Url" : "quakepak:/sound/weapons/sshotf1b.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "World_quake",
+      "QuakePath" : "sound/world/quake.wav",
+      "Url" : "quakepak:/sound/world/quake.wav"
+    }
+  ]
+}
