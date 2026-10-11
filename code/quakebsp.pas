@@ -179,6 +179,11 @@ type
     FPlanes: TBSPPlaneArray;
     FNodes: TBSPNodeArray;
     FLeafs: TBSPLeafArray;
+    FLeafFaces: array of Word;
+    { Visibility lump (Quake 2 dvis_t): cluster count, then per cluster the
+      offsets of its run-length compressed PVS and PHS rows }
+    FVisData: TBytes;
+    FClusterCount: Integer;
     { Planes of each ladder brush (point inside = behind all of them) }
     FLadderBrushes: array of array of Integer;
     FClipBrushes: array of array of Integer;
@@ -195,6 +200,7 @@ type
     FEntities: TQuakeEntityList;
     function GetFaceCount: Integer; inline;
     function GetModelCount: Integer; inline;
+    function GetLeafCount: Integer; inline;
     procedure ParseEntities(const Text: String);
     procedure LoadTextures;
     procedure LoadLadderBrushes(const Data: PByte; const Hdr: Pointer);
@@ -232,6 +238,25 @@ type
       (Quake coordinates), like Quake 2's CM_PointContents for the world. }
     function PointContents(const P: TVector3): Integer;
 
+    { Index of the BSP leaf containing a point (Quake coordinates), -1 if none }
+    function PointLeaf(const P: TVector3): Integer;
+
+    { Visibility cluster of the leaf containing a point; -1 in solid space
+      or outside the map (Quake 2 then draws everything) }
+    function PointCluster(const P: TVector3): Integer;
+
+    { Clusters potentially visible from Cluster, as a bit row of
+      ClusterBytes bytes (CM_ClusterPVS). All bits set when the map has no
+      visibility data or Cluster is -1. }
+    procedure ClusterPVS(const Cluster: Integer; var Row: TBytes);
+    function ClusterBytes: Integer;
+
+    { Cluster of a leaf (-1 for solid leafs) }
+    function LeafCluster(const Leaf: Integer): Integer;
+    { Faces listed in a leaf: LeafFace(Leaf, 0 .. LeafFaceCount(Leaf) - 1) }
+    function LeafFaceCount(const Leaf: Integer): Integer;
+    function LeafFace(const Leaf, Index: Integer): Integer;
+
     { Faces (convex polygons, Quake coordinates) of the player-clip brushes
       that are not otherwise solid: invisible walls for collision. }
     procedure GetClipBrushPolygons(const Polygons: Classes.TList);
@@ -255,6 +280,9 @@ type
     property FaceCount: Integer read GetFaceCount;
     property Models: TBSPModelArray read FModels;
     property ModelCount: Integer read GetModelCount;
+    property LeafCount: Integer read GetLeafCount;
+    { Number of visibility clusters (0 when the map has no vis data) }
+    property ClusterCount: Integer read FClusterCount;
     property Entities: TQuakeEntityList read FEntities;
     property Lightmaps: TBytes read FLightmaps;
     property TexInfos: TBSPTexInfoArray read FTexInfos;
@@ -582,6 +610,25 @@ begin
   if Length(FLeafs) > 0 then
     Move((Data + Hdr.Lumps[LUMP_LEAFS].Offset)^, FLeafs[0], Length(FLeafs) * SizeOf(TBSPLeaf));
 
+  SetLength(FLeafFaces, Hdr.Lumps[LUMP_LEAFFACES].Length div SizeOf(Word));
+  if Length(FLeafFaces) > 0 then
+    Move((Data + Hdr.Lumps[LUMP_LEAFFACES].Offset)^, FLeafFaces[0], Length(FLeafFaces) * SizeOf(Word));
+
+  FClusterCount := 0;
+  SetLength(FVisData, Hdr.Lumps[LUMP_VISIBILITY].Length);
+  if Length(FVisData) >= SizeOf(LongInt) then
+  begin
+    Move((Data + Hdr.Lumps[LUMP_VISIBILITY].Offset)^, FVisData[0], Length(FVisData));
+    FClusterCount := PLongInt(@FVisData[0])^;
+    if (FClusterCount < 0) or (SizeOf(LongInt) * (1 + 2 * Int64(FClusterCount)) > Length(FVisData)) then
+    begin
+      WritelnWarning('QuakeBsp', 'Map "%s" has an invalid visibility lump', [AMapPath]);
+      FClusterCount := 0;
+    end;
+  end;
+  if FClusterCount = 0 then
+    SetLength(FVisData, 0);
+
   SetLength(FVertices, Hdr.Lumps[LUMP_VERTICES].Length div SizeOf(TVector3));
   if Length(FVertices) > 0 then
     Move((Data + Hdr.Lumps[LUMP_VERTICES].Offset)^, FVertices[0], Length(FVertices) * SizeOf(TVector3));
@@ -614,8 +661,8 @@ begin
   ComputeExtents;
   LoadLadderBrushes(Data, @Hdr);
 
-  WritelnLog('QuakeBsp', 'Loaded map "%s": %d faces, %d vertices, %d texinfos, %d models, %d entities',
-    [AMapPath, Length(FFaces), Length(FVertices), Length(FTexInfos), Length(FModels), FEntities.Count]);
+  WritelnLog('QuakeBsp', 'Loaded map "%s": %d faces, %d vertices, %d texinfos, %d models, %d entities, %d clusters',
+    [AMapPath, Length(FFaces), Length(FVertices), Length(FTexInfos), Length(FModels), FEntities.Count, FClusterCount]);
   Result := Length(FModels) > 0;
 end;
 
@@ -880,12 +927,12 @@ begin
   Result := False;
 end;
 
-function TQuakeBsp.PointContents(const P: TVector3): Integer;
+function TQuakeBsp.PointLeaf(const P: TVector3): Integer;
 var
   Node: Integer;
   Plane: TBSPPlane;
 begin
-  Result := 0;
+  Result := -1;
   if (Length(FModels) = 0) or (Length(FNodes) = 0) then
     Exit;
   Node := FModels[0].HeadNode;
@@ -899,7 +946,94 @@ begin
   end;
   Node := -(Node + 1);
   if Node < Length(FLeafs) then
-    Result := FLeafs[Node].Contents;
+    Result := Node;
+end;
+
+function TQuakeBsp.PointContents(const P: TVector3): Integer;
+var
+  Leaf: Integer;
+begin
+  Leaf := PointLeaf(P);
+  if Leaf >= 0 then
+    Result := FLeafs[Leaf].Contents
+  else
+    Result := 0;
+end;
+
+function TQuakeBsp.PointCluster(const P: TVector3): Integer;
+begin
+  Result := LeafCluster(PointLeaf(P));
+end;
+
+function TQuakeBsp.GetLeafCount: Integer;
+begin
+  Result := Length(FLeafs);
+end;
+
+function TQuakeBsp.LeafCluster(const Leaf: Integer): Integer;
+begin
+  if (Leaf < 0) or (Leaf >= Length(FLeafs)) then
+    Exit(-1);
+  Result := FLeafs[Leaf].Cluster;
+  if Result >= Max(FClusterCount, 1) then
+    Result := -1;
+end;
+
+function TQuakeBsp.LeafFaceCount(const Leaf: Integer): Integer;
+begin
+  Result := FLeafs[Leaf].NumLeafFaces;
+end;
+
+function TQuakeBsp.LeafFace(const Leaf, Index: Integer): Integer;
+var
+  I: Integer;
+begin
+  I := FLeafs[Leaf].FirstLeafFace + Index;
+  if I < Length(FLeafFaces) then
+    Result := FLeafFaces[I]
+  else
+    Result := -1;
+end;
+
+function TQuakeBsp.ClusterBytes: Integer;
+begin
+  Result := Max(1, (FClusterCount + 7) shr 3);
+end;
+
+procedure TQuakeBsp.ClusterPVS(const Cluster: Integer; var Row: TBytes);
+var
+  RowSize, Ofs, Count: Integer;
+  OutPos: Integer;
+begin
+  RowSize := ClusterBytes;
+  SetLength(Row, RowSize);
+  if (FClusterCount = 0) or (Cluster < 0) or (Cluster >= FClusterCount) then
+  begin
+    FillChar(Row[0], RowSize, $FF);
+    Exit;
+  end;
+  FillChar(Row[0], RowSize, 0);
+  { bitofs[Cluster][DVIS_PVS] }
+  Ofs := PLongInt(@FVisData[SizeOf(LongInt) * (1 + 2 * Cluster)])^;
+  OutPos := 0;
+  { Run-length decompression like Quake 2's CM_DecompressVis: a zero byte
+    is followed by the number of zero bytes it stands for }
+  while (OutPos < RowSize) and (Ofs >= 0) and (Ofs < Length(FVisData)) do
+  begin
+    if FVisData[Ofs] <> 0 then
+    begin
+      Row[OutPos] := FVisData[Ofs];
+      Inc(OutPos);
+      Inc(Ofs);
+    end else
+    begin
+      if Ofs + 1 >= Length(FVisData) then
+        Break;
+      Count := FVisData[Ofs + 1];
+      Inc(Ofs, 2);
+      Inc(OutPos, Count); { Row is already zeroed }
+    end;
+  end;
 end;
 
 function TQuakeBsp.FindEntity(const AClassName: String): TQuakeEntity;

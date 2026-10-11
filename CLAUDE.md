@@ -21,6 +21,8 @@ castle-engine compile --mode=release      # or --mode=debug
 
 The log goes to `%LOCALAPPDATA%\castle-quake2\castle-quake2.log`. Audio needs `OpenAL32.dll` and `wrap_oal.dll` next to the exe.
 
+Linux (as in CI, or a cloud container): FPC 3.2.2 (`apt install fpc libgtk-3-dev`), CGE cloned from GitHub with its build tool compiled by `tools/build-tool/castle-engine_compile.sh`, `CASTLE_ENGINE_PATH` set; autotests run under `xvfb-run -a -s "-screen 0 1600x900x24"` with Mesa.
+
 ## Automated Headless Testing
 
 ```powershell
@@ -31,7 +33,7 @@ Demo script actions: `W:sec` wait, `S` screenshot (logs FPS + camera), `X` fire,
 
 ## Unit tests
 
-`tests/` is a console CGE project (search path `../code/`): `cd tests; castle-engine compile; ./castle-quake2-tests` — 44 checks of the parsers against the demo PAK (counts, contents, ladders, LightPoint, MD2 animations, SP2). Run from `tests/` (it loads `../data/paks/quake2_demo.pak`). CI runs it before the autotests.
+`tests/` is a console CGE project (search path `../code/`): `cd tests; castle-engine compile; ./castle-quake2-tests` — 51 checks of the parsers against the demo PAK (counts, contents, ladders, LightPoint, PVS, MD2 animations, SP2). Run from `tests/` (it loads `../data/paks/quake2_demo.pak`). CI runs it before the autotests.
 
 Screenshot comparison: `./castle-quake2-tests --compare reference/<map>.png <shot>.png <diff>.png [limit]` averages both images into 64x36 blocks and fails when the mean channel difference is above 3 (identical runs: < 1; a 10° turn: ~6). CI compares an `O:notarget,W:2,S,Q` shot (no combat, player settled) of each demo map with `tests/reference/*.png`. After an intended visual change, delete the affected reference and commit the one CI creates (artifact `autotest-screenshots`, `compare/reference/`), (references are made by CI's Mesa renderer; Windows shots differ by up to ~4, so don't regenerate them locally).
 
@@ -42,6 +44,7 @@ Screenshot comparison: `./castle-quake2-tests --compare reference/<map>.png <sho
 - `TQuakeMap` also fills its published `Background` (the viewport's `TCastleBackground`) with the map's skybox in `ApplySky`, in the editor too, and `PreviewEntities` / `PreviewMarkers` show items, monsters, player starts, paths, speakers and trigger volumes in the editor (`markers` console command in game).
 - `TQuakeMap` (in the play design, named `QuakeMap`) owns the BSP + geometry; `TQuakeWorld` gets it in the constructor, reuses the design-loaded map once, and calls `LoadMap` for restarts / level changes. Keep `TQuakeMap` at identity transform: gameplay code uses its local space as world space.
 - Monsters, pickups and movers are `TCastleBehavior`s owned by Pascal lists (not by the transform); their destructors free the transform after `BeforeDestruction` detached them. Give runtime transforms readable `Name`s.
+- World faces are culled by the PVS in 1024-unit regions (`TQuakeGeometry.UpdateVisibility`, `Shape.Visible`); `novis` in the console draws everything. To check culling, compare shots of the same demo script with and without `O:novis` (they should match within ~1.5).
 - Code running during design loading (e.g. in `TQuakeMap.Loaded`) can't use `WorldTransform` / `WorldBoundingBox` yet.
 
 ## Conventions & Rules

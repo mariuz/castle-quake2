@@ -22,3 +22,4 @@ test_output/
 
 # Linux / macOS executable
 /castle-quake2
+/tests/castle-quake2-tests

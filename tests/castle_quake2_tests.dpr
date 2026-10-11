@@ -73,6 +73,8 @@ var
   Bsp: TQuakeBsp;
   World: TQuakeEntity;
   C: TVector3;
+  Cluster, I, Seen: Integer;
+  Pvs: TBytes;
 begin
   Bsp := TQuakeBsp.Create;
   try
@@ -96,6 +98,21 @@ begin
     { Baked light below the player start }
     Check(Bsp.LightPoint(CgeToQuake(Vector3(128, 46, 320)), C), 'LightPoint finds a lit surface');
     Check((C.X > 0) or (C.Y > 0) or (C.Z > 0), 'LightPoint colour is not black');
+
+    Check(Bsp.ClusterCount > 0, 'demo1 has visibility clusters');
+    Cluster := Bsp.PointCluster(Bsp.FindEntity('info_player_start').Origin);
+    Check(Cluster >= 0, 'player start is in a cluster');
+    Bsp.ClusterPVS(Cluster, Pvs);
+    CheckEquals(Bsp.ClusterBytes, Length(Pvs), 'PVS row size');
+    Check((Pvs[Cluster shr 3] and (1 shl (Cluster and 7))) <> 0, 'a cluster sees itself');
+    Seen := 0;
+    for I := 0 to Bsp.ClusterCount - 1 do
+      if (Pvs[I shr 3] and (1 shl (I and 7))) <> 0 then
+        Inc(Seen);
+    Check((Seen > 1) and (Seen < Bsp.ClusterCount), Format('PVS culls clusters (%d of %d seen)', [Seen, Bsp.ClusterCount]));
+    CheckEquals(-1, Bsp.PointCluster(Vector3(100000, 0, 0)), 'no cluster outside the map');
+    Bsp.ClusterPVS(-1, Pvs);
+    Check(Pvs[0] = $FF, 'cluster -1 sees everything');
   finally
     Bsp.Free;
   end;

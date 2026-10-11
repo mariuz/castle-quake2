@@ -114,6 +114,16 @@ jobs:
             timeout 300 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest "$map" "test_output/compare/$map" --demo "O:notarget,W:2,S,Q" > "test_output/compare/$map.log" 2>&1
             (cd tests && ./castle-quake2-tests --compare "reference/$map.png" "../test_output/compare/${map}_1.png" "../test_output/compare/${map}_diff.png") || status=1
           done
+          # PVS culling must not hide anything visible: the same views with and
+          # without culling ("novis") must match
+          views="I:0,W:0.3,S,T:120,W:0.2,S,T:120,W:0.2,S,I:12,W:0.3,S,T:120,W:0.2,S,I:24,W:0.3,S,T:180,W:0.2,S"
+          for mode in vis novis; do
+            pre="O:notarget,O:god"; [ "$mode" = novis ] && pre="$pre,O:novis"
+            timeout 300 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 "test_output/compare/pvs_$mode" --demo "$pre,W:1,$views,Q" > "test_output/compare/pvs_$mode.log" 2>&1
+          done
+          for k in 1 2 3 4 5 6 7; do
+            (cd tests && ./castle-quake2-tests --compare "../test_output/compare/pvs_novis_$k.png" "../test_output/compare/pvs_vis_$k.png" "../test_output/compare/pvs_diff_$k.png" 2) || status=1
+          done
           cp -r tests/reference test_output/compare/reference
           if [ "$status" -ne 0 ]; then
             echo "::error::Screenshots differ from tests/reference (see test_output/compare/*_diff.png in the artifact)"

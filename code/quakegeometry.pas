@@ -25,6 +25,8 @@ type
     TexNode: TImageTextureNode;
     ScrollNode: TTextureTransformNode;
     Shape: TShapeNode;
+    { Visibility region of the world faces in this batch, -1 if not culled }
+    Region: Integer;
     { Uses the dynamic (light-style animated) lightmap atlas }
     Dynamic: Boolean;
     constructor Create(const ATexName: String; const AFlags: Integer);
@@ -57,6 +59,23 @@ type
   end;
 
   TQuakeDynamicLightmapList = specialize TObjectList<TQuakeDynamicLightmap>;
+
+  { World faces in one cell of a coarse grid, culled together by the PVS:
+    visible when any cluster of a leaf containing one of its faces is
+    potentially visible from the camera's cluster. }
+  TQuakeVisRegion = class
+  public
+    { Bit row of clusters (TQuakeBsp.ClusterBytes bytes) }
+    Clusters: TBytes;
+    Shapes: specialize TList<TAbstractShapeNode>;
+    Visible: Boolean;
+    constructor Create(const ClusterBytes: Integer);
+    destructor Destroy; override;
+    function SeenFrom(const Pvs: TBytes): Boolean;
+    procedure SetVisible(const Value: Boolean);
+  end;
+
+  TQuakeVisRegionList = specialize TObjectList<TQuakeVisRegion>;
 
   { Dynamic-light shader effect of one brush model and its uniforms }
   TQuakeDLightEffect = class
@@ -202,6 +221,15 @@ type
     FAnimFrame: Integer;
     FSkyName: String;
     FOnFireTargets: TQuakeFireTargetsEvent;
+    { PVS culling (Quake 2 R_MarkLeaves) }
+    FVisRegions: TQuakeVisRegionList;
+    FFaceRegion: array of Integer;
+    FVisCluster: Integer;
+    FVisibleRegions: Integer;
+    FNoVis: Boolean;
+    FPvs: TBytes;
+    procedure BuildVisRegions;
+    procedure SetNoVis(const Value: Boolean);
     procedure BuildModelGeometry(const ModelIdx: Integer; const RootNode: TX3DRootNode;
       const SkyRoot: TX3DRootNode; const LiquidRoot: TX3DRootNode = nil);
     procedure SetupMovers(const Parent: TCastleTransform);
@@ -221,6 +249,11 @@ type
     { Dynamic lights shown on the lightmapped surfaces this frame }
     procedure SetSurfaceLights(const Lights: TQuakeSurfaceLights; const Count: Integer);
 
+    { Show only the world faces potentially visible from a point (Quake
+      coordinates), using the map's PVS. Cheap while the cluster is unchanged. }
+    procedure UpdateVisibility(const CameraPos: TVector3);
+    function VisRegionCount: Integer;
+
     { Number of faces lit by animated / switchable light styles }
     function DynamicFaceCount: Integer;
 
@@ -238,6 +271,11 @@ type
     property Movers: TQuakeMoverList read FMovers;
     { Worldspawn "sky" key, e.g. "unit1_" (env/unit1_rt.pcx ...) }
     property SkyName: String read FSkyName;
+    { Draw all world faces, ignoring the PVS (Quake 2 r_novis) }
+    property NoVis: Boolean read FNoVis write SetNoVis;
+    { Camera cluster of the last UpdateVisibility (-1: outside, all drawn) }
+    property VisCluster: Integer read FVisCluster;
+    property VisibleRegionCount: Integer read FVisibleRegions;
     property OnFireTargets: TQuakeFireTargetsEvent read FOnFireTargets write FOnFireTargets;
   end;
 
@@ -300,6 +338,44 @@ begin
   Result := GammaTable[V];
 end;
 
+{ TQuakeVisRegion }
+
+constructor TQuakeVisRegion.Create(const ClusterBytes: Integer);
+begin
+  inherited Create;
+  SetLength(Clusters, ClusterBytes);
+  FillChar(Clusters[0], ClusterBytes, 0);
+  Shapes := specialize TList<TAbstractShapeNode>.Create;
+  Visible := True;
+end;
+
+destructor TQuakeVisRegion.Destroy;
+begin
+  Shapes.Free;
+  inherited Destroy;
+end;
+
+function TQuakeVisRegion.SeenFrom(const Pvs: TBytes): Boolean;
+var
+  I: Integer;
+begin
+  for I := 0 to Min(High(Clusters), High(Pvs)) do
+    if (Clusters[I] and Pvs[I]) <> 0 then
+      Exit(True);
+  Result := False;
+end;
+
+procedure TQuakeVisRegion.SetVisible(const Value: Boolean);
+var
+  Shape: TAbstractShapeNode;
+begin
+  if Visible = Value then
+    Exit;
+  Visible := Value;
+  for Shape in Shapes do
+    Shape.Visible := Value;
+end;
+
 { TQuakeGeomBatch }
 
 constructor TQuakeGeomBatch.Create(const ATexName: String; const AFlags: Integer);
@@ -307,6 +383,7 @@ begin
   inherited Create;
   TextureName := ATexName;
   Flags := AFlags;
+  Region := -1;
   Coords := TVector3List.Create;
   TexCoords := TVector2List.Create;
   LMTexCoords := TVector2List.Create;
@@ -1068,6 +1145,8 @@ begin
   FAnimTextures := TQuakeAnimTexList.Create(True);
   FScrollNodes := specialize TList<TTextureTransformNode>.Create;
   FDynLightmaps := TQuakeDynamicLightmapList.Create(True);
+  FVisRegions := TQuakeVisRegionList.Create(True);
+  FVisCluster := -1;
 
   World := FBsp.FindEntity('worldspawn');
   if World <> nil then
@@ -1088,6 +1167,7 @@ begin
   FAnimTextures.Free;
   FScrollNodes.Free;
   FDynLightmaps.Free;
+  FVisRegions.Free;
   inherited Destroy;
 end;
 
@@ -1140,7 +1220,7 @@ var
   Dyn: TQuakeDynamicLightmap;
   DynFace: TQuakeDynFace;
   IsDynamic: Boolean;
-  StyleIdx: Integer;
+  StyleIdx, Region: Integer;
   Ext: TQuakeFaceExtents;
   LmW, LmH, AtlasX, AtlasY: Integer;
   AllocOk: Boolean;
@@ -1196,10 +1276,16 @@ begin
       Key := TexName + '|' + IntToStr(TexInfo.Flags and BatchFlagMask);
       if IsDynamic then
         Key := Key + '|dyn';
+      Region := -1;
+      if (ModelIdx = 0) and (FaceIdx < Length(FFaceRegion)) then
+        Region := FFaceRegion[FaceIdx];
+      if Region >= 0 then
+        Key := Key + '|r' + IntToStr(Region);
       if not Batches.TryGetValue(Key, Batch) then
       begin
         Batch := TQuakeGeomBatch.Create(TexName, TexInfo.Flags and BatchFlagMask);
         Batch.Dynamic := IsDynamic;
+        Batch.Region := Region;
         Batches.Add(Key, Batch);
       end;
 
@@ -1298,6 +1384,8 @@ begin
         LiquidRoot.AddChildren(Batch.Shape)
       else
         RootNode.AddChildren(Batch.Shape);
+      if Batch.Region >= 0 then
+        FVisRegions[Batch.Region].Shapes.Add(Batch.Shape);
       RegisterAnimNode(Batch.TextureName, Batch.TexNode);
       if Batch.ScrollNode <> nil then
         FScrollNodes.Add(Batch.ScrollNode);
@@ -1384,7 +1472,9 @@ begin
   RootWorld := TX3DRootNode.Create;
   RootSky := TX3DRootNode.Create;
   RootLiquids := TX3DRootNode.Create;
+  BuildVisRegions;
   BuildModelGeometry(0, RootWorld, RootSky, RootLiquids);
+  FFaceRegion := nil;
   FSceneWorld.Load(RootWorld, True);
   FSceneSkyClip.Load(RootSky, True);
   FSceneLiquids.Load(RootLiquids, True);
@@ -1393,6 +1483,115 @@ begin
   SetupMovers(Parent);
   WritelnLog('QuakeGeometry', '%d animated texture chains, %d flowing surfaces, %d light-style faces, sky "%s"',
     [FAnimTextures.Count, FScrollNodes.Count, DynamicFaceCount, FSkyName]);
+end;
+
+procedure TQuakeGeometry.BuildVisRegions;
+const
+  { Grid cell size (Quake units). Smaller cells cull more, but split the
+    texture batches into more shapes. }
+  RegionSize = 1024;
+  CellBias = 1 shl 15;
+var
+  Mdl: TBSPModel;
+  Cells: specialize TDictionary<Int64, Integer>;
+  FaceIdx, V, Leaf, I, F, Cluster, Region: Integer;
+  Center: TVector3;
+  Key: Int64;
+begin
+  FVisRegions.Clear;
+  FFaceRegion := nil;
+  FVisCluster := -1;
+  if (FBsp.ClusterCount = 0) or (FBsp.ModelCount = 0) then
+    Exit; { no vis data: everything is always drawn }
+
+  Mdl := FBsp.Models[0];
+  SetLength(FFaceRegion, FBsp.FaceCount);
+  for FaceIdx := 0 to High(FFaceRegion) do
+    FFaceRegion[FaceIdx] := -1;
+
+  Cells := specialize TDictionary<Int64, Integer>.Create;
+  try
+    for FaceIdx := Mdl.FirstFace to Min(Mdl.FirstFace + Mdl.NumFaces, FBsp.FaceCount) - 1 do
+    begin
+      if FBsp.Faces[FaceIdx].NumEdges < 3 then
+        Continue;
+      Center := TVector3.Zero;
+      for V := 0 to FBsp.Faces[FaceIdx].NumEdges - 1 do
+        Center := Center + FBsp.GetFaceVertex(FaceIdx, V);
+      Center := Center / FBsp.Faces[FaceIdx].NumEdges;
+      Key :=
+        (Int64(Floor(Center.X / RegionSize) + CellBias) shl 32) or
+        (Int64(Floor(Center.Y / RegionSize) + CellBias) shl 16) or
+         Int64(Floor(Center.Z / RegionSize) + CellBias);
+      if not Cells.TryGetValue(Key, Region) then
+      begin
+        Region := FVisRegions.Add(TQuakeVisRegion.Create(FBsp.ClusterBytes));
+        Cells.Add(Key, Region);
+      end;
+      FFaceRegion[FaceIdx] := Region;
+    end;
+  finally
+    Cells.Free;
+  end;
+
+  { A face is drawn when a leaf listing it is in a potentially visible cluster }
+  for Leaf := 0 to FBsp.LeafCount - 1 do
+  begin
+    Cluster := FBsp.LeafCluster(Leaf);
+    if Cluster < 0 then
+      Continue;
+    for I := 0 to FBsp.LeafFaceCount(Leaf) - 1 do
+    begin
+      F := FBsp.LeafFace(Leaf, I);
+      if (F < 0) or (F > High(FFaceRegion)) or (FFaceRegion[F] < 0) then
+        Continue;
+      Region := FFaceRegion[F];
+      FVisRegions[Region].Clusters[Cluster shr 3] :=
+        FVisRegions[Region].Clusters[Cluster shr 3] or (1 shl (Cluster and 7));
+    end;
+  end;
+  FVisibleRegions := FVisRegions.Count;
+  WritelnLog('QuakeGeometry', 'PVS: %d clusters, %d world regions',
+    [FBsp.ClusterCount, FVisRegions.Count]);
+end;
+
+procedure TQuakeGeometry.UpdateVisibility(const CameraPos: TVector3);
+var
+  Cluster: Integer;
+  Region: TQuakeVisRegion;
+begin
+  if FVisRegions.Count = 0 then
+    Exit;
+  if FNoVis then
+    Cluster := -1
+  else
+    Cluster := FBsp.PointCluster(CameraPos);
+  { The PVS depends only on the cluster }
+  if Cluster = FVisCluster then
+    Exit;
+  FVisCluster := Cluster;
+  FBsp.ClusterPVS(Cluster, FPvs);
+  FVisibleRegions := 0;
+  for Region in FVisRegions do
+  begin
+    { Outside the map or in a wall (noclip): draw everything, like Quake 2 }
+    Region.SetVisible((Cluster < 0) or Region.SeenFrom(FPvs));
+    if Region.Visible then
+      Inc(FVisibleRegions);
+  end;
+end;
+
+procedure TQuakeGeometry.SetNoVis(const Value: Boolean);
+begin
+  if FNoVis = Value then
+    Exit;
+  FNoVis := Value;
+  FVisCluster := -2; { recompute on the next UpdateVisibility }
+end;
+
+function TQuakeGeometry.VisRegionCount: Integer;
+begin
+  Result := FVisRegions.Count;
 end;
 
 function TQuakeGeometry.DynamicFaceCount: Integer;

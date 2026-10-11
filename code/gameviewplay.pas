@@ -250,8 +250,9 @@ begin
     finally
       Img.Free;
     end;
-    WritelnLog('GameViewPlay', 'Saved screenshot to "%s" (%.1f FPS, camera %s)',
-      [OutPath, Container.Fps.RealFps, MainViewport.Camera.Translation.ToString]);
+    WritelnLog('GameViewPlay', 'Saved screenshot to "%s" (%.1f FPS, camera %s, PVS cluster %d, %d / %d world regions)',
+      [OutPath, Container.Fps.RealFps, MainViewport.Camera.Translation.ToString,
+       FWorld.Geometry.VisCluster, FWorld.Geometry.VisibleRegionCount, FWorld.Geometry.VisRegionCount]);
   except
     on E: Exception do
       WritelnWarning('GameViewPlay', 'Failed to save screenshot "%s": %s', [OutPath, E.Message]);
@@ -676,6 +677,7 @@ begin
 
   UpdateMovementInput(SecondsPassed);
   FWorld.Update(SecondsPassed, MainViewport.Camera.Translation, MainViewport.Camera.Direction);
+  FWorld.Geometry.UpdateVisibility(CgeToQuake(MainViewport.Camera.Translation));
   WalkNavigation.Exists := not FWorld.Dead;
 
   if FWorld.TeleportPending then
@@ -823,6 +825,11 @@ begin
   if Cmd = 'markers' then
     QuakeMap.PreviewMarkers := not QuakeMap.PreviewMarkers
   else
+  if Cmd = 'novis' then
+  begin
+    FWorld.Geometry.NoVis := not FWorld.Geometry.NoVis;
+    Hud.ShowMessage('novis ' + Iff(FWorld.Geometry.NoVis, 'ON', 'OFF'), 2);
+  end else
   if Cmd = 'save' then
   begin
     if Args = '' then
