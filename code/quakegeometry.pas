@@ -60,22 +60,40 @@ type
 
   TQuakeDynamicLightmapList = specialize TObjectList<TQuakeDynamicLightmap>;
 
-  { World faces in one cell of a coarse grid, culled together by the PVS:
-    visible when any cluster of a leaf containing one of its faces is
-    potentially visible from the camera's cluster. }
+  { World faces of one area in one cell of a coarse grid, culled together:
+    visible when a leaf listing one of its faces is in a cluster potentially
+    visible from the camera's cluster (PVS) and in an area connected to the
+    camera's area through open area portals. }
   TQuakeVisRegion = class
   public
-    { Bit row of clusters (TQuakeBsp.ClusterBytes bytes) }
-    Clusters: TBytes;
+    { Bit rows of clusters (TQuakeBsp.ClusterBytes bytes) and areas }
+    Clusters, Areas: TBytes;
     Shapes: specialize TList<TAbstractShapeNode>;
     Visible: Boolean;
-    constructor Create(const ClusterBytes: Integer);
+    constructor Create(const ClusterBytes, AreaBytes: Integer);
     destructor Destroy; override;
-    function SeenFrom(const Pvs: TBytes): Boolean;
+    function SeenFrom(const Pvs, AreaBits: TBytes): Boolean;
     procedure SetVisible(const Value: Boolean);
   end;
 
   TQuakeVisRegionList = specialize TObjectList<TQuakeVisRegion>;
+
+  TQuakeMover = class;
+
+  { func_areaportal: open while one of the doors targeting it is not
+    closed (Quake 2 door_use_areaportals), else toggled when used. }
+  TQuakeAreaPortal = class
+  public
+    Entity: TQuakeEntity;
+    PortalNum: Integer;
+    Doors: specialize TList<TQuakeMover>;
+    Toggled: Boolean;
+    constructor Create;
+    destructor Destroy; override;
+    function IsOpen: Boolean;
+  end;
+
+  TQuakeAreaPortalList = specialize TObjectList<TQuakeAreaPortal>;
 
   { Dynamic-light shader effect of one brush model and its uniforms }
   TQuakeDLightEffect = class
@@ -224,11 +242,14 @@ type
     { PVS culling (Quake 2 R_MarkLeaves) }
     FVisRegions: TQuakeVisRegionList;
     FFaceRegion: array of Integer;
-    FVisCluster: Integer;
+    FVisCluster, FVisArea: Integer;
     FVisibleRegions: Integer;
     FNoVis: Boolean;
-    FPvs: TBytes;
+    FPvs, FAreaBits, FPortalOpen: TBytes;
+    FAreaPortals: TQuakeAreaPortalList;
     procedure BuildVisRegions;
+    procedure BuildAreaPortals;
+    function UpdatePortalStates: Boolean;
     procedure SetNoVis(const Value: Boolean);
     procedure BuildModelGeometry(const ModelIdx: Integer; const RootNode: TX3DRootNode;
       const SkyRoot: TX3DRootNode; const LiquidRoot: TX3DRootNode = nil);
@@ -254,6 +275,11 @@ type
     procedure UpdateVisibility(const CameraPos: TVector3);
     function VisRegionCount: Integer;
 
+    { func_areaportal used by a trigger (not a door): toggle it }
+    procedure ToggleAreaPortal(const Ent: TQuakeEntity);
+    { Area portals in entity order (savegames keep their Toggled) }
+    property AreaPortals: TQuakeAreaPortalList read FAreaPortals;
+
     { Number of faces lit by animated / switchable light styles }
     function DynamicFaceCount: Integer;
 
@@ -275,6 +301,8 @@ type
     property NoVis: Boolean read FNoVis write SetNoVis;
     { Camera cluster of the last UpdateVisibility (-1: outside, all drawn) }
     property VisCluster: Integer read FVisCluster;
+    { Camera area of the last UpdateVisibility }
+    property VisArea: Integer read FVisArea;
     property VisibleRegionCount: Integer read FVisibleRegions;
     property OnFireTargets: TQuakeFireTargetsEvent read FOnFireTargets write FOnFireTargets;
   end;
@@ -340,11 +368,13 @@ end;
 
 { TQuakeVisRegion }
 
-constructor TQuakeVisRegion.Create(const ClusterBytes: Integer);
+constructor TQuakeVisRegion.Create(const ClusterBytes, AreaBytes: Integer);
 begin
   inherited Create;
   SetLength(Clusters, ClusterBytes);
   FillChar(Clusters[0], ClusterBytes, 0);
+  SetLength(Areas, AreaBytes);
+  FillChar(Areas[0], AreaBytes, 0);
   Shapes := specialize TList<TAbstractShapeNode>.Create;
   Visible := True;
 end;
@@ -355,12 +385,44 @@ begin
   inherited Destroy;
 end;
 
-function TQuakeVisRegion.SeenFrom(const Pvs: TBytes): Boolean;
-var
-  I: Integer;
+function TQuakeVisRegion.SeenFrom(const Pvs, AreaBits: TBytes): Boolean;
+
+  function Intersect(const A, B: TBytes): Boolean;
+  var
+    I: Integer;
+  begin
+    for I := 0 to Min(High(A), High(B)) do
+      if (A[I] and B[I]) <> 0 then
+        Exit(True);
+    Result := False;
+  end;
+
 begin
-  for I := 0 to Min(High(Clusters), High(Pvs)) do
-    if (Clusters[I] and Pvs[I]) <> 0 then
+  Result := Intersect(Clusters, Pvs) and Intersect(Areas, AreaBits);
+end;
+
+{ TQuakeAreaPortal }
+
+constructor TQuakeAreaPortal.Create;
+begin
+  inherited Create;
+  Doors := specialize TList<TQuakeMover>.Create;
+end;
+
+destructor TQuakeAreaPortal.Destroy;
+begin
+  Doors.Free;
+  inherited Destroy;
+end;
+
+function TQuakeAreaPortal.IsOpen: Boolean;
+var
+  Door: TQuakeMover;
+begin
+  if Doors.Count = 0 then
+    Exit(Toggled);
+  for Door in Doors do
+    if (Door.State <> msAtStart) or not Door.Transform.Exists then
       Exit(True);
   Result := False;
 end;
@@ -1146,6 +1208,7 @@ begin
   FScrollNodes := specialize TList<TTextureTransformNode>.Create;
   FDynLightmaps := TQuakeDynamicLightmapList.Create(True);
   FVisRegions := TQuakeVisRegionList.Create(True);
+  FAreaPortals := TQuakeAreaPortalList.Create(True);
   FVisCluster := -1;
 
   World := FBsp.FindEntity('worldspawn');
@@ -1168,6 +1231,7 @@ begin
   FScrollNodes.Free;
   FDynLightmaps.Free;
   FVisRegions.Free;
+  FAreaPortals.Free;
   inherited Destroy;
 end;
 
@@ -1481,6 +1545,7 @@ begin
   BuildPlayerClip;
   Parent.Add(FWorldTransform);
   SetupMovers(Parent);
+  BuildAreaPortals;
   WritelnLog('QuakeGeometry', '%d animated texture chains, %d flowing surfaces, %d light-style faces, sky "%s"',
     [FAnimTextures.Count, FScrollNodes.Count, DynamicFaceCount, FSkyName]);
 end;
@@ -1494,7 +1559,8 @@ const
 var
   Mdl: TBSPModel;
   Cells: specialize TDictionary<Int64, Integer>;
-  FaceIdx, V, Leaf, I, F, Cluster, Region: Integer;
+  FaceIdx, V, Leaf, I, F, Cluster, Area, Region: Integer;
+  FaceArea: array of Integer;
   Center: TVector3;
   Key: Int64;
 begin
@@ -1506,8 +1572,22 @@ begin
 
   Mdl := FBsp.Models[0];
   SetLength(FFaceRegion, FBsp.FaceCount);
+  SetLength(FaceArea, FBsp.FaceCount);
   for FaceIdx := 0 to High(FFaceRegion) do
+  begin
     FFaceRegion[FaceIdx] := -1;
+    FaceArea[FaceIdx] := 0;
+  end;
+  { Area of the first leaf listing each face; faces between areas (in
+    leafs of both) are added to the other areas below }
+  for Leaf := 0 to FBsp.LeafCount - 1 do
+    if FBsp.LeafCluster(Leaf) >= 0 then
+      for I := 0 to FBsp.LeafFaceCount(Leaf) - 1 do
+      begin
+        F := FBsp.LeafFace(Leaf, I);
+        if (F >= 0) and (F <= High(FaceArea)) and (FaceArea[F] = 0) then
+          FaceArea[F] := FBsp.LeafArea(Leaf);
+      end;
 
   Cells := specialize TDictionary<Int64, Integer>.Create;
   try
@@ -1520,12 +1600,13 @@ begin
         Center := Center + FBsp.GetFaceVertex(FaceIdx, V);
       Center := Center / FBsp.Faces[FaceIdx].NumEdges;
       Key :=
+        (Int64(FaceArea[FaceIdx]) shl 48) or
         (Int64(Floor(Center.X / RegionSize) + CellBias) shl 32) or
         (Int64(Floor(Center.Y / RegionSize) + CellBias) shl 16) or
          Int64(Floor(Center.Z / RegionSize) + CellBias);
       if not Cells.TryGetValue(Key, Region) then
       begin
-        Region := FVisRegions.Add(TQuakeVisRegion.Create(FBsp.ClusterBytes));
+        Region := FVisRegions.Add(TQuakeVisRegion.Create(FBsp.ClusterBytes, FBsp.AreaBytes));
         Cells.Add(Key, Region);
       end;
       FFaceRegion[FaceIdx] := Region;
@@ -1534,12 +1615,14 @@ begin
     Cells.Free;
   end;
 
-  { A face is drawn when a leaf listing it is in a potentially visible cluster }
+  { A face is drawn when a leaf listing it is in a potentially visible
+    cluster and a connected area }
   for Leaf := 0 to FBsp.LeafCount - 1 do
   begin
     Cluster := FBsp.LeafCluster(Leaf);
     if Cluster < 0 then
       Continue;
+    Area := FBsp.LeafArea(Leaf);
     for I := 0 to FBsp.LeafFaceCount(Leaf) - 1 do
     begin
       F := FBsp.LeafFace(Leaf, I);
@@ -1548,34 +1631,104 @@ begin
       Region := FFaceRegion[F];
       FVisRegions[Region].Clusters[Cluster shr 3] :=
         FVisRegions[Region].Clusters[Cluster shr 3] or (1 shl (Cluster and 7));
+      FVisRegions[Region].Areas[Area shr 3] :=
+        FVisRegions[Region].Areas[Area shr 3] or (1 shl (Area and 7));
     end;
   end;
   FVisibleRegions := FVisRegions.Count;
-  WritelnLog('QuakeGeometry', 'PVS: %d clusters, %d world regions',
-    [FBsp.ClusterCount, FVisRegions.Count]);
+  WritelnLog('QuakeGeometry', 'PVS: %d clusters, %d areas, %d world regions',
+    [FBsp.ClusterCount, FBsp.AreaCount, FVisRegions.Count]);
+end;
+
+procedure TQuakeGeometry.BuildAreaPortals;
+var
+  Ent: TQuakeEntity;
+  Portal: TQuakeAreaPortal;
+  Mover: TQuakeMover;
+begin
+  FAreaPortals.Clear;
+  for Ent in FBsp.Entities do
+    if Ent.ClassName = 'func_areaportal' then
+    begin
+      Portal := TQuakeAreaPortal.Create;
+      Portal.Entity := Ent;
+      { The portal number is in "style" (set by the map compiler) }
+      Portal.PortalNum := Ent.GetInt('style', 0);
+      if Ent.TargetName <> '' then
+        for Mover in FMovers do
+          if (Mover.Kind in [mkDoor, mkDoorRotating]) and SameText(Mover.Target, Ent.TargetName) then
+          begin
+            Portal.Doors.Add(Mover);
+            WritelnLog('QuakeGeometry', 'Area portal %d "%s" opened by mover %d',
+              [Portal.PortalNum, Ent.TargetName, FMovers.IndexOf(Mover)]);
+          end;
+      FAreaPortals.Add(Portal);
+    end;
+  SetLength(FPortalOpen, FBsp.AreaPortalCount);
+  if Length(FPortalOpen) > 0 then
+    FillChar(FPortalOpen[0], Length(FPortalOpen), 0);
+  WritelnLog('QuakeGeometry', '%d area portals', [FAreaPortals.Count]);
+end;
+
+function TQuakeGeometry.UpdatePortalStates: Boolean;
+var
+  Portal: TQuakeAreaPortal;
+  NewOpen: TBytes;
+begin
+  NewOpen := nil;
+  SetLength(NewOpen, Length(FPortalOpen));
+  if Length(NewOpen) = 0 then
+    Exit(False);
+  FillChar(NewOpen[0], Length(NewOpen), 0);
+  for Portal in FAreaPortals do
+    if (Portal.PortalNum >= 0) and (Portal.PortalNum < Length(NewOpen)) and Portal.IsOpen then
+      NewOpen[Portal.PortalNum] := 1;
+  Result := not CompareMem(@NewOpen[0], @FPortalOpen[0], Length(NewOpen));
+  FPortalOpen := NewOpen;
+end;
+
+procedure TQuakeGeometry.ToggleAreaPortal(const Ent: TQuakeEntity);
+var
+  Portal: TQuakeAreaPortal;
+begin
+  for Portal in FAreaPortals do
+    if Portal.Entity = Ent then
+      Portal.Toggled := not Portal.Toggled;
 end;
 
 procedure TQuakeGeometry.UpdateVisibility(const CameraPos: TVector3);
 var
-  Cluster: Integer;
+  Leaf, Cluster, Area: Integer;
+  PortalsChanged: Boolean;
   Region: TQuakeVisRegion;
 begin
   if FVisRegions.Count = 0 then
     Exit;
+  PortalsChanged := UpdatePortalStates;
   if FNoVis then
-    Cluster := -1
-  else
-    Cluster := FBsp.PointCluster(CameraPos);
-  { The PVS depends only on the cluster }
-  if Cluster = FVisCluster then
+  begin
+    Cluster := -1;
+    Area := 0;
+  end else
+  begin
+    Leaf := FBsp.PointLeaf(CameraPos);
+    Cluster := FBsp.LeafCluster(Leaf);
+    Area := FBsp.LeafArea(Leaf);
+  end;
+  { The PVS depends only on the cluster, the connected areas on the area
+    and the portals }
+  if (Cluster = FVisCluster) and (Area = FVisArea) and not PortalsChanged then
     Exit;
+  if Cluster <> FVisCluster then
+    FBsp.ClusterPVS(Cluster, FPvs);
   FVisCluster := Cluster;
-  FBsp.ClusterPVS(Cluster, FPvs);
+  FVisArea := Area;
+  FBsp.FloodAreas(Area, FPortalOpen, FAreaBits);
   FVisibleRegions := 0;
   for Region in FVisRegions do
   begin
     { Outside the map or in a wall (noclip): draw everything, like Quake 2 }
-    Region.SetVisible((Cluster < 0) or Region.SeenFrom(FPvs));
+    Region.SetVisible((Cluster < 0) or Region.SeenFrom(FPvs, FAreaBits));
     if Region.Visible then
       Inc(FVisibleRegions);
   end;

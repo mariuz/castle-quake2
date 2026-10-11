@@ -250,9 +250,10 @@ begin
     finally
       Img.Free;
     end;
-    WritelnLog('GameViewPlay', 'Saved screenshot to "%s" (%.1f FPS, camera %s, PVS cluster %d, %d / %d world regions)',
+    WritelnLog('GameViewPlay', 'Saved screenshot to "%s" (%.1f FPS, camera %s, PVS cluster %d, area %d, %d / %d world regions)',
       [OutPath, Container.Fps.RealFps, MainViewport.Camera.Translation.ToString,
-       FWorld.Geometry.VisCluster, FWorld.Geometry.VisibleRegionCount, FWorld.Geometry.VisRegionCount]);
+       FWorld.Geometry.VisCluster, FWorld.Geometry.VisArea,
+       FWorld.Geometry.VisibleRegionCount, FWorld.Geometry.VisRegionCount]);
   except
     on E: Exception do
       WritelnWarning('GameViewPlay', 'Failed to save screenshot "%s": %s', [OutPath, E.Message]);

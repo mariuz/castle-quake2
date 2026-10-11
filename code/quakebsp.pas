@@ -91,6 +91,18 @@ type
     FirstLeafBrush, NumLeafBrushes: Word;
   end;
 
+  { Quake 2 dareas_t: an area's portals in the area portal lump }
+  TBSPArea = packed record
+    NumAreaPortals: LongInt;
+    FirstAreaPortal: LongInt;
+  end;
+
+  { Quake 2 dareaportal_t: a portal (func_areaportal "style") to another area }
+  TBSPAreaPortal = packed record
+    PortalNum: LongInt;
+    OtherArea: LongInt;
+  end;
+
   TBSPEdge = packed record
     V0: Word;
     V1: Word;
@@ -184,6 +196,9 @@ type
       offsets of its run-length compressed PVS and PHS rows }
     FVisData: TBytes;
     FClusterCount: Integer;
+    { Areas (separated by func_areaportal brushes; area 0 is solid) }
+    FAreas: array of TBSPArea;
+    FAreaPortals: array of TBSPAreaPortal;
     { Planes of each ladder brush (point inside = behind all of them) }
     FLadderBrushes: array of array of Integer;
     FClipBrushes: array of array of Integer;
@@ -251,6 +266,16 @@ type
     procedure ClusterPVS(const Cluster: Integer; var Row: TBytes);
     function ClusterBytes: Integer;
 
+    { Area of a leaf (0 for solid leafs / none) }
+    function LeafArea(const Leaf: Integer): Integer;
+    function AreaBytes: Integer;
+    { Number of portal states FloodAreas reads (highest portal number + 1) }
+    function AreaPortalCount: Integer;
+    { Areas connected to StartArea through open portals, as a bit row of
+      AreaBytes bytes (CM_FloodArea). PortalOpen[n] <> 0 when portal n is
+      open; missing entries are closed. All bits set for StartArea <= 0. }
+    procedure FloodAreas(const StartArea: Integer; const PortalOpen: TBytes; var Bits: TBytes);
+
     { Cluster of a leaf (-1 for solid leafs) }
     function LeafCluster(const Leaf: Integer): Integer;
     { Faces listed in a leaf: LeafFace(Leaf, 0 .. LeafFaceCount(Leaf) - 1) }
@@ -283,6 +308,7 @@ type
     property LeafCount: Integer read GetLeafCount;
     { Number of visibility clusters (0 when the map has no vis data) }
     property ClusterCount: Integer read FClusterCount;
+    function AreaCount: Integer;
     property Entities: TQuakeEntityList read FEntities;
     property Lightmaps: TBytes read FLightmaps;
     property TexInfos: TBSPTexInfoArray read FTexInfos;
@@ -629,6 +655,13 @@ begin
   if FClusterCount = 0 then
     SetLength(FVisData, 0);
 
+  SetLength(FAreas, Hdr.Lumps[LUMP_AREAS].Length div SizeOf(TBSPArea));
+  if Length(FAreas) > 0 then
+    Move((Data + Hdr.Lumps[LUMP_AREAS].Offset)^, FAreas[0], Length(FAreas) * SizeOf(TBSPArea));
+  SetLength(FAreaPortals, Hdr.Lumps[LUMP_AREAPORTALS].Length div SizeOf(TBSPAreaPortal));
+  if Length(FAreaPortals) > 0 then
+    Move((Data + Hdr.Lumps[LUMP_AREAPORTALS].Offset)^, FAreaPortals[0], Length(FAreaPortals) * SizeOf(TBSPAreaPortal));
+
   SetLength(FVertices, Hdr.Lumps[LUMP_VERTICES].Length div SizeOf(TVector3));
   if Length(FVertices) > 0 then
     Move((Data + Hdr.Lumps[LUMP_VERTICES].Offset)^, FVertices[0], Length(FVertices) * SizeOf(TVector3));
@@ -661,8 +694,9 @@ begin
   ComputeExtents;
   LoadLadderBrushes(Data, @Hdr);
 
-  WritelnLog('QuakeBsp', 'Loaded map "%s": %d faces, %d vertices, %d texinfos, %d models, %d entities, %d clusters',
-    [AMapPath, Length(FFaces), Length(FVertices), Length(FTexInfos), Length(FModels), FEntities.Count, FClusterCount]);
+  WritelnLog('QuakeBsp', 'Loaded map "%s": %d faces, %d vertices, %d texinfos, %d models, %d entities, %d clusters, %d areas',
+    [AMapPath, Length(FFaces), Length(FVertices), Length(FTexInfos), Length(FModels), FEntities.Count,
+     FClusterCount, Length(FAreas)]);
   Result := Length(FModels) > 0;
 end;
 
@@ -977,6 +1011,71 @@ begin
   Result := FLeafs[Leaf].Cluster;
   if Result >= Max(FClusterCount, 1) then
     Result := -1;
+end;
+
+function TQuakeBsp.LeafArea(const Leaf: Integer): Integer;
+begin
+  if (Leaf < 0) or (Leaf >= Length(FLeafs)) then
+    Exit(0);
+  Result := FLeafs[Leaf].Area;
+  if (Result < 0) or (Result >= Length(FAreas)) then
+    Result := 0;
+end;
+
+function TQuakeBsp.AreaCount: Integer;
+begin
+  Result := Length(FAreas);
+end;
+
+function TQuakeBsp.AreaBytes: Integer;
+begin
+  Result := Max(1, (Length(FAreas) + 7) shr 3);
+end;
+
+function TQuakeBsp.AreaPortalCount: Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to High(FAreaPortals) do
+    Result := Max(Result, FAreaPortals[I].PortalNum + 1);
+end;
+
+procedure TQuakeBsp.FloodAreas(const StartArea: Integer; const PortalOpen: TBytes; var Bits: TBytes);
+var
+  Stack: array of Integer;
+  StackCount, Area, I, Other, PortalNum: Integer;
+begin
+  SetLength(Bits, AreaBytes);
+  if (StartArea <= 0) or (StartArea >= Length(FAreas)) then
+  begin
+    FillChar(Bits[0], Length(Bits), $FF);
+    Exit;
+  end;
+  FillChar(Bits[0], Length(Bits), 0);
+  SetLength(Stack, Length(FAreas));
+  Stack[0] := StartArea;
+  StackCount := 1;
+  Bits[StartArea shr 3] := 1 shl (StartArea and 7);
+  while StackCount > 0 do
+  begin
+    Dec(StackCount);
+    Area := Stack[StackCount];
+    for I := FAreas[Area].FirstAreaPortal to
+      Min(FAreas[Area].FirstAreaPortal + FAreas[Area].NumAreaPortals, Length(FAreaPortals)) - 1 do
+    begin
+      PortalNum := FAreaPortals[I].PortalNum;
+      if (PortalNum < 0) or (PortalNum >= Length(PortalOpen)) or (PortalOpen[PortalNum] = 0) then
+        Continue;
+      Other := FAreaPortals[I].OtherArea;
+      if (Other <= 0) or (Other >= Length(FAreas)) or
+         ((Bits[Other shr 3] and (1 shl (Other and 7))) <> 0) then
+        Continue;
+      Bits[Other shr 3] := Bits[Other shr 3] or (1 shl (Other and 7));
+      Stack[StackCount] := Other;
+      Inc(StackCount);
+    end;
+  end;
 end;
 
 function TQuakeBsp.LeafFaceCount(const Leaf: Integer): Integer;

@@ -6,7 +6,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 
 | Subsystem | Original Quake 2 | Castle Quake 2 (now) | Gap |
 | :--- | :--- | :--- | :--- |
-| World geometry | IBSP v38, PVS / areaportal culling | X3D batches per texture and 1024-unit region, PVS culling of regions (`Shape.Visible`), CGE frustum culling | Areaportals (closed doors); per-leaf brush model culling. |
+| World geometry | IBSP v38, PVS / areaportal culling | X3D batches per texture and 1024-unit region, PVS and areaportal culling of regions (`Shape.Visible`), CGE frustum culling | Per-leaf culling of brush models and entities. |
 | Lighting | RGB lightmaps, 4 styles, dynamic lights | All 4 styles (animated, switchable, ramps), 2x overbright, LightPoint model tint, dynamic lights on the world and models | More than 4 surface lights at once; light styles on model tint. |
 | Sky | Skybox, `skyrotate`, `skyaxis` | Skybox via `TCastleBackground` | Sky rotation. |
 | Liquids | Warped water / lava (`SURF_WARP`), contents | Non-solid liquid surfaces, point contents from BSP leafs, swimming, drowning, lava / slime damage, underwater tints | Warp shader. |
@@ -47,7 +47,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - ~~CI autotests~~ — done (`autotest` job); next: compare screenshots against references.
 - ~~Unit tests for the parsers~~ — done (`tests/`, against the demo PAK).
 - ~~Savegames~~ — done as JSON (entities matched by spawn order); projectiles and pending delayed events are not saved.
-- ~~PVS culling~~ — done: world faces are grouped into 1024-unit regions, each hidden when none of its clusters is in the camera cluster's PVS (`novis` console command to compare). Next: areaportals (`func_areaportal`, closed doors cut off areas) and culling brush models / entities by leaf.
+- ~~PVS culling~~ — done: world faces are grouped into 1024-unit regions, each hidden when none of its clusters is in the camera cluster's PVS (`novis` console command to compare). Areaportals too: regions are also split by area, and areas behind closed doors (`func_areaportal`) are hidden. Next: culling brush models / entities by leaf.
 - **Performance**: ~~batch particles~~ (done: one scene, camera-facing quads rebuilt per frame); cache `LineOfSight` results across monsters; merge mover scenes that never move (`func_wall`).
 - **Platforms**: verify the WebAssembly workflow end to end; Android / iOS with CGE's touch navigation; gamepad input via `Controllers`.
 
@@ -69,7 +69,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Shells on monsters: power armor (brain's power screen, absorbs damage) flashes green
 - [x] Weapon viewport (no wall clipping)
 - [x] PVS culling of world regions (visibility lump, `novis` to compare)
-- [ ] Areaportals (closed doors hide the areas behind them)
+- [x] Areaportals (closed doors hide the areas behind them; kept in savegames)
 
 ### Phase 2 – Play
 - [x] All 10 weapons, items, armor rules, keys, powerups

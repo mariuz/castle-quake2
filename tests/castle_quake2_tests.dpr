@@ -74,7 +74,7 @@ var
   World: TQuakeEntity;
   C: TVector3;
   Cluster, I, Seen: Integer;
-  Pvs: TBytes;
+  Pvs, PortalOpen, AreaBits: TBytes;
 begin
   Bsp := TQuakeBsp.Create;
   try
@@ -113,6 +113,17 @@ begin
     CheckEquals(-1, Bsp.PointCluster(Vector3(100000, 0, 0)), 'no cluster outside the map');
     Bsp.ClusterPVS(-1, Pvs);
     Check(Pvs[0] = $FF, 'cluster -1 sees everything');
+
+    CheckEquals(3, Bsp.AreaCount, 'demo1 areas (0 = solid)');
+    CheckEquals(2, Bsp.AreaPortalCount, 'demo1 portal states (portal 1)');
+    CheckEquals(2, Bsp.LeafArea(Bsp.PointLeaf(Bsp.FindEntity('info_player_start').Origin)), 'player start area');
+    PortalOpen := nil;
+    SetLength(PortalOpen, Bsp.AreaPortalCount);
+    Bsp.FloodAreas(2, PortalOpen, AreaBits);
+    CheckEquals(1 shl 2, AreaBits[0], 'closed portal: only area 2 connected');
+    PortalOpen[1] := 1;
+    Bsp.FloodAreas(2, PortalOpen, AreaBits);
+    CheckEquals((1 shl 1) or (1 shl 2), AreaBits[0], 'open portal connects areas 1 and 2');
   finally
     Bsp.Free;
   end;

@@ -805,6 +805,12 @@ begin
   CName := Ent.ClassName;
   Msg := Ent.MessageText;
 
+  if CName = 'func_areaportal' then
+  begin
+    FGeometry.ToggleAreaPortal(Ent);
+    Exit;
+  end;
+
   { trigger_key: needs an item }
   if CName = 'trigger_key' then
   begin
@@ -2161,6 +2167,11 @@ begin
   Result.Add('movers', Arr);
 
   Arr := TJSONArray.Create;
+  for I := 0 to FGeometry.AreaPortals.Count - 1 do
+    Arr.Add(FGeometry.AreaPortals[I].Toggled);
+  Result.Add('areaPortals', Arr);
+
+  Arr := TJSONArray.Create;
   for I := 0 to FProps.Count - 1 do
   begin
     O := TJSONObject.Create;
@@ -2307,6 +2318,11 @@ begin
         Mover.Transform.Translation := JsonToVec(O.Find('pos'));
       Mover.ApplyPose;
     end;
+
+  Arr := Obj.Get('areaPortals', TJSONArray(nil));
+  if Arr <> nil then
+    for I := 0 to Min(Arr.Count, FGeometry.AreaPortals.Count) - 1 do
+      FGeometry.AreaPortals[I].Toggled := Arr.Booleans[I];
 
   Arr := Obj.Get('props', TJSONArray(nil));
   if Arr <> nil then
