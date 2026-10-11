@@ -37,6 +37,7 @@ type
     FSpeakers: TQuakeSpeakerList;
     FProps: TQuakePropList;
     FLasers: TQuakeLaserList;
+    FVisibleEntities, FCulledEntities: Integer;
     FTimers: specialize TDictionary<TQuakeEntity, Single>; { func_timer -> next fire time (<0: off) }
     FDelayed: specialize TList<TDelayedTarget>;
     FCounters: specialize TDictionary<TQuakeEntity, Integer>;
@@ -112,6 +113,7 @@ type
     procedure AddProjectileLights;
     { Send the dynamic lights nearest to the player to the world shader }
     procedure SetSurfaceLights;
+    procedure CullTransform(const T: TCastleTransform; const Box: TBox3D);
     procedure Explode(const Pos: TVector3; const Damage: Integer; const Radius: Single;
       const FromPlayer: Boolean);
     function MonsterByTransform(const T: TCastleTransform): TQuakeMonster;
@@ -142,6 +144,13 @@ type
 
     { Advance world simulation. PlayerPos is the camera (eye) position. }
     procedure Update(const SecondsPassed: Single; const PlayerPos, PlayerDir: TVector3);
+    { Hide (Visible := False, still colliding) movers, monsters, items, props
+      and lasers outside the PVS / connected areas of the geometry's last
+      UpdateVisibility. }
+    procedure CullEntities;
+    { Entities shown / considered by the last CullEntities }
+    property VisibleEntities: Integer read FVisibleEntities;
+    property CulledEntities: Integer read FCulledEntities;
 
     { Player fires the current weapon }
     procedure FireWeapon(const Origin, Dir: TVector3);
@@ -1511,6 +1520,41 @@ begin
       pkBfg:
         Lighting.AddLight(Proj.Transform.Translation, 200, Vector3(0, 1, 0));
     end;
+end;
+
+procedure TQuakeWorld.CullTransform(const T: TCastleTransform; const Box: TBox3D);
+begin
+  if not T.Exists then
+    Exit;
+  T.Visible := FGeometry.BoxVisible(Box);
+  if T.Visible then
+    Inc(FVisibleEntities)
+  else
+    Inc(FCulledEntities);
+end;
+
+procedure TQuakeWorld.CullEntities;
+var
+  Mover: TQuakeMover;
+  Monster: TQuakeMonster;
+  Pickup: TQuakePickup;
+  Prop: TQuakeProp;
+  Laser: TQuakeLaser;
+begin
+  FVisibleEntities := 0;
+  FCulledEntities := 0;
+  if FGeometry = nil then
+    Exit;
+  for Mover in FGeometry.Movers do
+    CullTransform(Mover.Transform, Mover.WorldBox);
+  for Monster in FMonsters do
+    CullTransform(Monster.Transform, Monster.Transform.BoundingBox);
+  for Pickup in FPickups do
+    CullTransform(Pickup.Transform, Pickup.Transform.BoundingBox);
+  for Prop in FProps do
+    CullTransform(Prop.Transform, Prop.Transform.BoundingBox);
+  for Laser in FLasers do
+    CullTransform(Laser.Transform, Laser.Transform.BoundingBox);
 end;
 
 procedure TQuakeWorld.SetSurfaceLights;

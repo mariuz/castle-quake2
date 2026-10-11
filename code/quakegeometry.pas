@@ -273,6 +273,10 @@ type
     { Show only the world faces potentially visible from a point (Quake
       coordinates), using the map's PVS. Cheap while the cluster is unchanged. }
     procedure UpdateVisibility(const CameraPos: TVector3);
+    { Can a box (map / CGE space) be seen with the visibility of the last
+      UpdateVisibility: does it touch a leaf in a potentially visible
+      cluster and a connected area (Quake 2 SV_BuildClientFrame)? }
+    function BoxVisible(const Box: TBox3D): Boolean;
     function VisRegionCount: Integer;
 
     { func_areaportal used by a trigger (not a door): toggle it }
@@ -1732,6 +1736,33 @@ begin
     if Region.Visible then
       Inc(FVisibleRegions);
   end;
+end;
+
+function TQuakeGeometry.BoxVisible(const Box: TBox3D): Boolean;
+var
+  Leafs: array[0..63] of Integer;
+  Count, I, Cluster, Area: Integer;
+  A, B: TVector3;
+begin
+  if (FVisRegions.Count = 0) or (FVisCluster < 0) or Box.IsEmpty then
+    Exit(True);
+  A := CgeToQuake(Box.Data[0]);
+  B := CgeToQuake(Box.Data[1]);
+  { Too many leafs (a big box): draw it, like Quake 2's headnode fallback }
+  if not FBsp.BoxLeafs(
+    Vector3(Min(A.X, B.X), Min(A.Y, B.Y), Min(A.Z, B.Z)),
+    Vector3(Max(A.X, B.X), Max(A.Y, B.Y), Max(A.Z, B.Z)), Leafs, Count) then
+    Exit(True);
+  for I := 0 to Count - 1 do
+  begin
+    Cluster := FBsp.LeafCluster(Leafs[I]);
+    if (Cluster < 0) or ((FPvs[Cluster shr 3] and (1 shl (Cluster and 7))) = 0) then
+      Continue;
+    Area := FBsp.LeafArea(Leafs[I]);
+    if (FAreaBits[Area shr 3] and (1 shl (Area and 7))) <> 0 then
+      Exit(True);
+  end;
+  Result := False;
 end;
 
 procedure TQuakeGeometry.SetNoVis(const Value: Boolean);

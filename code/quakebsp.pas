@@ -256,6 +256,11 @@ type
     { Index of the BSP leaf containing a point (Quake coordinates), -1 if none }
     function PointLeaf(const P: TVector3): Integer;
 
+    { Leafs touched by a box (Quake coordinates), like CM_BoxLeafnums.
+      Returns False when there are more than Length(Leafs) of them. }
+    function BoxLeafs(const Mins, Maxs: TVector3; var Leafs: array of Integer;
+      out Count: Integer): Boolean;
+
     { Visibility cluster of the leaf containing a point; -1 in solid space
       or outside the map (Quake 2 then draws everything) }
     function PointCluster(const P: TVector3): Integer;
@@ -981,6 +986,58 @@ begin
   Node := -(Node + 1);
   if Node < Length(FLeafs) then
     Result := Node;
+end;
+
+function TQuakeBsp.BoxLeafs(const Mins, Maxs: TVector3; var Leafs: array of Integer;
+  out Count: Integer): Boolean;
+var
+  Center, Extent: TVector3;
+  Overflow: Boolean;
+  LeafsCount: Integer;
+
+  procedure Walk(Node: Integer);
+  var
+    Plane: TBSPPlane;
+    Dist, Radius: Single;
+  begin
+    while Node >= 0 do
+    begin
+      Plane := FPlanes[FNodes[Node].PlaneNum];
+      Dist := TVector3.DotProduct(Center, Plane.Normal) - Plane.Dist;
+      Radius := Abs(Plane.Normal.X) * Extent.X + Abs(Plane.Normal.Y) * Extent.Y +
+        Abs(Plane.Normal.Z) * Extent.Z;
+      if Dist > Radius then
+        Node := FNodes[Node].Children[0]
+      else
+      if Dist < -Radius then
+        Node := FNodes[Node].Children[1]
+      else
+      begin
+        { The box spans the plane: both sides }
+        Walk(FNodes[Node].Children[0]);
+        Node := FNodes[Node].Children[1];
+      end;
+    end;
+    if LeafsCount >= Length(Leafs) then
+    begin
+      Overflow := True;
+      Exit;
+    end;
+    Leafs[LeafsCount] := -(Node + 1);
+    Inc(LeafsCount);
+  end;
+
+begin
+  Count := 0;
+  if (Length(FModels) = 0) or (Length(FNodes) = 0) then
+    Exit(True);
+  Center := (Mins + Maxs) / 2;
+  Extent := (Maxs - Mins) / 2;
+  Overflow := False;
+  LeafsCount := 0;
+  Walk(FModels[0].HeadNode);
+  Count := LeafsCount;
+  Result := not Overflow;
 end;
 
 function TQuakeBsp.PointContents(const P: TVector3): Integer;

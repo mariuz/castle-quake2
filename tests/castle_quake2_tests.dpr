@@ -75,6 +75,9 @@ var
   C: TVector3;
   Cluster, I, Seen: Integer;
   Pvs, PortalOpen, AreaBits: TBytes;
+  Leafs: array[0..63] of Integer;
+  LeafCount: Integer;
+  Start: TVector3;
 begin
   Bsp := TQuakeBsp.Create;
   try
@@ -124,6 +127,17 @@ begin
     PortalOpen[1] := 1;
     Bsp.FloodAreas(2, PortalOpen, AreaBits);
     CheckEquals((1 shl 1) or (1 shl 2), AreaBits[0], 'open portal connects areas 1 and 2');
+
+    Start := Bsp.FindEntity('info_player_start').Origin;
+    Check(Bsp.BoxLeafs(Start - Vector3(16, 16, 24), Start + Vector3(16, 16, 32), Leafs, LeafCount) and
+      (LeafCount >= 1), 'player box touches leafs');
+    Seen := 0;
+    for I := 0 to LeafCount - 1 do
+      if Leafs[I] = Bsp.PointLeaf(Start) then
+        Inc(Seen);
+    CheckEquals(1, Seen, 'box leafs include the leaf of its center');
+    Check(not Bsp.BoxLeafs(Vector3(-4096, -4096, -4096), Vector3(4096, 4096, 4096), Leafs, LeafCount),
+      'whole-map box overflows 64 leafs');
   finally
     Bsp.Free;
   end;
