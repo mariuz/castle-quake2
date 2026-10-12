@@ -6,50 +6,62 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 
 | Subsystem | Original Quake 2 | Castle Quake 2 (now) | Gap |
 | :--- | :--- | :--- | :--- |
-| World geometry | IBSP v38, PVS / areaportal culling | X3D batches per texture and 1024-unit region, PVS and areaportal culling of world regions (`Shape.Visible`) and of movers / monsters / items / props by the leafs their boxes touch, CGE frustum culling | — |
-| Lighting | RGB lightmaps, 4 styles, dynamic lights | All 4 styles (animated, switchable, ramps), 2x overbright, LightPoint model tint, dynamic lights on the world and models | More than 4 surface lights at once; light styles on model tint. |
+| World geometry | IBSP v38, PVS / areaportal culling | X3D batches per texture and 1024-unit region; PVS and areaportal culling of world regions and of movers / monsters / items / props / lasers; CGE frustum culling | — |
+| Lighting | RGB lightmaps, 4 styles, dynamic lights | All 4 styles (animated, switchable, ramps), 2x overbright, LightPoint model tint, dynamic lights on the world and models | More than 4 surface lights at once; light styles in the model tint. |
 | Sky | Skybox, `skyrotate`, `skyaxis` | Skybox via `TCastleBackground` | Sky rotation. |
-| Liquids | Warped water / lava (`SURF_WARP`), contents | Non-solid liquid surfaces, point contents from BSP leafs, swimming, drowning, lava / slime damage, underwater tints | Warp shader. |
-| Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp, skins, `RF_SHELL` shells | `EF_POWERSCREEN` model, glow, bobbing items. |
+| Liquids | Warped water / lava (`SURF_WARP`), contents | Warp shader, non-solid liquid surfaces, swimming, drowning, lava / slime damage, underwater tints | Underwater view wobble. |
+| Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp, skins, shells (quad, invulnerability, power armor) | `EF_POWERSCREEN` model, glow, rotating / bobbing items. |
 | Sprites | SP2 (BFG, explosions) | SP2 loader, BFG ball / explosion sprites | Other sprite users (bubbles, flashes). |
-| Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove as `TQuakePlayerMovement` (friction, accel, air control, steps, crouch, jump pads, falling damage, water, ladders, player box) | Swept box traces with plane clipping (`PM_StepSlideMove`) instead of overlap tests. |
-| Weapons | 10 + hand grenades | 10 + hand grenades, chaingun spin-up | Frame-accurate timing. |
-| Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses) | Sight / chase / attack / pain / death, 19 definitions | Pathing, ambush flag, dodging, attack frames, bosses. |
-| Props / effects | Barrels, banners, ships, lasers, splashes, explosion models | All of these used by the demo maps | Gib models with velocities, `misc_viper`, `target_blaster`. |
-| Level flow | Units, cross-level triggers, help computer, intermission, savegames | Changelevel with spawn points, cross-level triggers, help computer (F1), intermission, savegames | — |
-| Audio | 3D sounds, looping speakers / entity sounds, CD music | 3D sounds with Quake 2 attenuation, looping / triggered speakers, OGG tracks | — |
-| Tooling | Console, `+map`, demos | Console, autotest scripts in CI (Linux, xvfb + Mesa), CGE editor components, F8 inspector | Editor property editors, screenshot diffing. |
+| Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove as `TQuakePlayerMovement` with the 32 × 32 × 56 player box | Swept box traces with plane clipping (`PM_StepSlideMove`) instead of overlap tests. |
+| Weapons | 10 + hand grenades, frame-timed | 10 + hand grenades, chaingun spin-up, cooldown timers | Firing on the MD2 frames Quake 2 uses. |
+| Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses), skill levels | Sight / chase / attack wind-up / pain / death, patrols, combat points, steering, 19 types tunable in the editor | Pathfinding, `ambush` spawnflag, dodging, medic revive, boss behaviour, skill 0–3 (fixed at medium). |
+| Props / effects | Barrels, banners, ships, lasers, splashes, explosion models | All of these used by the demo maps | Gib models with velocities, `misc_viper`, `target_blaster`, `trigger_monsterjump`, `func_killbox`. |
+| Level flow | Units, cross-level triggers, help computer, intermission, savegames | All of these (JSON savegames) | Projectiles and pending delayed events are not saved. |
+| Audio | 3D sounds, looping speakers / entity sounds, CD music | 3D sounds with Quake 2 attenuation, looping / triggered speakers, OGG tracks, named sounds editable in the editor | — |
+| Input / options | Key bindings, mouse sensitivity, joystick, skill | Fixed keys, menu with camera view and volume | Key bindings, sensitivity / invert, gamepad, skill selection. |
+| Multiplayer | Deathmatch / coop over UDP | Single player only | Out of scope for now (see below). |
+| Tooling | Console, `+map`, demos | Console, autotest scripts and screenshot comparison in CI, parser unit tests, CGE editor components and designs, F8 inspector, WebAssembly build | Editor property editors, demo recording. |
+
+## Done so far
+
+- **Look**: lightmaps and light styles, dynamic lights, skybox, water warp, MD2 with shells, SP2 sprites, particles, gibs, weapon viewport.
+- **Play**: all weapons and items, pmove with ladders / water / player box, doors / plats / trains / buttons, trigger chains, monster AI with patrols and combat points.
+- **Flow**: help computer, intermission, savegames, cross-level triggers, units that remember state.
+- **Performance**: PVS + areaportal culling of the world and of entities (`novis` to compare), batched particles.
+- **Editor**: views from designs, `TQuakeMap` building levels in the editor with skybox and entity markers, behaviors with published state, monster types (`data/monsters.castle-transform`) and named sounds (`data/sounds.castle-component`).
+- **Engineering**: CI on Windows / Linux / Web, autotests under Mesa, screenshot references, culling check (vis vs `novis`), 70 parser and design unit tests.
 
 ## Suggested improvements (prioritised)
 
-### 1. Feel of the game (highest impact)
-- ~~Port Quake 2 `pmove`~~ — done (`TQuakePlayerMovement`, with water, ladders and the player box); a swept box trace with plane clipping would make sliding along diagonal walls exact.
-- **Per-frame weapon and monster timing** driven by MD2 frame indices (Quake 2 fires on specific animation frames), instead of cooldown timers.
-- **Monster navigation**: wall-follow / step-around when `Move` is blocked, ledge checks so monsters don't walk off cliffs, `ambush` spawnflag, dodge from rockets.
-- ~~Help computer (F1) and intermission~~ — done.
+### 1. Player-facing polish (highest impact, small)
+- **Options menu**: mouse sensitivity and invert, field of view, music volume, and key bindings saved with CGE's `UserConfig` (the menu already has camera view and sound volume).
+- **Skill selection** (easy / medium / hard / nightmare) in *Single Player*: entities are filtered only by `SPAWNFLAG_NOT_MEDIUM` today (fixed medium skill); add `NOT_EASY` (256) / `NOT_HARD` (1024) for the chosen skill and scale monster damage / reaction like Quake 2's `skill->value`.
+- **Gamepad** through CGE's `Controllers`: move / look sticks, triggers to fire, mapped like Quake 2's joystick cvars; needed for the Android / console-like targets anyway.
+- **Rotating, bobbing items** (`EF_ROTATE`) and weapon bob tied to pmove speed, so items read clearly from a distance.
 
-### 2. Look
-- ~~Light styles~~ — done on the CPU with a separate dynamic atlas; a shader version would avoid the re-uploads if very large maps need it.
-- ~~Dynamic lights~~ — done (muzzle flashes, explosions, rockets, blaster bolts, BFG): a `PLUG_texture_color` effect on the lightmap textures, the 4 lights nearest the player.
-- ~~Water warp~~ — done; an underwater wobble `TCastleScreenEffect` would complete it.
-- ~~Powerup shells~~ — done: `TQuakeMd2Instance.SetShell` (view weapon quad / invulnerability, monster power armor).
-- ~~SP2 sprites, gibs~~ — done.
-- ~~Weapon in its own viewport~~ — done (`WeaponViewport` in the design).
+### 2. Feel of combat
+- **Frame-accurate attacks** for weapons and monsters: fire on the MD2 frame indices the Quake 2 game code uses (its `mframe_t` tables) instead of cooldown timers, so animation and damage line up.
+- **Monster AI gaps**: `ambush` spawnflag (stay asleep until seen), dodging rockets / grenades (`monster_dodge`), `trigger_monsterjump`, and a short-range **navigation fallback** (a breadth-first search over BSP leaf portals or a coarse grid of walkable cells) when steering fails.
+- **Swept player box** (`PM_StepSlideMove`): trace the 32 × 32 × 56 box against BSP brushes with plane clipping, removing the remaining snag cases on diagonal walls and stairs.
 
-### 3. CGE editor / inspectability
-- **Property editors** (under `{$ifdef CASTLE_DESIGN_MODE}`): a dropdown of maps found in the PAK for `TQuakeMap.MapName`, a file picker for `PakUrl`, and a component editor verb *Reload map* (like `TImageGridEditor` in the custom_component sample).
-- ~~Skybox from the map at design time~~ — done: `TQuakeMap.Background`.
-- **Entity gizmos**: show triggers, `path_corner`s, teleporters and spawn points as wireframe boxes / `TCastleImageTransform` icons when `PreviewEntities` is on, selectable in the editor hierarchy with their key/value pairs as a read-only property.
-- ~~Prefab designs~~ — done as `data/monsters.castle-transform` (`TQuakeMonsterType` per monster class, tunables published, model shown in the editor; applied over the table at startup). Originally planned: **Prefab designs** (`.castle-transform`) per monster type with the `TQuakeMonster` behavior and tunables (speed, ranges, damage) as published read-write properties, instead of the Pascal `MonsterDefs` table, so balancing happens in the editor.
-- ~~Named sounds~~ — done: `data/sounds.castle-component` (`TQuakeNamedSound`, a `TCastleSound` per path the code plays). Originally planned: **Named sounds** like the template's `GameSound` / `NamedSound`: a `data/sounds.castle-component` mapping logical names to PAK sound URLs, editable in the editor.
+### 3. Full game support (needs the retail PAK)
+- **Medic revive**, **boss behaviour** (supertank, Makron, jorg) and the missing entities (`misc_viper`, `target_blaster`, `func_killbox`, `turret_*`). Test with a local `baseq2` in a nightly-style workflow that is skipped when the PAK isn't available.
+- **Save projectiles and delayed events**, so a quick save mid-fight restores exactly.
+- A **map compatibility report**: autotest every map in a PAK (`maps` console command), log unknown classnames and load times, so missing entities are found systematically.
 
-### 4. Engineering
-- ~~CI autotests~~ — done (`autotest` job); next: compare screenshots against references.
-- ~~Unit tests for the parsers~~ — done (`tests/`, against the demo PAK).
-- ~~Savegames~~ — done as JSON (entities matched by spawn order); projectiles and pending delayed events are not saved.
-- ~~PVS culling~~ — done: world faces are grouped into 1024-unit regions, each hidden when none of its clusters is in the camera cluster's PVS (`novis` console command to compare). Areaportals too: regions are also split by area, and areas behind closed doors (`func_areaportal`) are hidden. Movers, monsters, items, props and lasers are culled too, by the leafs their bounding boxes touch (`TQuakeGeometry.BoxVisible`, like `SV_BuildClientFrame`).
-- **Performance**: ~~batch particles~~ (done: one scene, camera-facing quads rebuilt per frame); cache `LineOfSight` results across monsters; merge mover scenes that never move (`func_wall`).
-- **Platforms**: verify the WebAssembly workflow end to end; Android / iOS with CGE's touch navigation; gamepad input via `Controllers`.
+### 4. Editor and inspectability
+- **Property editors** (under `{$ifdef CASTLE_DESIGN_MODE}`): a dropdown of maps in the PAK for `TQuakeMap.MapName`, a file picker for `PakUrl`, a *Reload map* verb (like `TImageGridEditor` in the custom_component sample). Needs the Lazarus-built editor to verify.
+- **Selectable entities in the editor**: make preview markers / models one transform per entity with a read-only `EntityFields` (key/value pairs) property, so clicking a monster in the editor shows its spawnflags and targets.
+- **Monster prefabs with live behavior**: optionally move from the single `monsters.castle-transform` to a `.castle-transform` per type that also carries the `TQuakeMonster` behavior, so sounds / scale / effects can be added per monster in the editor.
+- **Named sounds by name in code**: replace literal paths (`'sound/items/pkup.wav'`) with `Sounds.PlayNamed('Items_pkup')` gradually, so the design is the single source of truth.
+
+### 5. Performance and platforms
+- **Measure on real GPUs**: log frame time and draw calls per map (CI only has Mesa software rendering at ~12 FPS); try `RegionSize` 512 vs 1024 for culling vs draw-call count.
+- Merge mover scenes that never move (`func_wall`), cache `LineOfSight` results across monsters, shader-based light styles for big maps.
+- **Mobile**: Android build with CGE touch navigation (two virtual sticks) and the gamepad support above.
+
+### Out of scope for now
+- **Multiplayer** (deathmatch / coop): needs a client-server split of `TQuakeWorld` and networking; large effort, best as a separate project milestone after single player is complete.
 
 ## Milestones
 
@@ -100,9 +112,22 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] `TQuakeMap`, HUD, console and menu as registered editor components (`editor_units`)
 - [x] Monsters, items and movers as `TCastleBehavior`s with named transforms (F8 inspector)
 - [ ] Map dropdown / reload verb property editors
+- [ ] Selectable entities with key/value inspection in the editor
 - [x] Design-time skybox (`TQuakeMap.Background`) and entity markers (`PreviewMarkers`: player starts, paths, speakers, trigger volumes)
 - [x] Monster types (`data/monsters.castle-transform`) and named sounds (`data/sounds.castle-component`) editable in the editor
 - [x] CI autotests with screenshots (Linux, xvfb + Mesa)
 - [x] Parser unit tests (`tests/`, in CI)
 - [x] Screenshot comparison in CI (64x36 block averages against `tests/reference`)
 - [x] WebAssembly build deployed to GitHub Pages
+
+### Phase 5 – Polish & reach (next)
+- [ ] Options menu: sensitivity, invert, FOV, music volume, key bindings (`UserConfig`)
+- [ ] Skill selection (easy … nightmare)
+- [ ] Gamepad input (`Controllers`)
+- [ ] Rotating / bobbing items, weapon bob
+- [ ] Frame-accurate weapon and monster attacks
+- [ ] Monster `ambush`, dodging, `trigger_monsterjump`, navigation fallback
+- [ ] Swept player box (`PM_StepSlideMove`)
+- [ ] Savegames include projectiles and delayed events
+- [ ] Map compatibility report over a full PAK
+- [ ] Android build with touch controls
