@@ -15,7 +15,7 @@ uses
   CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound,
   QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap,
-  QuakePlayer, fpjson, jsonparser, CastleDownload;
+  QuakePlayer, QuakeSettings, fpjson, jsonparser, CastleDownload;
 
 type
   TCameraMode = (cmFirstPerson, cmNoclip);
@@ -85,6 +85,8 @@ type
 
     procedure LoadLevel(const AMapName: String);
     procedure SetCameraMode(const Mode: TCameraMode);
+    { Apply Settings: mouse sensitivity / invert, field of view, volumes }
+    procedure ApplySettings;
 
     property World: TQuakeWorld read FWorld;
     property MapName: String read FMapName write FMapName;
@@ -130,6 +132,18 @@ begin
   end;
 end;
 
+procedure TViewPlay.ApplySettings;
+begin
+  WalkNavigation.MouseLookHorizontalSensitivity :=
+    TCastleWalkNavigation.DefaultMouseLookHorizontalSensitivity * Settings.MouseSensitivity;
+  WalkNavigation.MouseLookVerticalSensitivity :=
+    TCastleWalkNavigation.DefaultMouseLookVerticalSensitivity * Settings.MouseSensitivity;
+  WalkNavigation.InvertVerticalMouseLook := Settings.InvertMouse;
+  { The design's camera uses a horizontal field of view, like Quake 2 }
+  MainViewport.Camera.Perspective.FieldOfView := DegToRad(Settings.FieldOfView);
+  Settings.ApplyAudio;
+end;
+
 procedure TViewPlay.Start;
 begin
   inherited Start;
@@ -157,6 +171,7 @@ begin
   Console.OnCommand := @HandleConsoleCommand;
   Menu.OnMenuAction := @HandleMenuAction;
   SetCameraMode(FCameraMode);
+  ApplySettings;
 
   if FAutoTestMap <> '' then
   begin
@@ -198,16 +213,17 @@ begin
   PlayerMovement.InputCrouch := False;
   if not Typing then
   begin
-    if Container.Pressed[keyW] or Container.Pressed[keyArrowUp] then
+    { Bound keys (Options -> Controls); arrows always move too }
+    if Container.Pressed[Settings.Keys[qaForward]] or Container.Pressed[keyArrowUp] then
       PlayerMovement.InputForward := PlayerMovement.InputForward + 1;
-    if Container.Pressed[keyS] or Container.Pressed[keyArrowDown] then
+    if Container.Pressed[Settings.Keys[qaBack]] or Container.Pressed[keyArrowDown] then
       PlayerMovement.InputForward := PlayerMovement.InputForward - 1;
-    if Container.Pressed[keyD] then
+    if Container.Pressed[Settings.Keys[qaMoveRight]] then
       PlayerMovement.InputSide := PlayerMovement.InputSide + 1;
-    if Container.Pressed[keyA] then
+    if Container.Pressed[Settings.Keys[qaMoveLeft]] then
       PlayerMovement.InputSide := PlayerMovement.InputSide - 1;
-    PlayerMovement.InputJump := Container.Pressed[keySpace];
-    PlayerMovement.InputCrouch := Container.Pressed[keyC];
+    PlayerMovement.InputJump := Container.Pressed[Settings.Keys[qaJump]];
+    PlayerMovement.InputCrouch := Container.Pressed[Settings.Keys[qaCrouch]];
   end;
   { Scripted movement for autotests }
   if FDemoMoveTime > 0 then
@@ -289,6 +305,7 @@ var
   Val: Single;
   Dir, Target: TVector3;
   Ignore: TCastleTransform;
+  Key, K: TKey;
 begin
   if FDemoIndex >= FDemoCommands.Count then
   begin
@@ -363,6 +380,22 @@ begin
         end;
         Inc(J);
       end;
+  end else
+  if Action = 'B' then { Press and release a key, e.g. "B:escape" (menu tests) }
+  begin
+    Key := keyNone;
+    for K := Low(TKey) to High(TKey) do
+      if (K <> keyNone) and SameText(KeyToStr(K), Param) then
+      begin
+        Key := K;
+        Break;
+      end;
+    if Key <> keyNone then
+    begin
+      Container.EventPress(InputKey(TVector2.Zero, Key, '', []));
+      Container.EventRelease(InputKey(TVector2.Zero, Key, '', []));
+    end else
+      WritelnWarning('Demo', 'Unknown key "%s"', [Param]);
   end else
   if Action = 'J' then { Jump }
     FDemoJump := True
@@ -614,6 +647,8 @@ begin
       FIntermission := False;
       Hud.Intermission := False;
     end;
+    { Entities are matched by spawn order, which depends on the skill }
+    GameSkill := EnsureRange(Obj.Get('skill', GameSkill), 0, 3);
     LoadLevel(Obj.Get('map', 'demo1'));
     if FWorld.Bsp = nil then
       Exit;
@@ -698,7 +733,7 @@ begin
   { Hold to fire (left mouse / Ctrl) }
   Firing := FDemoFireHeld;
   if not Console.IsOpen and not Menu.Exists then
-    Firing := Firing or Container.Pressed[keyCtrl] or (buttonLeft in Container.MousePressed);
+    Firing := Firing or Container.Pressed[Settings.Keys[qaFire]] or (buttonLeft in Container.MousePressed);
   if Firing then
     FWorld.FireWeapon(MainViewport.Camera.Translation, MainViewport.Camera.Direction);
 end;
@@ -723,13 +758,16 @@ begin
 
   if Menu.Exists then
   begin
+    { The menu uses Escape to go back from a page or cancel a key binding }
+    if Menu.Press(Event) then
+      Exit(True);
     if Event.IsKey(keyEscape) then
     begin
       Menu.Exists := False;
-      WalkNavigation.MouseLook := True;
+      WalkNavigation.MouseLook := FAutoTestMap = '';
       Exit(True);
     end;
-    Exit(Menu.Press(Event));
+    Exit(False);
   end;
 
   if Event.IsKey(keyBackQuote) or (Event.KeyString = '~') or (Event.KeyString = '`') then
@@ -745,7 +783,7 @@ begin
     Exit(True);
   end;
 
-  if Event.IsKey(keyE) then
+  if Event.IsKey(Settings.Keys[qaUse]) then
   begin
     FWorld.ActivateUse(MainViewport.Camera.Translation, MainViewport.Camera.Direction);
     Exit(True);
@@ -757,7 +795,7 @@ begin
       FWorld.SelectWeapon(Slot);
       Exit(True);
     end;
-  if Event.IsKey(keyG) then
+  if Event.IsKey(Settings.Keys[qaGrenade]) then
   begin
     FWorld.SelectWeapon(11); { hand grenades }
     Exit(True);
@@ -772,7 +810,7 @@ begin
     Exit(True);
   end;
 
-  if Event.IsKey(keyF1) then
+  if Event.IsKey(Settings.Keys[qaHelp]) then
   begin
     { Quake 2 help computer }
     Hud.HelpVisible := not Hud.HelpVisible;
@@ -856,6 +894,13 @@ begin
     else
       Console.Print('Usage: lightstyle <0..255> <pattern a..z>');
   end else
+  if Cmd = 'skill' then
+  begin
+    { Like Quake 2: takes effect when a map is (re)loaded }
+    if Args <> '' then
+      GameSkill := EnsureRange(StrToIntDef(Args, GameSkill), 0, 3);
+    Console.Print(Format('skill %d (%s), applies to the next map', [GameSkill, SkillNames[GameSkill]]));
+  end else
   if Cmd = 'god' then
     FWorld.CheatGodMode
   else
@@ -913,9 +958,11 @@ begin
     maNewGame, maWarpMap:
       begin
         Menu.Exists := False;
-        WalkNavigation.MouseLook := True;
+        WalkNavigation.MouseLook := FAutoTestMap = '';
         LoadLevel(Param);
       end;
+    maSettingsChanged:
+      ApplySettings;
     maToggleCamera:
       if FCameraMode = cmFirstPerson then
         SetCameraMode(cmNoclip)

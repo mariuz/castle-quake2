@@ -99,6 +99,9 @@ jobs:
           run_test demo1 "W:2,S,K,N:3,C:9,W:0.5,X,W:0.3,S,R:14,C:7,W:0.5,X,W:0.5,S,O:kill,W:3.5,S,Q"
           run_test demo2 "W:2,S,GO:1 0 1,W:1.1,J,W:0.3,S,F,W:0.3,S,F,W:1,Q"
           run_test demo3 "W:2,S,O:lightstyle 6 z,W:0.5,S,O:map demo1,W:1,S,Q"
+          # Menu: Single Player -> Hard starts the first map; Options -> field of view
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo2 test_output/menu --demo "O:notarget,W:1,B:escape,B:enter,B:down,B:down,B:enter,W:1,B:escape,B:down,B:down,B:enter,B:down,B:down,B:down,B:right,B:right,W:0.2,S,B:escape,B:escape,W:0.5,S,Q" > test_output/menu.log 2>&1
+          grep -q "Spawned 35 pickups, 33 monsters" test_output/menu.log && ! grep -q Exception test_output/menu.log || { echo "::error::Hard skill new game from the menu"; exit 1; }
           ls -l test_output
           test "$(ls test_output/*.png | wc -l)" -ge 9
 

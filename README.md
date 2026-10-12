@@ -74,9 +74,13 @@ The project follows the structure of CGE's own templates (`3d_fps_game`) and the
 | **F1** | Help computer (objectives, kills / goals / secrets) |
 | **F6 / F9** | Quick save / quick load |
 | **F12** | Screenshot |
-| **~** | Console (`map`, `maps`, `save`, `load`, `god`, `give all`, `give quad`, `give invulnerability`, `noclip`, `notarget`, `kill`, `fps`, `markers`, `novis`, `lightstyle`, `quit`, `help`) |
+| **~** | Console (`map`, `maps`, `save`, `load`, `god`, `give all`, `give quad`, `give invulnerability`, `noclip`, `notarget`, `kill`, `fps`, `markers`, `novis`, `skill`, `lightstyle`, `quit`, `help`) |
 | **F8** (debug build) | CGE inspector: hierarchy and live properties |
-| **Escape** | Menu |
+| **Escape** | Menu: *Single Player* (choose Easy / Medium / Hard / Nightmare), *Map Warp*, *Options* (camera, mouse sensitivity, invert mouse, field of view, sound and music volume, *Controls* to rebind keys) |
+
+The movement, jump, crouch, use, fire, grenade and help keys above are the defaults; rebind them in *Options → Controls*. Options are saved with CGE's `UserConfig` and restored on the next start.
+
+Skill works like Quake 2: it picks which entities spawn (demo1 has 18 / 21 / 33 / 33 monsters on easy / medium / hard / nightmare), halves the damage you take on easy, makes monsters attack more often from hard on, and removes their pain flinches on nightmare. The `skill <0-3>` console command changes it for the next map; savegames remember it.
 
 ---
 
@@ -117,7 +121,7 @@ CI also runs the `--autotest` demo scripts on Linux (xvfb + Mesa), uploads their
 .\castle-quake2.exe --autotest demo1 shot --demo "W:1,S,K,C:9,N:3,X,W:0.2,S,Q"
 ```
 
-Demo script actions (comma separated): `W:sec` wait, `S` screenshot, `X` fire, `H` toggle hold-fire, `U` use, `C:slot` weapon, `K` give all, `Y` god, `A:deg` yaw, `T:deg` turn, `P:deg` pitch, `M:units` move, `N:i` / `I:i` / `D:i` / `R:i` stand near monster / item / brush entity / prop number i, `F` toggle the help computer, `G:x y z` go to Quake coordinates, `GO:forward side seconds` hold movement keys, `J` jump, `E:targetname` fire targets, `O:command` run a console command (e.g. `O:kill`), `V` log mover, prop and laser states, `L:map` load map, `Q` quit.
+Demo script actions (comma separated): `W:sec` wait, `S` screenshot, `X` fire, `H` toggle hold-fire, `U` use, `C:slot` weapon, `K` give all, `Y` god, `A:deg` yaw, `T:deg` turn, `P:deg` pitch, `M:units` move, `N:i` / `I:i` / `D:i` / `R:i` stand near monster / item / brush entity / prop number i, `F` toggle the help computer, `G:x y z` go to Quake coordinates, `GO:forward side seconds` hold movement keys, `J` jump, `E:targetname` fire targets, `O:command` run a console command (e.g. `O:kill`), `V` log mover, prop and laser states, `L:map` load map, `B:key` press a key (`B:escape`, `B:down`, `B:enter`... to drive the menu), `Q` quit. Autotests ignore the saved options and don't save them.
 
 ---
 

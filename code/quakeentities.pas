@@ -9,7 +9,7 @@ uses
   SysUtils, Classes, Generics.Collections, Math,
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions, CastleUtils,
   CastleSoundEngine, CastleBehaviors, CastleColors, CastleRenderOptions,
-  QuakePak, QuakeBsp, QuakeMd2, QuakeLight, QuakeSound, QuakeHud, QuakeParticles, QuakeSprite;
+  QuakePak, QuakeBsp, QuakeMd2, QuakeLight, QuakeSound, QuakeHud, QuakeParticles, QuakeSprite, QuakeSettings;
 
 type
   TItemCategory = (icWeapon, icAmmo, icHealth, icArmor, icPowerup, icKey);
@@ -902,8 +902,8 @@ begin
 
   if not Alerted then
     Alert;
-  { Quake 2 monsters don't flinch on every hit }
-  if (State <> msPain) and (Random < 0.6) then
+  { Quake 2 monsters don't flinch on every hit, and never on nightmare }
+  if (State <> msPain) and (GameSkill < 3) and (Random < 0.6) then
   begin
     Sounds.PlayAt(MonsterSound(Def, Def^.PainSound), Transform);
     SetState(msPain);
@@ -1058,7 +1058,7 @@ begin
   begin
     SetState(msAttack);
     FAttackFired := False;
-    AttackCooldown := Def^.AttackCooldown * (0.8 + Random * 0.4);
+    AttackCooldown := Def^.AttackCooldown * SkillAttackDelay(GameSkill) * (0.8 + Random * 0.4);
     Exit;
   end;
 

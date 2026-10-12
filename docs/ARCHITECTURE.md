@@ -140,6 +140,10 @@ Brush entities (`model "*N"`, classname `func_*`) are separate `TCastleScene`s i
 | Game logic as `TCastleBehavior` (`GameEnemy` in the template) | `TQuakeMonster`, `TQuakePickup`, `TQuakeMover`, with read-only published state for the inspector. |
 | Graceful design-time loading | `TQuakeMap` adds its PAK, palette and URL protocols itself (`EnsureData`), logs a warning instead of failing when a map is missing, and rebuilds when `MapName` / `PakUrl` change. |
 
-## 8. Automated testing
+## 8. Options and skill
+
+`QuakeSettings` holds the player options (`TQuakeSettings`: mouse sensitivity as a multiplier of CGE's default, invert, horizontal FOV, sound / music volume, a key per `TQuakeAction`, last chosen skill), loaded from and saved to CGE's `UserConfig` (`quake2/...` keys, only non-default values stored). `TQuakeMenu` edits them on the *Options* and *Controls* pages (Left / Right change values, Enter on a control waits for a key; binding a used key swaps the two) and raises `maSettingsChanged`, on which `TViewPlay.ApplySettings` sets `TCastleWalkNavigation` sensitivity / `InvertVerticalMouseLook`, the camera's `Perspective.FieldOfView` and the sound engine volumes. `GameSkill` is Quake 2's latched `skill`: set by *Single Player*, the `skill` console command (next map) and savegames (before the map loads, since entities are matched by spawn order). It selects the spawnflag that removes entities (`SPAWNFLAG_NOT_EASY` / `_MEDIUM` / `_HARD`), halves player damage on easy (`T_Damage`), scales the time between monster attacks (`M_CheckAttack`'s attack chance) and disables pain reactions on nightmare.
+
+## 9. Automated testing
 
 `--autotest <map> <prefix> --demo "<script>"` loads a map, runs the script (see README) and exits after a final screenshot. Screenshots log the FPS and camera position, `V` logs every mover's state, and `N:` / `I:` / `D:` place the camera on a floor near a monster / item / mover, which makes visual regression checks of AI, pickups and movers possible without a human player.

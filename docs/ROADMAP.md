@@ -14,11 +14,11 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Sprites | SP2 (BFG, explosions) | SP2 loader, BFG ball / explosion sprites | Other sprite users (bubbles, flashes). |
 | Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove as `TQuakePlayerMovement` with the 32 × 32 × 56 player box | Swept box traces with plane clipping (`PM_StepSlideMove`) instead of overlap tests. |
 | Weapons | 10 + hand grenades, frame-timed | 10 + hand grenades, chaingun spin-up, cooldown timers | Firing on the MD2 frames Quake 2 uses. |
-| Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses), skill levels | Sight / chase / attack wind-up / pain / death, patrols, combat points, steering, 19 types tunable in the editor | Pathfinding, `ambush` spawnflag, dodging, medic revive, boss behaviour, skill 0–3 (fixed at medium). |
+| Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses), skill levels | Sight / chase / attack wind-up / pain / death, patrols, combat points, steering, 19 types tunable in the editor, skill 0–3 | Pathfinding, `ambush` spawnflag, dodging, medic revive, boss behaviour. |
 | Props / effects | Barrels, banners, ships, lasers, splashes, explosion models | All of these used by the demo maps | Gib models with velocities, `misc_viper`, `target_blaster`, `trigger_monsterjump`, `func_killbox`. |
 | Level flow | Units, cross-level triggers, help computer, intermission, savegames | All of these (JSON savegames) | Projectiles and pending delayed events are not saved. |
 | Audio | 3D sounds, looping speakers / entity sounds, CD music | 3D sounds with Quake 2 attenuation, looping / triggered speakers, OGG tracks, named sounds editable in the editor | — |
-| Input / options | Key bindings, mouse sensitivity, joystick, skill | Fixed keys, menu with camera view and volume | Key bindings, sensitivity / invert, gamepad, skill selection. |
+| Input / options | Key bindings, mouse sensitivity, joystick, skill | Options menu (sensitivity, invert, FOV, volumes), key rebinding, skill selection, saved in `UserConfig` | Gamepad. |
 | Multiplayer | Deathmatch / coop over UDP | Single player only | Out of scope for now (see below). |
 | Tooling | Console, `+map`, demos | Console, autotest scripts and screenshot comparison in CI, parser unit tests, CGE editor components and designs, F8 inspector, WebAssembly build | Editor property editors, demo recording. |
 
@@ -34,8 +34,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 ## Suggested improvements (prioritised)
 
 ### 1. Player-facing polish (highest impact, small)
-- **Options menu**: mouse sensitivity and invert, field of view, music volume, and key bindings saved with CGE's `UserConfig` (the menu already has camera view and sound volume).
-- **Skill selection** (easy / medium / hard / nightmare) in *Single Player*: entities are filtered only by `SPAWNFLAG_NOT_MEDIUM` today (fixed medium skill); add `NOT_EASY` (256) / `NOT_HARD` (1024) for the chosen skill and scale monster damage / reaction like Quake 2's `skill->value`.
+- ~~Options menu~~ — done: mouse sensitivity and invert, field of view, sound and music volume, *Controls* page with key rebinding, saved in `UserConfig` (`QuakeSettings`).
+- ~~Skill selection~~ — done: *Single Player* asks Easy / Medium / Hard / Nightmare; skill filters spawnflags, halves damage on easy, speeds up monster attacks from hard on, no pain flinches on nightmare; `skill` console command; kept in savegames.
 - **Gamepad** through CGE's `Controllers`: move / look sticks, triggers to fire, mapped like Quake 2's joystick cvars; needed for the Android / console-like targets anyway.
 - **Rotating, bobbing items** (`EF_ROTATE`) and weapon bob tied to pmove speed, so items read clearly from a distance.
 
@@ -121,8 +121,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] WebAssembly build deployed to GitHub Pages
 
 ### Phase 5 – Polish & reach (next)
-- [ ] Options menu: sensitivity, invert, FOV, music volume, key bindings (`UserConfig`)
-- [ ] Skill selection (easy … nightmare)
+- [x] Options menu: sensitivity, invert, FOV, music volume, key bindings (`UserConfig`)
+- [x] Skill selection (easy … nightmare)
 - [ ] Gamepad input (`Controllers`)
 - [ ] Rotating / bobbing items, weapon bob
 - [ ] Frame-accurate weapon and monster attacks

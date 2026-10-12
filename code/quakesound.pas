@@ -273,7 +273,6 @@ begin
   try
     FMusicSound := TCastleSound.Create(nil);
     FMusicSound.Url := MusicUrl;
-    SoundEngine.LoopingChannel[0].Volume := 0.7;
     SoundEngine.LoopingChannel[0].Sound := FMusicSound;
     FCurrentMusicTrack := TrackName;
     WritelnLog('QuakeSound', 'Playing music "%s"', [MusicUrl]);

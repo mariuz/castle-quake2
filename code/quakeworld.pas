@@ -9,7 +9,7 @@ interface
 uses
   SysUtils, Classes, Math, Generics.Collections, fpjson, jsonparser,
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes,
-  QuakePak, QuakeBsp, QuakeGeometry, QuakeMap, QuakeMd2, QuakePlayer, QuakeLight, QuakeSound, QuakeHud,
+  QuakePak, QuakeBsp, QuakeGeometry, QuakeMap, QuakeMd2, QuakePlayer, QuakeLight, QuakeSound, QuakeHud, QuakeSettings,
   QuakeParticles, QuakeEntities;
 
 const
@@ -215,7 +215,6 @@ type
 implementation
 
 const
-  SPAWNFLAG_NOT_MEDIUM = 512;
   SPAWNFLAG_NOT_DEATHMATCH = 2048;
   TRIGGER_TRIGGERED = 4;
 
@@ -429,8 +428,8 @@ begin
     Pos := QuakeToCge(Ent.Origin);
     SpawnFlags := Ent.SpawnFlags;
 
-    { Medium skill, single player }
-    if (SpawnFlags and SPAWNFLAG_NOT_MEDIUM) <> 0 then
+    { Entities not on this skill (single player) }
+    if (SpawnFlags and SkillSpawnFlag(GameSkill)) <> 0 then
       Continue;
 
     if (CName = 'info_player_start') or (CName = 'info_player_deathmatch') then
@@ -1835,6 +1834,9 @@ begin
   if FDead or FStats.GodMode or (FStats.InvulnTime > 0) or (Amount <= 0) then
     Exit;
   Take := Amount;
+  { Quake 2 T_Damage: half damage on easy }
+  if GameSkill = 0 then
+    Take := Max(1, Take div 2);
   if (FStats.Armor > 0) and (FStats.ArmorType > 0) then
   begin
     Save := Min(FStats.Armor, Ceil(ArmorProtection[FStats.ArmorType] * Take));
@@ -2138,6 +2140,7 @@ begin
   Result := TJSONObject.Create;
   Result.Add('map', FBsp.MapName);
   Result.Add('time', FTime);
+  Result.Add('skill', GameSkill);
   { Player inventory }
   O := TJSONObject.Create;
   O.Add('health', FStats.Health);

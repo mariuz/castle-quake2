@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig;
 
 var
   Passed, Failed: Integer;
@@ -490,6 +490,47 @@ begin
   Check(Sounds.SoundFor('sound/misc/does_not_exist.wav') = nil, 'unknown sound');
 end;
 
+procedure TestSettings;
+var
+  S: TQuakeSettings;
+  Config: TCastleConfig;
+  Path: String;
+begin
+  CheckEquals(SPAWNFLAG_NOT_EASY, SkillSpawnFlag(0), 'easy removes NOT_EASY entities');
+  CheckEquals(SPAWNFLAG_NOT_MEDIUM, SkillSpawnFlag(1), 'medium removes NOT_MEDIUM entities');
+  CheckEquals(SPAWNFLAG_NOT_HARD, SkillSpawnFlag(3), 'nightmare uses the hard spawnflag');
+  Check(SkillAttackDelay(0) > SkillAttackDelay(1), 'monsters attack less often on easy');
+  Check(SkillAttackDelay(3) < SkillAttackDelay(2), 'and most often on nightmare');
+
+  S := TQuakeSettings.Create;
+  try
+    S.BindKey(qaForward, keyA);
+    Check((S.Keys[qaForward] = keyA) and (S.Keys[qaMoveLeft] = keyW), 'binding a used key swaps the keys');
+    S.Skill := 3;
+    S.MouseSensitivity := 1.75;
+    S.InvertMouse := True;
+    S.FieldOfView := 110;
+    S.MusicVolume := 30;
+    Path := GetTempDir + 'castle_quake2_test_settings.xml';
+    Config := TCastleConfig.Create(nil);
+    try
+      Config.LoadFromString('<?xml version="1.0"?><CONFIG></CONFIG>', FilenameToUriSafe(Path));
+      S.Save(Config);
+      S.ResetToDefaults;
+      S.Load(Config);
+    finally
+      Config.Free;
+    end;
+    Check((S.Skill = 3) and SameValue(S.MouseSensitivity, 1.75) and S.InvertMouse and
+      (S.FieldOfView = 110) and (S.MusicVolume = 30) and (S.SoundVolume = 100),
+      'settings survive save / load');
+    Check((S.Keys[qaForward] = keyA) and (S.Keys[qaMoveLeft] = keyW) and (S.Keys[qaFire] = keyCtrl),
+      'key bindings survive save / load');
+  finally
+    S.Free;
+  end;
+end;
+
 const
   PakPath = '../data/paks/quake2_demo.pak';
 begin
@@ -518,6 +559,7 @@ begin
   TestSprite;
   TestCoordinates;
   TestDesigns;
+  TestSettings;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then

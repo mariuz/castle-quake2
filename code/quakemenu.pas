@@ -8,12 +8,18 @@ interface
 uses
   SysUtils, Classes, Math,
   CastleVectors, CastleUIControls, CastleControls, CastleKeysMouse, CastleColors,
-  CastleRectangles, CastleGLUtils, CastleImages, CastleSoundEngine, QuakePak, QuakeSound;
+  CastleRectangles, CastleGLUtils, CastleImages, CastleSoundEngine, QuakePak, QuakeSound, QuakeSettings;
 
 type
   TMenuAction = (
-    maNone, maNewGame, maWarpMap, maToggleCamera, maQuit
+    maNone, maNewGame, maWarpMap, maToggleCamera, maSettingsChanged, maQuit
   );
+
+  TMenuPage = (smMain, smSkill, smMaps, smOptions, smControls, smShowcase);
+
+  { Rows of the Options page }
+  TOptionItem = (oiCamera, oiSensitivity, oiInvert, oiFieldOfView, oiSoundVolume,
+    oiMusicVolume, oiControls, oiBack);
 
   TOnMenuActionEvent = procedure(const Action: TMenuAction; const Param: String) of object;
 
@@ -21,14 +27,21 @@ type
   TQuakeMenu = class(TCastleUserInterface)
   private
     FSelectedIdx: Integer;
-    FSubMenu: (smMain, smEpisodes, smMaps, smOptions, smShowcase);
+    FSubMenu: TMenuPage;
     FItems: TStringList;
     FOnMenuAction: TOnMenuActionEvent;
     FCameraModeName: String;
-    FVolume: Integer;
     FMaps: TStringList;
-    procedure RebuildMenuItems;
+    { Controls page: action waiting for a key press, or False }
+    FBinding: Boolean;
+    FBindingAction: TQuakeAction;
+    procedure RebuildMenuItems(const KeepSelection: Boolean = False);
     procedure ExecuteSelection;
+    procedure ShowPage(const Page: TMenuPage);
+    { Change the value of the selected option (-1 / +1); False if it has none }
+    function AdjustOption(const Delta: Integer): Boolean;
+    procedure SettingsChanged;
+    function PageTitle: String;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -74,7 +87,6 @@ begin
   FSelectedIdx := 0;
   FSubMenu := smMain;
   FCameraModeName := 'First-Person';
-  FVolume := 100;
   FMaps := Pak.FindFiles('maps/', '.bsp');
   FMaps.Sort;
   RebuildMenuItems;
@@ -87,7 +99,18 @@ begin
   inherited Destroy;
 end;
 
-procedure TQuakeMenu.RebuildMenuItems;
+function OnOff(const Value: Boolean): String;
+begin
+  if Value then
+    Result := 'On'
+  else
+    Result := 'Off';
+end;
+
+procedure TQuakeMenu.RebuildMenuItems(const KeepSelection: Boolean);
+var
+  A: TQuakeAction;
+  I: Integer;
 begin
   FItems.Clear;
   case FSubMenu of
@@ -99,6 +122,12 @@ begin
         FItems.Add('CGE Features Showcase');
         FItems.Add('Quit');
       end;
+    smSkill:
+      begin
+        for I := 0 to High(SkillNames) do
+          FItems.Add(SkillNames[I]);
+        FItems.Add('Back to Main Menu');
+      end;
     smMaps:
       begin
         FItems.AddStrings(FMaps);
@@ -107,15 +136,81 @@ begin
     smOptions:
       begin
         FItems.Add('Camera View: [' + FCameraModeName + ']');
-        FItems.Add('Sound Effects: [' + IntToStr(FVolume) + '%]');
+        FItems.Add(Format('Mouse Sensitivity: [%.2f]', [Settings.MouseSensitivity]));
+        FItems.Add('Invert Mouse: [' + OnOff(Settings.InvertMouse) + ']');
+        FItems.Add(Format('Field of View: [%d]', [Settings.FieldOfView]));
+        FItems.Add(Format('Sound Volume: [%d%%]', [Settings.SoundVolume]));
+        FItems.Add(Format('Music Volume: [%d%%]', [Settings.MusicVolume]));
+        FItems.Add('Controls...');
         FItems.Add('Back to Main Menu');
+      end;
+    smControls:
+      begin
+        for A := Low(TQuakeAction) to High(TQuakeAction) do
+          FItems.Add(ActionNames[A] + ': [' + KeyToStr(Settings.Keys[A]) + ']');
+        FItems.Add('Reset to Defaults');
+        FItems.Add('Back to Options');
       end;
     smShowcase:
       begin
         FItems.Add('Back to Main Menu');
       end;
   end;
-  FSelectedIdx := 0;
+  if not KeepSelection then
+    FSelectedIdx := 0;
+  FSelectedIdx := EnsureRange(FSelectedIdx, 0, FItems.Count - 1);
+end;
+
+procedure TQuakeMenu.ShowPage(const Page: TMenuPage);
+begin
+  FSubMenu := Page;
+  FBinding := False;
+  RebuildMenuItems;
+  { Start on the current skill }
+  if FSubMenu = smSkill then
+    FSelectedIdx := Settings.Skill;
+end;
+
+procedure TQuakeMenu.SettingsChanged;
+begin
+  Settings.Save;
+  RebuildMenuItems(True);
+  if Assigned(FOnMenuAction) then
+    FOnMenuAction(maSettingsChanged, '');
+end;
+
+function TQuakeMenu.AdjustOption(const Delta: Integer): Boolean;
+begin
+  Result := FSubMenu = smOptions;
+  if not Result then
+    Exit;
+  case TOptionItem(FSelectedIdx) of
+    oiSensitivity:
+      Settings.MouseSensitivity := EnsureRange(Settings.MouseSensitivity + 0.25 * Delta, 0.25, 3);
+    oiInvert:
+      Settings.InvertMouse := not Settings.InvertMouse;
+    oiFieldOfView:
+      Settings.FieldOfView := EnsureRange(Settings.FieldOfView + 5 * Delta, 70, 120);
+    oiSoundVolume:
+      Settings.SoundVolume := EnsureRange(Settings.SoundVolume + 10 * Delta, 0, 100);
+    oiMusicVolume:
+      Settings.MusicVolume := EnsureRange(Settings.MusicVolume + 10 * Delta, 0, 100);
+    else
+      Exit(False);
+  end;
+  Sounds.Play('sound/misc/menu2.wav');
+  SettingsChanged;
+end;
+
+function TQuakeMenu.PageTitle: String;
+begin
+  case FSubMenu of
+    smSkill: Result := 'CHOOSE SKILL';
+    smMaps: Result := 'MAP WARP';
+    smOptions: Result := 'OPTIONS';
+    smControls: Result := 'CONTROLS';
+    else Result := '';
+  end;
 end;
 
 procedure TQuakeMenu.ExecuteSelection;
@@ -126,59 +221,108 @@ begin
     Exit;
 
   ItemText := FItems[FSelectedIdx];
-  Sounds.Play('sound/misc/menu2.wav');
 
   case FSubMenu of
     smMain:
-      case FSelectedIdx of
-        0: if Assigned(FOnMenuAction) then FOnMenuAction(maNewGame, FirstMapName);
-        1: begin FSubMenu := smMaps; RebuildMenuItems; end;
-        2: begin FSubMenu := smOptions; RebuildMenuItems; end;
-        3: begin FSubMenu := smShowcase; RebuildMenuItems; end;
-        4: if Assigned(FOnMenuAction) then FOnMenuAction(maQuit, '');
+      begin
+        Sounds.Play('sound/misc/menu2.wav');
+        case FSelectedIdx of
+          0: ShowPage(smSkill);
+          1: ShowPage(smMaps);
+          2: ShowPage(smOptions);
+          3: ShowPage(smShowcase);
+          4: if Assigned(FOnMenuAction) then FOnMenuAction(maQuit, '');
+        end;
+      end;
+    smSkill:
+      begin
+        Sounds.Play('sound/misc/menu2.wav');
+        if FSelectedIdx > High(SkillNames) then
+          ShowPage(smMain)
+        else
+        begin
+          GameSkill := FSelectedIdx;
+          Settings.Skill := FSelectedIdx;
+          Settings.Save;
+          ShowPage(smMain);
+          if Assigned(FOnMenuAction) then
+            FOnMenuAction(maNewGame, FirstMapName);
+        end;
       end;
     smMaps:
       begin
+        Sounds.Play('sound/misc/menu2.wav');
         if ItemText = 'Back to Main Menu' then
-        begin
-          FSubMenu := smMain;
-          RebuildMenuItems;
-        end else
+          ShowPage(smMain)
+        else
         if Assigned(FOnMenuAction) then
           FOnMenuAction(maWarpMap, ChangeFileExt(ExtractFileName(ItemText), ''));
       end;
     smOptions:
-      case FSelectedIdx of
-        0:
+      case TOptionItem(FSelectedIdx) of
+        oiCamera:
           begin
+            Sounds.Play('sound/misc/menu2.wav');
             if Assigned(FOnMenuAction) then
               FOnMenuAction(maToggleCamera, '');
-            RebuildMenuItems;
+            RebuildMenuItems(True);
           end;
-        1:
+        oiControls:
           begin
-            FVolume := (FVolume + 25) mod 125;
-            SoundEngine.Volume := FVolume / 100;
-            RebuildMenuItems;
-            FSelectedIdx := 1;
+            Sounds.Play('sound/misc/menu2.wav');
+            ShowPage(smControls);
           end;
-        2:
+        oiBack:
           begin
-            FSubMenu := smMain;
-            RebuildMenuItems;
+            Sounds.Play('sound/misc/menu2.wav');
+            ShowPage(smMain);
           end;
+        else
+          AdjustOption(1);
+      end;
+    smControls:
+      begin
+        Sounds.Play('sound/misc/menu2.wav');
+        if FSelectedIdx <= Ord(High(TQuakeAction)) then
+        begin
+          { Wait for the key to bind }
+          FBinding := True;
+          FBindingAction := TQuakeAction(FSelectedIdx);
+        end else
+        if FSelectedIdx = Ord(High(TQuakeAction)) + 1 then
+        begin
+          Settings.ResetKeys;
+          SettingsChanged;
+        end else
+        begin
+          ShowPage(smOptions);
+          FSelectedIdx := Ord(oiControls);
+        end;
       end;
     smShowcase:
-      begin
-        FSubMenu := smMain;
-        RebuildMenuItems;
-      end;
+      ShowPage(smMain);
   end;
 end;
 
 function TQuakeMenu.Press(const Event: TInputPressRelease): Boolean;
 begin
   Result := False;
+
+  if FBinding then
+  begin
+    if Event.EventType <> itKey then
+      Exit;
+    FBinding := False;
+    { Escape cancels; the console and menu keys can't be bound }
+    if (Event.Key <> keyNone) and not (Event.Key in [keyEscape, keyBackQuote]) then
+    begin
+      Settings.BindKey(FBindingAction, Event.Key);
+      Sounds.Play('sound/misc/menu2.wav');
+      SettingsChanged;
+    end else
+      Sounds.Play('sound/misc/menu3.wav');
+    Exit(True);
+  end;
 
   if Event.IsKey(keyArrowUp) then
   begin
@@ -194,6 +338,11 @@ begin
     Exit(True);
   end;
 
+  if Event.IsKey(keyArrowLeft) then
+    Exit(AdjustOption(-1));
+  if Event.IsKey(keyArrowRight) then
+    Exit(AdjustOption(1));
+
   if Event.IsKey(keyEnter) or Event.IsKey(keySpace) then
   begin
     ExecuteSelection;
@@ -202,10 +351,16 @@ begin
 
   if Event.IsKey(keyEscape) then
   begin
+    if FSubMenu = smControls then
+    begin
+      ShowPage(smOptions);
+      FSelectedIdx := Ord(oiControls);
+      Sounds.Play('sound/misc/menu3.wav');
+      Exit(True);
+    end;
     if FSubMenu <> smMain then
     begin
-      FSubMenu := smMain;
-      RebuildMenuItems;
+      ShowPage(smMain);
       Sounds.Play('sound/misc/menu3.wav');
       Exit(True);
     end;
@@ -248,7 +403,10 @@ begin
     Exit;
   end;
 
-  StartY := CY + 140;
+  if PageTitle <> '' then
+    UIFont.Print(CX - UIFont.TextWidth(PageTitle) / 2, CY + 165, Vector4(1.0, 0.65, 0.2, 1.0), PageTitle);
+
+  StartY := CY + 130;
   { Show a window of at most 10 items around the selection }
   First := EnsureRange(FSelectedIdx - 5, 0, Max(0, FItems.Count - 10));
   for I := First to Min(FItems.Count - 1, First + 9) do
@@ -266,8 +424,16 @@ begin
   end;
 
   { Bottom help hint }
-  UIFont.Print(CX - 160, 40, Vector4(0.6, 0.6, 0.6, 0.7),
-    'Use Arrow Keys to Navigate, Enter to Select, Esc to Back');
+  if FBinding then
+    UIFont.Print(CX - 200, 40, Vector4(1.0, 0.85, 0.15, 1.0),
+      'Press a key for ' + ActionNames[FBindingAction] + ' (Esc cancels)')
+  else
+  if FSubMenu = smOptions then
+    UIFont.Print(CX - 200, 40, Vector4(0.6, 0.6, 0.6, 0.7),
+      'Arrows: Navigate, Left / Right: Change, Enter: Select, Esc: Back')
+  else
+    UIFont.Print(CX - 160, 40, Vector4(0.6, 0.6, 0.6, 0.7),
+      'Use Arrow Keys to Navigate, Enter to Select, Esc to Back');
 end;
 
 initialization
