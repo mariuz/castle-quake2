@@ -8,7 +8,7 @@ interface
 uses
   SysUtils, Classes, Generics.Collections,
   CastleVectors, CastleSoundEngine, CastleSoundBase, CastleTransform, CastleBehaviors, CastleLog, CastleUriUtils,
-  CastleClassUtils, CastleComponentSerialize, CastleStringUtils,
+  CastleClassUtils, CastleComponentSerialize, CastleStringUtils, Math,
   QuakePak;
 
 type
@@ -26,10 +26,47 @@ type
     property QuakePath: String read FQuakePath write SetQuakePath;
   end;
 
+  { Quake 2 entity sound channels: a new sound on the same entity and
+    channel replaces the playing one (CHAN_AUTO never does). }
+  TQuakeSoundChannel = (chAuto, chWeapon, chVoice, chItem, chBody);
+
+  { A one-shot sound, remembered while it plays on an entity channel }
+  TQuakePlayingSound = class(TCastlePlayingSoundSource)
+  public
+    ChannelOwner: TObject;
+    Channel: TQuakeSoundChannel;
+    destructor Destroy; override;
+  end;
+
+  { A voice of the loop mixer: one per looping sound, played at the
+    loudest emitter of that sound (Quake 2 S_AddLoopSounds) }
+  TQuakeLoopVoice = class
+  public
+    Transform: TCastleTransform;
+    Source: TCastleSoundSource;
+    { Loudest request of the current frame }
+    Requested: Boolean;
+    BestGain, BestVolume: Single;
+    BestPosition: TVector3;
+    destructor Destroy; override;
+  end;
+
+const
+  { Quake 2 attenuations }
+  ATTN_NONE = 0;
+  ATTN_NORM = 1;
+  ATTN_IDLE = 2;
+  ATTN_STATIC = 3;
+
+type
   { Sound manager for Quake SFX and music }
   TQuakeSounds = class
   private
     FSoundCache: specialize TObjectDictionary<String, TCastleSound>;
+    FChannelSounds: specialize TList<TQuakePlayingSound>;
+    FLoopVoices: specialize TObjectDictionary<String, TQuakeLoopVoice>;
+    FWorldParent: TCastleTransform;
+    FListener: TVector3;
     { Owns the components of the named sounds design }
     FNamedOwner: TComponent;
     FNamedSounds: specialize TDictionary<String, TQuakeNamedSound>;
@@ -37,21 +74,62 @@ type
     FCurrentMusicTrack: String;
     FEnabled: Boolean;
     function GetSound(const APath: String): TCastleSound;
+    function SpatialSoundMult(const APath: String; const DistMult: Single): TCastleSound;
+    { Stop the sound playing on Owner's Channel (not chAuto), remember New there }
+    procedure UseChannel(const Owner: TObject; const Channel: TQuakeSoundChannel;
+      const New: TQuakePlayingSound);
+    function NewPlaying(const Snd: TCastleSound; const Volume: Single;
+      const Owner: TObject; const Channel: TQuakeSoundChannel): TQuakePlayingSound;
   public
     constructor Create;
     destructor Destroy; override;
 
-    { Play 2D non-positional sound (weapon fire, UI, player damage) }
-    procedure Play(const APath: String; const Volume: Single = 1.0);
+    { Play a 2D sound of the player (weapon fire, pain, pickups, UI).
+      On a channel other than chAuto it replaces the player's previous
+      sound there, like Quake 2 (rapid fire doesn't pile up). }
+    procedure Play(const APath: String; const Volume: Single = 1.0;
+      const Channel: TQuakeSoundChannel = chAuto);
 
-    { Play 3D positional sound attached to a transform (door, monster, elevator).
-      Attenuation as in Quake 2: 1 = normal, 2 = idle, 3 = static (fades fastest). }
+    { Play a sound from where a transform is now (monster, mover...).
+      Attenuation as in Quake 2: 0 = none (heard everywhere), 1 = normal,
+      2 = idle, 3 = static (fades fastest). The sound keeps playing at
+      that point when the transform is hidden or freed (gibs, kills). }
     procedure PlayAt(const APath: String; const ATransform: TCastleTransform;
-      const Volume: Single = 1.0; const Attenuation: Single = 1.0);
+      const Volume: Single = 1.0; const Attenuation: Single = 1.0;
+      const Channel: TQuakeSoundChannel = chAuto);
+
+    { Play a sound at a point in the world (explosions, impacts). Owner +
+      Channel (optional) make it replace Owner's previous sound there. }
+    procedure PlayAtPoint(const APath: String; const Position: TVector3;
+      const Volume: Single = 1.0; const Attenuation: Single = 1.0;
+      const Owner: TObject = nil; const Channel: TQuakeSoundChannel = chAuto);
+
+    { Stop what plays on Owner's channel (nil Owner: the player's 2D sounds) }
+    procedure StopChannel(const Owner: TObject; const Channel: TQuakeSoundChannel);
 
     { Sound for a path with Quake 2 distance attenuation (<= 0: heard everywhere).
       nil if the sound isn't in the PAK. Cached per path and attenuation. }
     function SpatialSound(const APath: String; const Attenuation: Single): TCastleSound;
+
+    { Looping sounds (Quake 2 entity "s.sound": ambient speakers, moving
+      doors and platforms). Every frame call BeginLoops, AddLoop for each
+      active audible emitter, then EndLoops: each
+      distinct sound plays once, from its loudest emitter, with Quake 2's
+      loop attenuation (silent beyond ~413 units). Attenuation <= 0: heard
+      everywhere at Volume. Needs WorldParent. }
+    procedure BeginLoops(const Listener: TVector3);
+    procedure AddLoop(const APath: String; const Position: TVector3; const Volume: Single = 1;
+      const Attenuation: Single = 1);
+    procedure EndLoops;
+    { Stop the loops and take their voices out of WorldParent (when the
+      world goes away; EndLoops puts them back) }
+    procedure ClearLoops;
+    { Number of loop voices playing (after EndLoops) }
+    function PlayingLoopCount: Integer;
+    { Where the loop voice of a sound plays (False if it isn't playing) }
+    function LoopPosition(const APath: String; out Position: TVector3): Boolean;
+    { Where the loop mixer's voices live (the viewport's Items) }
+    property WorldParent: TCastleTransform read FWorldParent write FWorldParent;
 
     { Use the TQuakeNamedSound components of a design (by default
       data/sounds.castle-component) for their QuakePath. Returns their number. }
@@ -92,6 +170,8 @@ begin
   inherited Create;
   FSoundCache := specialize TObjectDictionary<String, TCastleSound>.Create([doOwnsValues]);
   FNamedSounds := specialize TDictionary<String, TQuakeNamedSound>.Create;
+  FChannelSounds := specialize TList<TQuakePlayingSound>.Create;
+  FLoopVoices := specialize TObjectDictionary<String, TQuakeLoopVoice>.Create([doOwnsValues]);
   FEnabled := True;
   FMusicSound := nil;
   FCurrentMusicTrack := '';
@@ -100,6 +180,9 @@ end;
 destructor TQuakeSounds.Destroy;
 begin
   StopMusic;
+  FreeAndNil(FLoopVoices);
+  { Playing sounds outlive us (they free themselves on stop): forget them }
+  FreeAndNil(FChannelSounds);
   FSoundCache.Free;
   FNamedSounds.Free;
   FNamedOwner.Free;
@@ -130,10 +213,92 @@ begin
   end;
 end;
 
-procedure TQuakeSounds.Play(const APath: String; const Volume: Single);
+const
+  { Quake 2 snd_dma.c: full volume within SOUND_FULLVOLUME units, loops fade
+    with SOUND_LOOPATTENUATE per unit }
+  SoundFullVolume = 80;
+  SoundLoopAttenuate = 0.003;
+
+{ Quake 2 S_StartSound: dist_mult = attenuation * 0.0005, or * 0.001 for
+  ATTN_STATIC (3) }
+function DistanceMult(const Attenuation: Single): Single;
+begin
+  if Attenuation <= 0 then
+    Result := 0
+  else
+  if Attenuation >= 3 then
+    Result := Attenuation * 0.001
+  else
+    Result := Attenuation * 0.0005;
+end;
+
+{ TQuakePlayingSound }
+
+destructor TQuakePlayingSound.Destroy;
+begin
+  if (Sounds <> nil) and (Sounds.FChannelSounds <> nil) then
+    Sounds.FChannelSounds.Remove(Self);
+  inherited Destroy;
+end;
+
+{ TQuakeLoopVoice }
+
+destructor TQuakeLoopVoice.Destroy;
+begin
+  if Source <> nil then
+    Source.Sound := nil;
+  FreeAndNil(Source);
+  FreeAndNil(Transform);
+  inherited Destroy;
+end;
+
+{ TQuakeSounds }
+
+procedure TQuakeSounds.UseChannel(const Owner: TObject; const Channel: TQuakeSoundChannel;
+  const New: TQuakePlayingSound);
+begin
+  New.ChannelOwner := Owner;
+  New.Channel := Channel;
+  if Channel = chAuto then
+    Exit;
+  StopChannel(Owner, Channel);
+  FChannelSounds.Add(New);
+end;
+
+procedure TQuakeSounds.StopChannel(const Owner: TObject; const Channel: TQuakeSoundChannel);
+var
+  I: Integer;
+  Old: TQuakePlayingSound;
+begin
+  for I := FChannelSounds.Count - 1 downto 0 do
+    if I < FChannelSounds.Count then
+    begin
+      Old := FChannelSounds[I];
+      if (Old.ChannelOwner = Owner) and (Old.Channel = Channel) then
+      begin
+        FChannelSounds.Delete(I);
+        { FreeOnStop: frees it, and its destructor finds nothing to remove }
+        Old.Stop;
+      end;
+    end;
+end;
+
+function TQuakeSounds.NewPlaying(const Snd: TCastleSound; const Volume: Single;
+  const Owner: TObject; const Channel: TQuakeSoundChannel): TQuakePlayingSound;
+begin
+  Result := TQuakePlayingSound.Create(nil);
+  Result.Sound := Snd;
+  Result.Volume := Volume;
+  Result.FreeOnStop := True;
+  { Stay where the sound started, also after the source is freed }
+  Result.Follow := False;
+  UseChannel(Owner, Channel, Result);
+end;
+
+procedure TQuakeSounds.Play(const APath: String; const Volume: Single;
+  const Channel: TQuakeSoundChannel);
 var
   Snd: TCastleSound;
-  Playing: TCastlePlayingSound;
 begin
   if not FEnabled or (SoundEngine = nil) then
     Exit;
@@ -141,13 +306,7 @@ begin
   try
     Snd := GetSound(APath);
     if Snd <> nil then
-    begin
-      Playing := TCastlePlayingSound.Create(nil);
-      Playing.Sound := Snd;
-      Playing.Volume := Volume;
-      Playing.FreeOnStop := True;
-      SoundEngine.Play(Playing);
-    end;
+      SoundEngine.Play(NewPlaying(Snd, Volume, nil, Channel));
   except
     on E: Exception do
       WritelnWarning('QuakeSound', 'Failed to play "%s": %s', [APath, E.Message]);
@@ -155,6 +314,11 @@ begin
 end;
 
 function TQuakeSounds.SpatialSound(const APath: String; const Attenuation: Single): TCastleSound;
+begin
+  Result := SpatialSoundMult(APath, DistanceMult(Attenuation));
+end;
+
+function TQuakeSounds.SpatialSoundMult(const APath: String; const DistMult: Single): TCastleSound;
 var
   Base: TCastleSound;
   Key: String;
@@ -163,22 +327,132 @@ begin
   Base := GetSound(APath);
   if Base = nil then
     Exit;
-  Key := LowerCase(APath) + '@' + FloatToStr(Attenuation);
+  Key := LowerCase(APath) + '@' + FloatToStr(DistMult);
   if not FSoundCache.TryGetValue(Key, Result) then
   begin
     Result := TCastleSound.Create(nil);
     Result.Url := Base.Url;
     Result.Volume := Base.Volume;
     Result.Pitch := Base.Pitch;
-    { Quake 2 S_SpatializeOrigin: full volume up to 80 units (SOUND_FULLVOLUME),
-      then linear falloff of 0.0005 * attenuation per unit }
-    Result.ReferenceDistance := 80;
-    if Attenuation > 0 then
-      Result.MaxDistance := 80 + 1 / (0.0005 * Attenuation)
+    { Quake 2 S_SpatializeOrigin: full volume up to SOUND_FULLVOLUME, then
+      1 - distance * dist_mult: OpenAL's clamped linear model with these
+      distances gives the same gain }
+    Result.ReferenceDistance := SoundFullVolume;
+    if DistMult > 0 then
+      Result.MaxDistance := SoundFullVolume + 1 / DistMult
     else
       Result.MaxDistance := 100000;
     FSoundCache.Add(Key, Result);
   end;
+end;
+
+procedure TQuakeSounds.BeginLoops(const Listener: TVector3);
+var
+  Voice: TQuakeLoopVoice;
+begin
+  FListener := Listener;
+  for Voice in FLoopVoices.Values do
+  begin
+    Voice.Requested := False;
+    Voice.BestGain := 0;
+  end;
+end;
+
+procedure TQuakeSounds.AddLoop(const APath: String; const Position: TVector3;
+  const Volume: Single; const Attenuation: Single);
+var
+  Voice: TQuakeLoopVoice;
+  Key: String;
+  Gain: Single;
+begin
+  if not FEnabled or (SoundEngine = nil) or (FWorldParent = nil) or (APath = '') then
+    Exit;
+  Key := LowerCase(APath);
+  if Attenuation <= 0 then
+    Key := Key + '@none';
+  if not FLoopVoices.TryGetValue(Key, Voice) then
+  begin
+    Voice := TQuakeLoopVoice.Create;
+    FLoopVoices.Add(Key, Voice);
+    Voice.Transform := TCastleTransform.Create(nil);
+    Voice.Transform.Name := 'LoopSound' + IntToStr(FLoopVoices.Count);
+    Voice.Source := TCastleSoundSource.Create(nil);
+    Voice.Source.SoundPlaying := False;
+    Voice.Source.Spatial := Attenuation > 0;
+    if Attenuation > 0 then
+      Voice.Source.Sound := SpatialSoundMult(APath, SoundLoopAttenuate)
+    else
+      Voice.Source.Sound := GetSound(APath);
+    Voice.Transform.AddBehavior(Voice.Source);
+    FWorldParent.Add(Voice.Transform);
+  end;
+  if Voice.Source.Sound = nil then
+    Exit;
+  { Gain the emitter would have here, to pick the loudest one }
+  if Attenuation > 0 then
+    Gain := Volume * (1 - Max(0, PointsDistance(Position, FListener) - SoundFullVolume) * SoundLoopAttenuate)
+  else
+    Gain := Volume;
+  if (not Voice.Requested) or (Gain > Voice.BestGain) then
+  begin
+    Voice.Requested := True;
+    Voice.BestGain := Gain;
+    Voice.BestVolume := Volume;
+    Voice.BestPosition := Position;
+  end;
+end;
+
+procedure TQuakeSounds.EndLoops;
+var
+  Voice: TQuakeLoopVoice;
+  Audible: Boolean;
+begin
+  for Voice in FLoopVoices.Values do
+  begin
+    Audible := Voice.Requested and (Voice.BestGain > 0);
+    if Audible then
+    begin
+      if (Voice.Transform.Parent = nil) and (FWorldParent <> nil) then
+        FWorldParent.Add(Voice.Transform);
+      Voice.Transform.Translation := Voice.BestPosition;
+      Voice.Source.Volume := Voice.BestVolume;
+    end;
+    if Voice.Source.SoundPlaying <> Audible then
+      Voice.Source.SoundPlaying := Audible;
+  end;
+end;
+
+function TQuakeSounds.LoopPosition(const APath: String; out Position: TVector3): Boolean;
+var
+  Voice: TQuakeLoopVoice;
+begin
+  Result := FLoopVoices.TryGetValue(LowerCase(APath), Voice) and Voice.Source.SoundPlaying;
+  if Result then
+    Position := Voice.Transform.Translation
+  else
+    Position := TVector3.Zero;
+end;
+
+procedure TQuakeSounds.ClearLoops;
+var
+  Voice: TQuakeLoopVoice;
+begin
+  for Voice in FLoopVoices.Values do
+  begin
+    Voice.Source.SoundPlaying := False;
+    if Voice.Transform.Parent <> nil then
+      Voice.Transform.Parent.Remove(Voice.Transform);
+  end;
+end;
+
+function TQuakeSounds.PlayingLoopCount: Integer;
+var
+  Voice: TQuakeLoopVoice;
+begin
+  Result := 0;
+  for Voice in FLoopVoices.Values do
+    if Voice.Source.SoundPlaying and (Voice.Source.Sound <> nil) then
+      Inc(Result);
 end;
 
 function TQuakeSounds.LoadNamedSounds(const Url: String): Integer;
@@ -223,32 +497,56 @@ end;
 procedure TQuakeSounds.ConfigureEngine;
 begin
   if SoundEngine <> nil then
+  begin
     SoundEngine.DistanceModel := dmLinear;
+    { Quake 2 mixes up to MAX_CHANNELS = 32 sounds }
+    SoundEngine.MaxAllocatedSources := 32;
+  end;
 end;
 
 procedure TQuakeSounds.PlayAt(const APath: String; const ATransform: TCastleTransform;
-  const Volume: Single; const Attenuation: Single);
+  const Volume: Single; const Attenuation: Single; const Channel: TQuakeSoundChannel);
+begin
+  if ATransform = nil then
+    Exit;
+  { The transform's place in the world (its parent is the map, at identity) }
+  PlayAtPoint(APath, ATransform.Translation, Volume, Attenuation, ATransform, Channel);
+end;
+
+procedure TQuakeSounds.PlayAtPoint(const APath: String; const Position: TVector3;
+  const Volume: Single; const Attenuation: Single; const Owner: TObject;
+  const Channel: TQuakeSoundChannel);
 var
   Snd: TCastleSound;
+  Emitter: TCastleTransform;
   Source: TCastleSoundSource;
 begin
-  if not FEnabled or (SoundEngine = nil) or (ATransform = nil) then
+  if not FEnabled or (SoundEngine = nil) then
     Exit;
 
   try
+    if Attenuation <= 0 then
+    begin
+      { ATTN_NONE: heard everywhere, like a 2D sound }
+      Snd := GetSound(APath);
+      if Snd <> nil then
+        SoundEngine.Play(NewPlaying(Snd, Volume, Owner, Channel));
+      Exit;
+    end;
     Snd := SpatialSound(APath, Attenuation);
     if Snd = nil then
       Exit;
-
-    Source := ATransform.FindBehavior(TCastleSoundSource) as TCastleSoundSource;
-    if Source = nil then
-    begin
-      Source := TCastleSoundSource.Create(ATransform);
-      Source.Spatial := True;
-      ATransform.AddBehavior(Source);
+    { A throwaway emitter: the sound doesn't follow it (Follow = False), so
+      it keeps playing at Position after the emitter is freed }
+    Emitter := TCastleTransform.Create(nil);
+    try
+      Emitter.Translation := Position;
+      Source := TCastleSoundSource.Create(Emitter);
+      Emitter.AddBehavior(Source);
+      Source.Play(NewPlaying(Snd, Volume, Owner, Channel));
+    finally
+      Emitter.Free;
     end;
-    Source.Volume := Volume;
-    Source.Play(Snd);
   except
     on E: Exception do
       WritelnWarning('QuakeSound', 'Failed to play 3D sound "%s": %s', [APath, E.Message]);

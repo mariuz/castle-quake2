@@ -161,7 +161,9 @@ type
     StartSound, EndSound: String;
     { Looping sound while moving (Quake 2 moveinfo.sound_middle) }
     MoveSound: String;
-    MoveSource: TCastleSoundSource;
+    { Looping move sound (MoveSound) is on: the world gives it to the
+      loop mixer while the mover is in view }
+    MoveSoundOn: Boolean;
     { Train path }
     TrainCorner: TQuakeEntity;
     TrainFrom, TrainTo: TVector3;
@@ -183,6 +185,7 @@ type
     { Re-apply Transform from State / Progress / SpinAngle (after loading a save) }
     procedure ApplyPose;
     procedure UpdateMoveSound(const Moving: Boolean);
+    procedure PlayMoverSound(const APath: String);
   published
     property EntityClass: String read GetEntityClass;
     property EntityTargetName: String read TargetName;
@@ -904,33 +907,20 @@ begin
 end;
 
 procedure TQuakeMover.UpdateMoveSound(const Moving: Boolean);
-var
-  Snd: TCastleSound;
 begin
-  if MoveSound = '' then
-    Exit;
-  if Moving and (MoveSource = nil) then
-  begin
-    Snd := Sounds.SpatialSound(MoveSound, 1);
-    if Snd = nil then
-    begin
-      MoveSound := '';
-      Exit;
-    end;
-    MoveSource := TCastleSoundSource.Create(nil);
-    MoveSource.SoundPlaying := False;
-    MoveSource.Sound := Snd;
-    { Play from the middle of the brush (its transform origin may be far away) }
-    MoveSource.Spatial := True;
-    Transform.AddBehavior(MoveSource);
-  end;
-  if (MoveSource <> nil) and (MoveSource.SoundPlaying <> Moving) then
-    MoveSource.SoundPlaying := Moving;
+  MoveSoundOn := Moving and (MoveSound <> '');
+end;
+
+procedure TQuakeMover.PlayMoverSound(const APath: String);
+begin
+  { From the middle of the brush (its transform origin may be far away);
+    start and end sounds share Quake 2's CHAN_VOICE, so one replaces the other }
+  if APath <> '' then
+    Sounds.PlayAtPoint(APath, Center, 1, 1, Self, chVoice);
 end;
 
 destructor TQuakeMover.Destroy;
 begin
-  FreeAndNil(MoveSource);
   { BeforeDestruction already detached this behavior from Transform }
   FreeAndNil(Scene);
   FreeAndNil(Transform);
@@ -997,7 +987,7 @@ begin
         if State = msAtEnd then
           StateTimer := WaitTime;
         if Result and (StartSound <> '') then
-          Sounds.PlayAt(StartSound, Transform);
+          PlayMoverSound(StartSound);
         { Buttons fire their targets when pressed }
         if Result and (Kind = mkButton) and (State = msToEnd) then
           Geometry.FireTargets(Target);
@@ -1020,7 +1010,7 @@ begin
   if (Kind = mkPlat) and (State = msAtStart) and (TargetName = '') then
   begin
     State := msToEnd;
-    Sounds.PlayAt(StartSound, Transform);
+    PlayMoverSound(StartSound);
   end else
   if (Kind = mkPlat) and (State = msAtEnd) then
     StateTimer := WaitTime;
@@ -1122,7 +1112,7 @@ begin
                 State := msAtEnd;
                 StateTimer := WaitTime;
                 if EndSound <> '' then
-                  Sounds.PlayAt(EndSound, Transform);
+                  PlayMoverSound(EndSound);
               end;
             end;
           msAtEnd:
@@ -1133,7 +1123,7 @@ begin
               begin
                 State := msToStart;
                 if StartSound <> '' then
-                  Sounds.PlayAt(StartSound, Transform);
+                  PlayMoverSound(StartSound);
               end;
             end;
           msToStart:
@@ -1144,7 +1134,7 @@ begin
               begin
                 State := msAtStart;
                 if EndSound <> '' then
-                  Sounds.PlayAt(EndSound, Transform);
+                  PlayMoverSound(EndSound);
               end;
             end;
           msAtStart:

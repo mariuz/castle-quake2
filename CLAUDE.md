@@ -33,7 +33,7 @@ Demo script actions: `W:sec` wait, `S` screenshot (logs FPS + camera), `X` fire,
 
 ## Unit tests
 
-`tests/` is a console CGE project (search path `../code/`): `cd tests; castle-engine compile; ./castle-quake2-tests` — 78 checks of the parsers against the demo PAK (counts, contents, ladders, LightPoint, PVS, areas, box leafs, MD2 animations, SP2, monster types and named sounds designs, settings save / load and skill rules). Run from `tests/` (it loads `../data/paks/quake2_demo.pak`). CI runs it before the autotests.
+`tests/` is a console CGE project (search path `../code/`): `cd tests; castle-engine compile; ./castle-quake2-tests` — 86 checks of the parsers against the demo PAK (counts, contents, ladders, LightPoint, PVS, areas, box leafs, MD2 animations, SP2, monster types and named sounds designs, settings save / load and skill rules, sound attenuation and loop mixer). Run from `tests/` (it loads `../data/paks/quake2_demo.pak`). CI runs it before the autotests.
 
 Screenshot comparison: `./castle-quake2-tests --compare reference/<map>.png <shot>.png <diff>.png [limit]` averages both images into 64x36 blocks and fails when the mean channel difference is above 3 (identical runs: < 1; a 10° turn: ~6). CI compares an `O:notarget,W:2,S,Q` shot (no combat, player settled) of each demo map with `tests/reference/*.png`. After an intended visual change, delete the affected reference and commit the one CI creates (artifact `autotest-screenshots`, `compare/reference/`), (references are made by CI's Mesa renderer; Windows shots differ by up to ~4, so don't regenerate them locally).
 
@@ -56,6 +56,7 @@ Screenshot comparison: `./castle-quake2-tests --compare reference/<map>.png <sho
 - BSP polygons and MD2 triangles are clockwise from the front: `Ccw := False`.
 - CGE images are bottom-to-top; PCX/WAL decoders flip rows, so UV `v = 1 - t/height`.
 - `TCastleBackground.TexturePositiveZ` is the X3D "front" drawn at **-Z** (and `TextureNegativeZ` at +Z).
+- Sounds: use `Sounds.Play(path, volume, channel)` for the player (2D), `PlayAt(path, transform, volume, attenuation, channel)` / `PlayAtPoint(path, position, ...)` for the world, with Quake 2's `CHAN_*` as `chWeapon` / `chVoice` / `chItem` / `chBody` (same owner + channel replaces the previous sound). Never attach looping `TCastleSoundSource`s to entities: report looping sounds each frame through `TQuakeWorld.UpdateLoopSounds` (loop mixer). To listen headless, run with `ALSOFT_CONF` pointing to an OpenAL Soft config with `drivers = wave` and `sample-type = int16`.
 - Particles are data (`TQuakeParticle`) drawn by one batched scene in `TQuakeParticleManager.RebuildBatch`; set `Particles.Camera`. (If you use `TBillboardNode` elsewhere, it needs `Scene.ProcessEvents := True`.)
 - Don't use `MODULATE2X`/`MODULATE4X` multi-texture modes: CGE emits an int literal (`*= 2;`) that breaks WebGL shaders. Scale the unlit emissive colour instead. Check web logs for `GLSL: Fragment shader not compiled`.
 - Dynamic lights: `Lighting.AddLight(pos, radius, color, duration)` (duration 0 = this frame only, re-add every frame). World surfaces show the 4 nearest via the lightmap texture effect in `TQuakeGeometry.CreateDLightEffect`; create one effect per scene, never share X3D nodes between scenes.

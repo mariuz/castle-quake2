@@ -266,11 +266,12 @@ begin
     finally
       Img.Free;
     end;
-    WritelnLog('GameViewPlay', 'Saved screenshot to "%s" (%.1f FPS, camera %s, PVS cluster %d, area %d, %d / %d world regions, %d / %d entities)',
+    WritelnLog('GameViewPlay', 'Saved screenshot to "%s" (%.1f FPS, camera %s, PVS cluster %d, area %d, %d / %d world regions, %d / %d entities, %d loop sounds)',
       [OutPath, Container.Fps.RealFps, MainViewport.Camera.Translation.ToString,
        FWorld.Geometry.VisCluster, FWorld.Geometry.VisArea,
        FWorld.Geometry.VisibleRegionCount, FWorld.Geometry.VisRegionCount,
-       FWorld.VisibleEntities, FWorld.VisibleEntities + FWorld.CulledEntities]);
+       FWorld.VisibleEntities, FWorld.VisibleEntities + FWorld.CulledEntities,
+       Sounds.PlayingLoopCount]);
   except
     on E: Exception do
       WritelnWarning('GameViewPlay', 'Failed to save screenshot "%s": %s', [OutPath, E.Message]);
@@ -716,6 +717,7 @@ begin
   FWorld.Update(SecondsPassed, MainViewport.Camera.Translation, MainViewport.Camera.Direction);
   FWorld.Geometry.UpdateVisibility(CgeToQuake(MainViewport.Camera.Translation));
   FWorld.CullEntities;
+  FWorld.UpdateLoopSounds(MainViewport.Camera.Translation);
   WalkNavigation.Exists := not FWorld.Dead;
 
   if FWorld.TeleportPending then

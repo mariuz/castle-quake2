@@ -100,7 +100,15 @@ Brush entities (`model "*N"`, classname `func_*`) are separate `TCastleScene`s i
 
 ## 4b. Sound
 
-`target_speaker`s become `TQuakeSpeaker` behaviors next to a `TCastleSoundSource`: looped speakers set `Source.Sound` (always looping) and toggle `SoundPlaying` when used; one-shot speakers call `Source.Play`. Quake 2's attenuation (full volume up to 80 units, then `0.0005 × attenuation` per unit) maps onto `SoundEngine.DistanceModel := dmLinear` with `ReferenceDistance = 80` and `MaxDistance = 80 + 1 / (0.0005 × attenuation)`; `TCastleSound` instances are cached per path and attenuation.
+`TQuakeSounds` (unit `QuakeSound`) follows Quake 2's `snd_dma.c`:
+
+- **Attenuation**: full volume up to `SOUND_FULLVOLUME` (80 units), then `1 - distance × dist_mult` with `dist_mult = 0.0005 × attenuation` (`0.001 × 3` for `ATTN_STATIC`). That is OpenAL's clamped linear model (`SoundEngine.DistanceModel := dmLinear`) with `ReferenceDistance = 80` and `MaxDistance = 80 + 1 / dist_mult`; `TCastleSound`s are cached per path and `dist_mult`. `ATTN_NONE` (0) plays as a 2D sound.
+- **Channels** (`TQuakeSoundChannel`: `chAuto`, `chWeapon`, `chVoice`, `chItem`, `chBody`, Quake 2's `CHAN_*`): a sound on the same owner and channel stops the previous one (`chAuto` never does). The player's 2D sounds use owner nil: weapon fire on `chWeapon` (rapid fire doesn't pile up), pain / death / no-ammo / falls on `chVoice`, pickups and quad on `chItem`, water on `chBody`. Monsters: sight / pain / death / idle / search on `chVoice`, attacks on `chWeapon`, gibs on `chBody`. Movers: start / end sounds on `chVoice`.
+- **Point sounds**: `PlayAt(path, transform)` and `PlayAtPoint(path, position)` play from a throwaway emitter with `TCastlePlayingSoundSource.Follow := False`, so the sound keeps playing where it started after the transform is hidden or freed (gibs, exploding projectiles, level changes). Explosions (`rocklx1a`, `bfg__x1b`), blaster impacts and `target_splash` sparks are heard from where they happen; movers play from `Center` (their transform origin can be far from the brush).
+- **Loops** (Quake 2 `S_AddLoopSounds`): looping `target_speaker`s and moving doors / plats don't own sources. Every frame `TQuakeWorld.UpdateLoopSounds` passes the active emitters in the PVS / connected areas (`TQuakeGeometry.BoxVisible`) to `Sounds.BeginLoops` / `AddLoop` / `EndLoops`; each distinct sound has one voice (`TQuakeLoopVoice`, a transform with a looping `TCastleSoundSource` in `Sounds.WorldParent`) placed at its loudest emitter, with `SOUND_LOOPATTENUATE` (0.003: silent beyond ~413 units). demo1 has 84 speakers but plays 1–3 loops at a time.
+- **Sources**: `SoundEngine.MaxAllocatedSources := 32` (Quake 2 `MAX_CHANNELS`). Before the loop mixer, every looping speaker held a source, so the default 16 were exhausted and one-shot sounds (explosions, pain) were dropped.
+
+Audio can be checked headless with OpenAL Soft's wave backend (`ALSOFT_CONF` with `drivers = wave`, `sample-type = int16`, `[wave] file = ...`): it writes the final mix to a WAV file.
 
 ## 5. Models (`QuakeMd2`)
 

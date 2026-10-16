@@ -22,7 +22,7 @@ uses
   SysUtils, Math,
   Classes,
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
-  CastleTransform, CastleUriUtils,
+  CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
   QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig;
 
@@ -531,6 +531,47 @@ begin
   end;
 end;
 
+procedure TestSounds;
+var
+  Root: TCastleRootTransform;
+  Pos: TVector3;
+begin
+  { Quake 2 attenuation: full volume up to 80 units, then 1 - d * dist_mult,
+    dist_mult = 0.0005 * attenuation (0.001 * 3 for ATTN_STATIC) }
+  Check(SameValue(Sounds.SpatialSound('sound/items/pkup.wav', ATTN_NORM).MaxDistance, 2080, 0.01), 'ATTN_NORM silent at 2080 units');
+  Check(SameValue(Sounds.SpatialSound('sound/items/pkup.wav', ATTN_IDLE).MaxDistance, 1080, 0.01), 'ATTN_IDLE silent at 1080 units');
+  Check(SameValue(Sounds.SpatialSound('sound/items/pkup.wav', ATTN_STATIC).MaxDistance, 80 + 1000 / 3, 0.01), 'ATTN_STATIC silent at 413 units');
+  Check(SameValue(Sounds.SpatialSound('sound/items/pkup.wav', ATTN_NORM).ReferenceDistance, 80), 'full volume within 80 units');
+
+  { Loop mixer: one voice per distinct sound, at its loudest emitter;
+    emitters beyond loop attenuation (413 units) are silent }
+  Root := TCastleRootTransform.Create(nil);
+  try
+    Sounds.WorldParent := Root;
+    Sounds.BeginLoops(TVector3.Zero);
+    Sounds.AddLoop('sound/world/amb7.wav', Vector3(300, 0, 0));
+    Sounds.AddLoop('sound/world/amb7.wav', Vector3(0, 0, 100));
+    Sounds.AddLoop('sound/world/amb8.wav', Vector3(1000, 0, 0));
+    Sounds.EndLoops;
+    CheckEquals(1, Sounds.PlayingLoopCount, 'one loop voice for two emitters, none out of range');
+    Check(Sounds.LoopPosition('sound/world/amb7.wav', Pos) and TVector3.Equals(Pos, Vector3(0, 0, 100)),
+      'loop voice plays at the loudest (nearest) emitter');
+    Sounds.BeginLoops(Vector3(1000, 0, 0));
+    Sounds.AddLoop('sound/world/amb7.wav', Vector3(300, 0, 0));
+    Sounds.AddLoop('sound/world/amb8.wav', Vector3(1000, 0, 0));
+    Sounds.EndLoops;
+    Check(not Sounds.LoopPosition('sound/world/amb7.wav', Pos) and Sounds.LoopPosition('sound/world/amb8.wav', Pos),
+      'loops follow the listener');
+    Sounds.BeginLoops(TVector3.Zero);
+    Sounds.EndLoops;
+    CheckEquals(0, Sounds.PlayingLoopCount, 'loops stop when nothing requests them');
+    Sounds.ClearLoops;
+  finally
+    Sounds.WorldParent := nil;
+    Root.Free;
+  end;
+end;
+
 const
   PakPath = '../data/paks/quake2_demo.pak';
 begin
@@ -560,6 +601,7 @@ begin
   TestCoordinates;
   TestDesigns;
   TestSettings;
+  TestSounds;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then

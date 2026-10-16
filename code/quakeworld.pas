@@ -115,14 +115,13 @@ type
     procedure SetSurfaceLights;
     procedure CullTransform(const T: TCastleTransform; const Box: TBox3D);
     procedure Explode(const Pos: TVector3; const Damage: Integer; const Radius: Single;
-      const FromPlayer: Boolean);
+      const FromPlayer: Boolean; const ExplosionSound: Boolean = True);
     function MonsterByTransform(const T: TCastleTransform): TQuakeMonster;
     function MoverByTransform(const T: TCastleTransform): TQuakeMover;
     procedure UseEntity(const Ent: TQuakeEntity);
     function TimerInterval(const Ent: TQuakeEntity): Single;
     function EntityMoveDir(const Ent: TQuakeEntity): TVector3;
     { A transform at the entity origin, for positional one-shot sounds }
-    function FPlayerTransformFor(const Ent: TQuakeEntity): TCastleTransform;
     procedure ActivateProp(const Prop: TQuakeProp);
     procedure DamageProp(const Prop: TQuakeProp; const Damage: Integer);
     function PropByTransform(const T: TCastleTransform): TQuakeProp;
@@ -148,6 +147,11 @@ type
       and lasers outside the PVS / connected areas of the geometry's last
       UpdateVisibility. }
     procedure CullEntities;
+    { Give the loop mixer the looping sounds heard from Listener: speakers
+      that are on and movers that move, if in the PVS (Quake 2 sends
+      entity loop sounds only for entities in the client frame). Call after
+      the geometry's UpdateVisibility. }
+    procedure UpdateLoopSounds(const Listener: TVector3);
     { Entities shown / considered by the last CullEntities }
     property VisibleEntities: Integer read FVisibleEntities;
     property CulledEntities: Integer read FCulledEntities;
@@ -252,6 +256,7 @@ begin
   inherited Create;
   FItems := AItems;
   FMap := AMap;
+  Sounds.WorldParent := AItems;
   FPickups := TQuakePickupList.Create(True);
   FMonsters := TQuakeMonsterList.Create(True);
   FProjectiles := TQuakeProjectileList.Create(True);
@@ -271,6 +276,8 @@ end;
 
 destructor TQuakeWorld.Destroy;
 begin
+  Sounds.ClearLoops;
+  Sounds.WorldParent := nil;
   ClearLevel;
   FreeAndNil(FWeaponModel);
   FreeAndNil(FWeaponTransform);
@@ -786,7 +793,7 @@ begin
       if not GiveItem(P.Def) then
         Continue;
       P.Collected := True;
-      Sounds.Play(P.Def^.Sound);
+      Sounds.Play(P.Def^.Sound, 1, chItem);
       if FHud <> nil then
         FHud.ShowPickup(P.Def^.Icon, P.Def^.Name);
       { Picked items can fire targets too }
@@ -937,7 +944,7 @@ begin
     Particles.SpawnSplash(QuakeToCge(Ent.Origin), EntityMoveDir(Ent), Ent.Sounds,
       Ent.GetInt('count', 32));
     if Ent.Sounds = 1 then
-      Sounds.PlayAt('sound/world/spark' + IntToStr(5 + Random(3)) + '.wav', FPlayerTransformFor(Ent));
+      Sounds.PlayAtPoint('sound/world/spark' + IntToStr(5 + Random(3)) + '.wav', QuakeToCge(Ent.Origin));
   end else
   if CName = 'target_laser' then
   begin
@@ -1067,17 +1074,6 @@ begin
   Yaw := DegToRad(A.Y);
   { Quake pitch is positive looking down }
   Result := Vector3(Cos(Yaw) * Cos(Pitch), -Sin(Pitch), -Sin(Yaw) * Cos(Pitch));
-end;
-
-function TQuakeWorld.FPlayerTransformFor(const Ent: TQuakeEntity): TCastleTransform;
-var
-  Speaker: TQuakeSpeaker;
-begin
-  { Reuse any speaker transform close to the entity, else play at the map root }
-  for Speaker in FSpeakers do
-    if PointsDistance(Speaker.Transform.Translation, QuakeToCge(Ent.Origin)) < 64 then
-      Exit(Speaker.Transform);
-  Result := FMap;
 end;
 
 function TQuakeWorld.PropByTransform(const T: TCastleTransform): TQuakeProp;
@@ -1472,7 +1468,7 @@ begin
   SpawnProjectile(pkHandGrenade, Origin + Dir * 16, (Dir + Vector3(0, 0.1, 0)).Normalize,
     MinSpeed + Held * (MaxSpeed - MinSpeed) / GrenadeTimer, 125 * DamageMultiplier, True);
   FProjectiles.Last.Life := Max(0.1, FGrenadeFuse);
-  Sounds.Play('sound/weapons/hgrent1a.wav');
+  Sounds.Play('sound/weapons/hgrent1a.wav', 1, chWeapon);
   PlayWeaponAnim('throw', False);
   FWeaponCooldown := WeaponDefs[11].Cooldown;
 end;
@@ -1530,6 +1526,29 @@ begin
     Inc(FVisibleEntities)
   else
     Inc(FCulledEntities);
+end;
+
+procedure TQuakeWorld.UpdateLoopSounds(const Listener: TVector3);
+var
+  Speaker: TQuakeSpeaker;
+  Mover: TQuakeMover;
+  Pos: TVector3;
+begin
+  Sounds.BeginLoops(Listener);
+  if FGeometry <> nil then
+  begin
+    for Speaker in FSpeakers do
+      if Speaker.Playing then
+      begin
+        Pos := Speaker.Transform.Translation;
+        if (Speaker.Attenuation <= 0) or FGeometry.BoxVisible(Box3DAroundPoint(Pos, 8)) then
+          Sounds.AddLoop(Speaker.Path, Pos, Speaker.Source.Volume, Speaker.Attenuation);
+      end;
+    for Mover in FGeometry.Movers do
+      if Mover.MoveSoundOn and Mover.Transform.Exists and FGeometry.BoxVisible(Mover.WorldBox) then
+        Sounds.AddLoop(Mover.MoveSound, Mover.Center);
+  end;
+  Sounds.EndLoops;
 end;
 
 procedure TQuakeWorld.CullEntities;
@@ -1600,7 +1619,7 @@ begin
 end;
 
 procedure TQuakeWorld.Explode(const Pos: TVector3; const Damage: Integer; const Radius: Single;
-  const FromPlayer: Boolean);
+  const FromPlayer: Boolean; const ExplosionSound: Boolean);
 var
   M: TQuakeMonster;
   Mover: TQuakeMover;
@@ -1609,7 +1628,9 @@ var
   Points: Integer;
 begin
   Particles.SpawnExplosion(Pos);
-  Sounds.Play('sound/weapons/rocklx1a.wav');
+  { Heard from where it happens (Quake 2 TE_ROCKET_EXPLOSION, ATTN_NORM) }
+  if ExplosionSound then
+    Sounds.PlayAtPoint('sound/weapons/rocklx1a.wav', Pos);
   { Quake 2 explosion light: radius 350, orange, fading with the fireball }
   Lighting.AddLight(Pos, 350, Vector3(1, 0.5, 0.5), 0.5);
   if Damage <= 0 then
@@ -1749,13 +1770,13 @@ begin
             begin
               Particles.SpawnBfgExplosion(NewPos);
               Lighting.AddLight(NewPos, 350, Vector3(0, 1, 0), 0.5);
-              Sounds.Play('sound/weapons/bfg__x1b.wav');
-              Explode(NewPos, Proj.SplashDamage * DamageMultiplier, Proj.SplashRadius * 0.3, Proj.FromPlayer);
+              Sounds.PlayAtPoint('sound/weapons/bfg__x1b.wav', NewPos);
+              Explode(NewPos, Proj.SplashDamage * DamageMultiplier, Proj.SplashRadius * 0.3, Proj.FromPlayer, False);
             end;
           else
             begin
               Particles.SpawnBlasterImpact(NewPos, -Dir);
-              Sounds.PlayAt('sound/weapons/lashit.wav', Proj.Transform);
+              Sounds.PlayAtPoint('sound/weapons/lashit.wav', NewPos);
             end;
         end;
         Remove := True;
@@ -1805,7 +1826,7 @@ begin
         if Monster.Def^.Attack = akRail then
         begin
           Particles.SpawnRailTrail(Eye, Target);
-          Sounds.PlayAt('sound/weapons/railgf1a.wav', Monster.Transform);
+          Sounds.PlayAt('sound/weapons/railgf1a.wav', Monster.Transform, 1, 1, chWeapon);
           if Random < Accuracy then
             DamagePlayer(Monster.Def^.Damage, Eye);
         end else
@@ -1859,15 +1880,15 @@ begin
   begin
     FPainSoundTimer := 0.7;
     if FStats.Health < 25 then
-      Sounds.Play('sound/player/male/pain25_1.wav')
+      Sounds.Play('sound/player/male/pain25_1.wav', 1, chVoice)
     else
     if FStats.Health < 50 then
-      Sounds.Play('sound/player/male/pain50_1.wav')
+      Sounds.Play('sound/player/male/pain50_1.wav', 1, chVoice)
     else
     if FStats.Health < 75 then
-      Sounds.Play('sound/player/male/pain75_1.wav')
+      Sounds.Play('sound/player/male/pain75_1.wav', 1, chVoice)
     else
-      Sounds.Play('sound/player/male/pain100_1.wav');
+      Sounds.Play('sound/player/male/pain100_1.wav', 1, chVoice);
   end;
 end;
 
@@ -1876,7 +1897,7 @@ begin
   FDead := True;
   FDeadTimer := 3.0;
   FStats.Health := Min(FStats.Health, 0);
-  Sounds.Play('sound/player/male/death' + IntToStr(1 + Random(4)) + '.wav');
+  Sounds.Play('sound/player/male/death' + IntToStr(1 + Random(4)) + '.wav', 1, chVoice);
   if FHud <> nil then
     FHud.ShowMessage('You died. Restarting level...', 3);
 end;
@@ -2012,7 +2033,7 @@ begin
   Def := WeaponDefs[FStats.CurrentWeapon];
   if (Def.AmmoType <> atNone) and (FStats.Ammo[Def.AmmoType] < Def.AmmoPerShot) then
   begin
-    Sounds.Play('sound/weapons/noammo.wav');
+    Sounds.Play('sound/weapons/noammo.wav', 1, chVoice);
     FWeaponCooldown := 0.5;
     if FHud <> nil then
       FHud.ShowMessage('No ammo for ' + Def.Name, 1.5);
@@ -2026,7 +2047,7 @@ begin
   begin
     FGrenadeCooking := True;
     FGrenadeFuse := 3.0;
-    Sounds.Play('sound/weapons/hgrena1b.wav');
+    Sounds.Play('sound/weapons/hgrena1b.wav', 1, chWeapon);
     PlayWeaponAnim('throw', False);
     Exit;
   end;
@@ -2037,11 +2058,11 @@ begin
   MuzzlePos := Origin + Dir * 16;
   Lighting.TriggerMuzzleFlash(MuzzlePos);
   if FStats.CurrentWeapon in [4, 5] then
-    Sounds.Play(Format('sound/weapons/machgf%db.wav', [1 + Random(5)]))
+    Sounds.Play(Format('sound/weapons/machgf%db.wav', [1 + Random(5)]), 1, chWeapon)
   else
-    Sounds.Play(Def.Sound);
+    Sounds.Play(Def.Sound, 1, chWeapon);
   if Mult > 1 then
-    Sounds.Play('sound/items/damage3.wav');
+    Sounds.Play('sound/items/damage3.wav', 1, chItem);
   if FStats.CurrentWeapon = 5 then
     PlayWeaponAnim('pow', True)
   else
@@ -2496,17 +2517,17 @@ begin
   if (FLastWaterLevel = 0) and (Level > 0) then
   begin
     if (WType and CONTENTS_LAVA) <> 0 then
-      Sounds.Play('sound/player/lava_in.wav')
+      Sounds.Play('sound/player/lava_in.wav', 1, chBody)
     else
-      Sounds.Play('sound/player/watr_in.wav');
+      Sounds.Play('sound/player/watr_in.wav', 1, chBody);
   end else
   if (FLastWaterLevel > 0) and (Level = 0) then
-    Sounds.Play('sound/player/watr_out.wav')
+    Sounds.Play('sound/player/watr_out.wav', 1, chBody)
   else
   if (FLastWaterLevel < 3) and (Level = 3) then
-    Sounds.Play('sound/player/watr_un.wav');
+    Sounds.Play('sound/player/watr_un.wav', 1, chBody);
   if (FLastWaterLevel = 3) and (Level < 3) and (FAirFinished < FTime + 7) then
-    Sounds.Play('sound/player/gasp1.wav');
+    Sounds.Play('sound/player/gasp1.wav', 1, chVoice);
 
   { Drowning: 12 seconds of air, then 2 damage per second, increasing }
   if Level < 3 then
@@ -2549,9 +2570,9 @@ end;
 procedure TQuakeWorld.PlayerFallDamage(const Damage: Integer);
 begin
   if Damage >= 10 then
-    Sounds.Play('sound/player/male/fall1.wav')
+    Sounds.Play('sound/player/male/fall1.wav', 1, chVoice)
   else
-    Sounds.Play('sound/player/male/fall2.wav');
+    Sounds.Play('sound/player/male/fall2.wav', 1, chVoice);
   DamagePlayer(Damage, FPlayerPos);
 end;
 

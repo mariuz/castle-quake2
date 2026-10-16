@@ -224,6 +224,8 @@ type
     FNoise: String;
     FLooped: Boolean;
     FAttenuation: Single;
+    FPath: String;
+    FLoopOn: Boolean;
     FSound: TCastleSound;
     function GetPlaying: Boolean;
   public
@@ -234,6 +236,8 @@ type
     destructor Destroy; override;
     { Toggle a looped speaker, or play a one-shot one }
     procedure Activate;
+    { Sound path, e.g. sound/world/amb10.wav }
+    property Path: String read FPath;
   published
     property Noise: String read FNoise;
     property Looped: Boolean read FLooped;
@@ -717,7 +721,7 @@ begin
   if Alerted or not IsAlive or NoTarget then
     Exit;
   Alerted := True;
-  Sounds.PlayAt(MonsterSound(Def, Def^.SightSound), Transform);
+  Sounds.PlayAt(MonsterSound(Def, Def^.SightSound), Transform, 1, 1, chVoice);
   { Quake 2 FoundTarget: stop patrolling, run to the combat point first }
   MoveTarget := nil;
   if (CombatTarget <> '') and Assigned(OnPickTarget) then
@@ -875,7 +879,7 @@ begin
     if (Health < -40) and not Gibbed then
     begin
       Gibbed := True;
-      Sounds.PlayAt('sound/misc/udeath.wav', Transform);
+      Sounds.PlayAt('sound/misc/udeath.wav', Transform, 1, 1, chBody);
       Particles.SpawnGibs(Transform.Translation);
       Transform.Exists := False;
     end;
@@ -885,13 +889,13 @@ begin
   Health := Health - (Dmg - AbsorbPowerArmor(Dmg));
   if Health <= 0 then
   begin
-    Sounds.PlayAt(MonsterSound(Def, Def^.DeathSound), Transform);
+    Sounds.PlayAt(MonsterSound(Def, Def^.DeathSound), Transform, 1, 1, chVoice);
     if Model <> nil then
       Model.Scene.Collides := False;
     if Health < -40 then
     begin
       Gibbed := True;
-      Sounds.PlayAt('sound/misc/udeath.wav', Transform);
+      Sounds.PlayAt('sound/misc/udeath.wav', Transform, 1, 1, chBody);
       Particles.SpawnGibs(Transform.Translation);
       Transform.Exists := False;
       State := msDead;
@@ -905,7 +909,7 @@ begin
   { Quake 2 monsters don't flinch on every hit, and never on nightmare }
   if (State <> msPain) and (GameSkill < 3) and (Random < 0.6) then
   begin
-    Sounds.PlayAt(MonsterSound(Def, Def^.PainSound), Transform);
+    Sounds.PlayAt(MonsterSound(Def, Def^.PainSound), Transform, 1, 1, chVoice);
     SetState(msPain);
   end;
 end;
@@ -998,7 +1002,7 @@ begin
       begin
         FSearched := True;
         if MonsterSearchSound(Def) <> '' then
-          Sounds.PlayAt(MonsterSearchSound(Def), Transform, 1, 2);
+          Sounds.PlayAt(MonsterSearchSound(Def), Transform, 1, ATTN_IDLE, chVoice);
       end;
     end;
     if (not Alerted) and CanSeePlayer and (Dist < 1200) and not NoTarget then
@@ -1013,7 +1017,7 @@ begin
     begin
       FIdleTimer := 5 + Random * 15;
       if MonsterIdleSound(Def) <> '' then
-        Sounds.PlayAt(MonsterIdleSound(Def), Transform, 1, 2);
+        Sounds.PlayAt(MonsterIdleSound(Def), Transform, 1, ATTN_IDLE, chVoice);
     end;
     if MoveTarget <> nil then
       Patrol(SecondsPassed)
@@ -1044,7 +1048,7 @@ begin
        (StateTimer > 0.8)) then
     begin
       FAttackFired := True;
-      Sounds.PlayAt(MonsterSound(Def, Def^.AttackSound), Transform);
+      Sounds.PlayAt(MonsterSound(Def, Def^.AttackSound), Transform, 1, 1, chWeapon);
       if Assigned(OnAttack) then
         OnAttack(Self);
     end;
@@ -1205,7 +1209,7 @@ const
   LOOPED_ON = 1;
   LOOPED_OFF = 2;
 var
-  Path: String;
+  SoundPath: String;
 begin
   inherited Create(nil);
   Entity := AEntity;
@@ -1216,11 +1220,12 @@ begin
   if FAttenuation = 0 then
     FAttenuation := 1;
 
-  Path := FNoise;
-  if ExtractFileExt(Path) = '' then
-    Path := Path + '.wav';
-  Path := 'sound/' + Path;
-  FSound := Sounds.SpatialSound(Path, FAttenuation);
+  SoundPath := FNoise;
+  if ExtractFileExt(SoundPath) = '' then
+    SoundPath := SoundPath + '.wav';
+  SoundPath := 'sound/' + SoundPath;
+  FPath := SoundPath;
+  FSound := Sounds.SpatialSound(SoundPath, FAttenuation);
 
   Transform := TCastleTransform.Create(nil);
   Transform.Name := Format('Speaker%.3d', [NextEntityNumber]);
@@ -1230,11 +1235,9 @@ begin
   Source.Volume := AEntity.GetFloat('volume', 1);
   Transform.AddBehavior(Source);
   Transform.AddBehavior(Self);
-  if FLooped and (FSound <> nil) then
-  begin
-    Source.SoundPlaying := (AEntity.SpawnFlags and LOOPED_ON) <> 0;
-    Source.Sound := FSound;
-  end;
+  { Looped speakers are played by the world through the loop mixer
+    (Sounds.AddLoop), only one source per distinct sound }
+  FLoopOn := FLooped and ((AEntity.SpawnFlags and LOOPED_ON) <> 0);
   AParent.Add(Transform);
 end;
 
@@ -1250,7 +1253,7 @@ end;
 
 function TQuakeSpeaker.GetPlaying: Boolean;
 begin
-  Result := FLooped and (FSound <> nil) and Source.SoundPlaying;
+  Result := FLooped and (FSound <> nil) and FLoopOn;
 end;
 
 procedure TQuakeSpeaker.Activate;
@@ -1258,7 +1261,7 @@ begin
   if FSound = nil then
     Exit;
   if FLooped then
-    Source.SoundPlaying := not Source.SoundPlaying
+    FLoopOn := not FLoopOn
   else
     Source.Play(FSound);
 end;
