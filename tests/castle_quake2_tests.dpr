@@ -509,6 +509,7 @@ begin
     S.Skill := 3;
     S.MouseSensitivity := 1.75;
     S.InvertMouse := True;
+    S.ViewBob := False;
     S.FieldOfView := 110;
     S.MusicVolume := 30;
     Path := GetTempDir + 'castle_quake2_test_settings.xml';
@@ -521,7 +522,7 @@ begin
     finally
       Config.Free;
     end;
-    Check((S.Skill = 3) and SameValue(S.MouseSensitivity, 1.75) and S.InvertMouse and
+    Check((S.Skill = 3) and SameValue(S.MouseSensitivity, 1.75) and S.InvertMouse and not S.ViewBob and
       (S.FieldOfView = 110) and (S.MusicVolume = 30) and (S.SoundVolume = 100),
       'settings survive save / load');
     Check((S.Keys[qaForward] = keyA) and (S.Keys[qaMoveLeft] = keyW) and (S.Keys[qaFire] = keyCtrl),

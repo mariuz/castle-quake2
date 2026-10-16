@@ -8,7 +8,7 @@ interface
 
 uses
   SysUtils, Classes, Math, Generics.Collections, fpjson, jsonparser,
-  CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes,
+  CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions,
   QuakePak, QuakeBsp, QuakeGeometry, QuakeMap, QuakeMd2, QuakePlayer, QuakeLight, QuakeSound, QuakeHud, QuakeSettings,
   QuakeParticles, QuakeEntities;
 
@@ -175,6 +175,8 @@ type
 
     { Attach the view weapon to the camera }
     procedure AttachWeaponToCamera(const Camera: TCastleTransform);
+    { View weapon bob and lag: degrees, X pitch down, Y yaw left, Z roll }
+    procedure SetGunAngles(const Angles: TVector3);
 
     { Called by the view after it moved the camera to a teleport destination }
     procedure TeleportDone;
@@ -336,6 +338,19 @@ begin
   Camera.Add(FWeaponTransform);
   { Quake models face +X; the camera looks along -Z }
   FWeaponTransform.Rotation := Vector4(0, 1, 0, Pi / 2);
+end;
+
+procedure TQuakeWorld.SetGunAngles(const Angles: TVector3);
+var
+  Q: TQuaternion;
+begin
+  { Camera space: pitch around +X (negative = down), yaw around +Y, roll
+    around -Z (the view axis); then the base turn of the model (+X to -Z) }
+  Q := QuatFromAxisAngle(Vector3(1, 0, 0), -DegToRad(Angles.X)) *
+    QuatFromAxisAngle(Vector3(0, 1, 0), DegToRad(Angles.Y)) *
+    QuatFromAxisAngle(Vector3(0, 0, -1), DegToRad(Angles.Z)) *
+    QuatFromAxisAngle(Vector3(0, 1, 0), Pi / 2);
+  FWeaponTransform.Rotation := Q.ToAxisAngle;
 end;
 
 procedure TQuakeWorld.UpdateWeaponModel;
@@ -1869,6 +1884,8 @@ begin
   FStats.Health := FStats.Health - Take;
   if FHud <> nil then
     FHud.FlashDamage(Amount);
+  if FPlayer <> nil then
+    FPlayer.DamageKick(Amount, FromPos, FStats.Health);
 
   if FStats.Health <= 0 then
   begin

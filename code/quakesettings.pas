@@ -21,6 +21,8 @@ type
     { Multiplier of CGE's default mouse look sensitivity }
     MouseSensitivity: Single;
     InvertMouse: Boolean;
+    { View and weapon bob, landing dip, damage kicks }
+    ViewBob: Boolean;
     { Horizontal field of view in degrees (Quake 2 default 90) }
     FieldOfView: Integer;
     { Percent }
@@ -107,6 +109,7 @@ begin
   Skill := 1;
   MouseSensitivity := 1;
   InvertMouse := False;
+  ViewBob := True;
   FieldOfView := 90;
   SoundVolume := 100;
   MusicVolume := 70;
@@ -132,6 +135,7 @@ begin
   Skill := EnsureRange(C.GetValue('quake2/skill', 1), 0, 3);
   MouseSensitivity := EnsureRange(C.GetFloat('quake2/mouse_sensitivity', 1), 0.1, 5);
   InvertMouse := C.GetValue('quake2/invert_mouse', False);
+  ViewBob := C.GetValue('quake2/view_bob', True);
   FieldOfView := EnsureRange(C.GetValue('quake2/fov', 90), 60, 130);
   SoundVolume := EnsureRange(C.GetValue('quake2/sound_volume', 100), 0, 100);
   MusicVolume := EnsureRange(C.GetValue('quake2/music_volume', 70), 0, 100);
@@ -155,6 +159,7 @@ begin
   C.SetDeleteValue('quake2/skill', Skill, 1);
   C.SetDeleteFloat('quake2/mouse_sensitivity', MouseSensitivity, 1);
   C.SetDeleteValue('quake2/invert_mouse', InvertMouse, False);
+  C.SetDeleteValue('quake2/view_bob', ViewBob, True);
   C.SetDeleteValue('quake2/fov', FieldOfView, 90);
   C.SetDeleteValue('quake2/sound_volume', SoundVolume, 100);
   C.SetDeleteValue('quake2/music_volume', MusicVolume, 70);

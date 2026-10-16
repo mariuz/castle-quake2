@@ -76,7 +76,7 @@ The project follows the structure of CGE's own templates (`3d_fps_game`) and the
 | **F12** | Screenshot |
 | **~** | Console (`map`, `maps`, `save`, `load`, `god`, `give all`, `give quad`, `give invulnerability`, `noclip`, `notarget`, `kill`, `fps`, `markers`, `novis`, `skill`, `lightstyle`, `quit`, `help`) |
 | **F8** (debug build) | CGE inspector: hierarchy and live properties |
-| **Escape** | Menu: *Single Player* (choose Easy / Medium / Hard / Nightmare), *Map Warp*, *Options* (camera, mouse sensitivity, invert mouse, field of view, sound and music volume, *Controls* to rebind keys) |
+| **Escape** | Menu: *Single Player* (choose Easy / Medium / Hard / Nightmare), *Map Warp*, *Options* (camera, mouse sensitivity, invert mouse, view bob, field of view, sound and music volume, *Controls* to rebind keys) |
 
 The movement, jump, crouch, use, fire, grenade and help keys above are the defaults; rebind them in *Options → Controls*. Options are saved with CGE's `UserConfig` and restored on the next start.
 

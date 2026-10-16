@@ -39,6 +39,24 @@ type
     FOnLadder: Boolean;
     FBoxCollision: Boolean;
     FHalfWidth: Single;
+    { View effects (Quake 2 SV_CalcViewOffset / SV_CalcGunOffset), applied to
+      the camera after the move and removed before the next one, so they
+      never change where the player is }
+    FViewBob: Boolean;
+    FAppliedOffset: TVector3;
+    FAppliedPitch, FAppliedRoll: Single; { degrees }
+    FBobTime: Single;
+    FFallTime, FFallValue: Single;
+    FDamageTime, FDamagePitch, FDamageRoll: Single;
+    FGunAngles: TVector3;
+    FHasLastAngles: Boolean;
+    FLastYaw, FLastPitch, FYawRate, FPitchRate: Single;
+    { Move the player (the pmove part of Update) }
+    procedure Move(const SecondsPassed: Single);
+    procedure StartFallKick(const Delta: Single);
+    procedure UpdateViewEffects(const SecondsPassed: Single);
+    { Base view: the camera view without the applied effects }
+    procedure UndoEffects(var Dir, Up: TVector3);
     procedure CategorizeWater(const Pos: TVector3);
     { A ladder brush right in front of the player (PM_CatagorizePosition's
       ladder trace, done with point contents) }
@@ -70,6 +88,22 @@ type
     procedure Update(const SecondsPassed: Single; var RemoveMe: TRemoveType); override;
     { Forget the velocity (after teleports, level loads, respawn) }
     procedure ResetVelocity;
+    { Restore the camera to the view without effects and forget them (before
+      moving or turning the camera from code: teleports, autotest actions) }
+    procedure ClearViewEffects;
+    { Quake 2 P_DamageFeedback view kick: tilt away from where the damage
+      came from (FromPos in world space), decaying in 0.5 s }
+    procedure DamageKick(const Amount: Integer; const FromPos: TVector3; const Health: Integer);
+    { Eye position and view direction without bob and kicks: aim and use
+      with these, like Quake 2 uses viewangles, not the kicked view }
+    function AimPosition: TVector3;
+    function AimDirection: TVector3;
+    { Weapon angles in degrees (X pitch down, Y yaw left, Z roll) for the
+      view weapon: bob while walking and lag behind turning }
+    property GunAngles: TVector3 read FGunAngles;
+    { View pitch (down) and roll in degrees added this frame }
+    property ViewKickPitch: Single read FAppliedPitch;
+    property ViewKickRoll: Single read FAppliedRoll;
     { Throw the player (trigger_push, explosions) }
     procedure AddVelocity(const V: TVector3);
     { Pmove velocity in CGE units per second }
@@ -109,6 +143,9 @@ type
     property HalfWidth: Single read FHalfWidth write FHalfWidth;
     property StandEyeHeight: Single read FEyeHeight write FEyeHeight;
     property CrouchEyeHeight: Single read FCrouchEyeHeight write FCrouchEyeHeight;
+    { View and weapon bob, landing dip and damage kicks (Quake 2's bob_up,
+      bob_pitch, bob_roll, run_pitch, run_roll) }
+    property ViewBob: Boolean read FViewBob write FViewBob default True;
   end;
 
 implementation
@@ -121,6 +158,7 @@ begin
   inherited Create(AOwner);
   { Quake 2 defaults (pm_maxspeed, pm_duckspeed, pm_accelerate, pm_friction...) }
   FActive := True;
+  FViewBob := True;
   FRunSpeed := 300;
   FCrouchSpeed := 100;
   FAccelerate := 10;
@@ -219,6 +257,14 @@ end;
 procedure TQuakePlayerMovement.ResetVelocity;
 begin
   FVelocity := TVector3.Zero;
+  { The camera was just placed: its view has no effects applied }
+  FAppliedOffset := TVector3.Zero;
+  FAppliedPitch := 0;
+  FAppliedRoll := 0;
+  FFallTime := 0;
+  FDamageTime := 0;
+  FBobTime := 0;
+  FHasLastAngles := False;
 end;
 
 procedure TQuakePlayerMovement.AddVelocity(const V: TVector3);
@@ -455,15 +501,22 @@ begin
 end;
 
 procedure TQuakePlayerMovement.Update(const SecondsPassed: Single; var RemoveMe: TRemoveType);
+begin
+  inherited Update(SecondsPassed, RemoveMe);
+  if (not FActive) or Suspended or (Parent = nil) or (World = nil) or (SecondsPassed <= 0) then
+    Exit;
+  ClearViewEffects;
+  Move(SecondsPassed);
+  UpdateViewEffects(SecondsPassed);
+end;
+
+procedure TQuakePlayerMovement.Move(const SecondsPassed: Single);
 var
   Pos, Forward, Right, WishVel, WishDir, NewPos: TVector3;
   WishSpeed, Above, Dt, FallSpeed, Delta: Single;
   Dir: TVector3;
   WasOnGround: Boolean;
 begin
-  inherited Update(SecondsPassed, RemoveMe);
-  if (not FActive) or Suspended or (Parent = nil) or (World = nil) or (SecondsPassed <= 0) then
-    Exit;
   { Large steps (loading hitches) would tunnel through floors }
   Dt := Min(SecondsPassed, 0.05);
   Pos := Parent.Translation;
@@ -573,6 +626,7 @@ begin
       FOnGround := True;
       { P_FallingDamage: delta = speed^2 * 0.0001 }
       Delta := Sqr(FallSpeed / 10) * 0.01;
+      StartFallKick(Delta);
       if (Delta > 30) and Assigned(FOnFallDamage) then
         FOnFallDamage(Max(1, Round((Delta - 30) / 2)))
       else
@@ -591,6 +645,220 @@ begin
   end;
 
   Parent.Translation := NewPos;
+end;
+
+procedure TQuakePlayerMovement.StartFallKick(const Delta: Single);
+begin
+  { P_FallingDamage: soft landings (delta < 15) only make a footstep }
+  if Delta < 15 then
+    Exit;
+  FFallTime := 0.3; { FALL_TIME }
+  FFallValue := Min(40, Delta * 0.5);
+end;
+
+procedure TQuakePlayerMovement.DamageKick(const Amount: Integer; const FromPos: TVector3;
+  const Health: Integer);
+var
+  Kick, Side: Single;
+  ToSource, Dir, Up, Right: TVector3;
+begin
+  if (Amount <= 0) or (Health <= 0) or (Parent = nil) then
+    Exit;
+  { P_DamageFeedback: kick = knockback * 100 / health, at least half the
+    damage, at most 50; split into roll and pitch by the direction }
+  Kick := Min(50, Max(Amount * 100 / Health, Amount * 0.5));
+  ToSource := FromPos - AimPosition;
+  if ToSource.IsZero then
+    Exit;
+  ToSource := ToSource.Normalize;
+  Dir := Parent.Direction;
+  Up := Parent.Up;
+  UndoEffects(Dir, Up);
+  Right := TVector3.CrossProduct(Dir, Up).Normalize;
+  Side := TVector3.DotProduct(ToSource, Right);
+  FDamageRoll := Kick * Side * 0.3;
+  Side := -TVector3.DotProduct(ToSource, Dir);
+  FDamagePitch := Kick * Side * 0.3;
+  FDamageTime := 0.5; { DAMAGE_TIME }
+end;
+
+procedure TQuakePlayerMovement.UndoEffects(var Dir, Up: TVector3);
+var
+  Right: TVector3;
+begin
+  { Effects are applied as pitch around the right axis, then roll around the
+    view direction: undo in reverse order }
+  if FAppliedRoll <> 0 then
+    Up := RotatePointAroundAxisRad(-DegToRad(FAppliedRoll), Up, Dir);
+  if FAppliedPitch <> 0 then
+  begin
+    Right := TVector3.CrossProduct(Dir, Up).Normalize;
+    Dir := RotatePointAroundAxisRad(DegToRad(FAppliedPitch), Dir, Right);
+    Up := RotatePointAroundAxisRad(DegToRad(FAppliedPitch), Up, Right);
+  end;
+end;
+
+procedure TQuakePlayerMovement.ClearViewEffects;
+var
+  Dir, Up: TVector3;
+begin
+  if Parent = nil then
+    Exit;
+  if (FAppliedPitch <> 0) or (FAppliedRoll <> 0) then
+  begin
+    Dir := Parent.Direction;
+    Up := Parent.Up;
+    UndoEffects(Dir, Up);
+    Parent.SetView(Dir, Up);
+  end;
+  if not FAppliedOffset.IsPerfectlyZero then
+    Parent.Translation := Parent.Translation - FAppliedOffset;
+  FAppliedOffset := TVector3.Zero;
+  FAppliedPitch := 0;
+  FAppliedRoll := 0;
+end;
+
+function TQuakePlayerMovement.AimPosition: TVector3;
+begin
+  if Parent = nil then
+    Exit(TVector3.Zero);
+  Result := Parent.Translation - FAppliedOffset;
+end;
+
+function TQuakePlayerMovement.AimDirection: TVector3;
+var
+  Up: TVector3;
+begin
+  if Parent = nil then
+    Exit(Vector3(0, 0, -1));
+  Result := Parent.Direction;
+  Up := Parent.Up;
+  UndoEffects(Result, Up);
+end;
+
+procedure TQuakePlayerMovement.UpdateViewEffects(const SecondsPassed: Single);
+const
+  BobUp = 0.005;
+  BobPitch = 0.002;
+  BobRoll = 0.002;
+  RunPitch = 0.002;
+  RunRoll = 0.005;
+var
+  XYSpeed, BobMove, BobFracSin, Bob, Ratio, Delta, Pitch, Roll, Yaw, ViewPitch, Smooth: Single;
+  BobOdd: Boolean;
+  Dir, Up, Right, Flat, Offset: TVector3;
+begin
+  { Quake 2 runs this every 0.1 s server frame: rates below are per second }
+  XYSpeed := Sqrt(Sqr(FVelocity.X) + Sqr(FVelocity.Z));
+  if (XYSpeed < 5) or FNoclip then
+    FBobTime := 0
+  else
+  if FOnGround or FOnLadder then
+  begin
+    if FCrouched then
+      BobMove := 0.0625
+    else
+    if XYSpeed > 210 then
+      BobMove := 0.25
+    else
+    if XYSpeed > 100 then
+      BobMove := 0.125
+    else
+      BobMove := 0.0625;
+    FBobTime := FBobTime + BobMove * 10 * SecondsPassed;
+  end;
+  BobFracSin := Abs(Sin(FBobTime * Pi));
+  BobOdd := Odd(Trunc(FBobTime));
+
+  FFallTime := Max(0, FFallTime - SecondsPassed);
+  FDamageTime := Max(0, FDamageTime - SecondsPassed);
+
+  { Base view this frame }
+  Dir := Parent.Direction;
+  Up := Parent.Up;
+  Right := TVector3.CrossProduct(Dir, Up).Normalize;
+  Flat := Vector3(Dir.X, 0, Dir.Z);
+  if not Flat.IsZero then
+    Flat := Flat.Normalize;
+
+  Pitch := 0;
+  Roll := 0;
+  Offset := TVector3.Zero;
+  if FViewBob and not FNoclip then
+  begin
+    { Damage and fall kicks }
+    Ratio := FDamageTime / 0.5;
+    Pitch := Pitch + Ratio * FDamagePitch;
+    Roll := Roll + Ratio * FDamageRoll;
+    Ratio := FFallTime / 0.3;
+    Pitch := Pitch + Ratio * FFallValue;
+    { Running tilts the view }
+    Pitch := Pitch + TVector3.DotProduct(FVelocity, Flat) * RunPitch;
+    Roll := Roll + TVector3.DotProduct(FVelocity, Right) * RunRoll;
+    { Bob }
+    Delta := BobFracSin * BobPitch * XYSpeed;
+    if FCrouched then
+      Delta := Delta * 6;
+    Pitch := Pitch + Delta;
+    Delta := BobFracSin * BobRoll * XYSpeed;
+    if FCrouched then
+      Delta := Delta * 6;
+    if BobOdd then
+      Delta := -Delta;
+    Roll := Roll + Delta;
+    { Eye height: bob up to 6 units, dip on landing }
+    Bob := Min(6, BobFracSin * XYSpeed * BobUp);
+    Offset.Y := Bob - Ratio * FFallValue * 0.4;
+  end;
+
+  { Weapon: bob, and lag behind turning (oldviewangles - viewangles) }
+  Yaw := RadToDeg(ArcTan2(-Dir.X, -Dir.Z));
+  ViewPitch := RadToDeg(ArcSin(EnsureRange(Dir.Y, -1, 1)));
+  if FHasLastAngles and (SecondsPassed > 0) then
+  begin
+    Delta := Yaw - FLastYaw;
+    if Delta > 180 then
+      Delta := Delta - 360
+    else
+    if Delta < -180 then
+      Delta := Delta + 360;
+    Smooth := Min(1, SecondsPassed / 0.1);
+    FYawRate := FYawRate + (Delta / SecondsPassed - FYawRate) * Smooth;
+    FPitchRate := FPitchRate + ((ViewPitch - FLastPitch) / SecondsPassed - FPitchRate) * Smooth;
+  end;
+  FHasLastAngles := True;
+  FLastYaw := Yaw;
+  FLastPitch := ViewPitch;
+  if FViewBob then
+  begin
+    FGunAngles.Z := XYSpeed * BobFracSin * 0.005;
+    FGunAngles.Y := XYSpeed * BobFracSin * 0.01;
+    if BobOdd then
+    begin
+      FGunAngles.Z := -FGunAngles.Z;
+      FGunAngles.Y := -FGunAngles.Y;
+    end;
+    FGunAngles.X := XYSpeed * BobFracSin * 0.005;
+    { Per 0.1 s frame, clamped to 45 degrees, like Quake 2 }
+    Delta := EnsureRange(-FYawRate * 0.1, -45, 45);
+    FGunAngles.Z := FGunAngles.Z + 0.1 * Delta;
+    FGunAngles.Y := FGunAngles.Y + 0.2 * Delta;
+    FGunAngles.X := FGunAngles.X + 0.2 * EnsureRange(FPitchRate * 0.1, -45, 45);
+  end else
+    FGunAngles := TVector3.Zero;
+
+  { Apply: pitch (positive = down) around the right axis, then roll }
+  if (Pitch <> 0) or (Roll <> 0) then
+  begin
+    Dir := RotatePointAroundAxisRad(-DegToRad(Pitch), Dir, Right);
+    Up := RotatePointAroundAxisRad(-DegToRad(Pitch), Up, Right);
+    Up := RotatePointAroundAxisRad(DegToRad(Roll), Up, Dir);
+    Parent.SetView(Dir, Up);
+  end;
+  Parent.Translation := Parent.Translation + Offset;
+  FAppliedOffset := Offset;
+  FAppliedPitch := Pitch;
+  FAppliedRoll := Roll;
 end;
 
 initialization

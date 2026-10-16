@@ -37,7 +37,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - ~~Options menu~~ — done: mouse sensitivity and invert, field of view, sound and music volume, *Controls* page with key rebinding, saved in `UserConfig` (`QuakeSettings`).
 - ~~Skill selection~~ — done: *Single Player* asks Easy / Medium / Hard / Nightmare; skill filters spawnflags, halves damage on easy, speeds up monster attacks from hard on, no pain flinches on nightmare; `skill` console command; kept in savegames.
 - **Gamepad** through CGE's `Controllers`: move / look sticks, triggers to fire, mapped like Quake 2's joystick cvars; needed for the Android / console-like targets anyway.
-- **Rotating, bobbing items** (`EF_ROTATE`) and weapon bob tied to pmove speed, so items read clearly from a distance.
+- ~~View feel~~ — done: Quake 2's view bob, weapon bob and lag, running tilt, landing dip and damage kicks (`SV_CalcViewOffset`, `SV_CalcGunOffset`, `P_DamageFeedback`), with an *Options → View Bob* switch. Items already rotate (`EF_ROTATE`); Quake 2 items don't bob.
 
 ### 2. Feel of combat
 - **Frame-accurate attacks** for weapons and monsters: fire on the MD2 frame indices the Quake 2 game code uses (its `mframe_t` tables) instead of cooldown timers, so animation and damage line up.
@@ -124,7 +124,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Options menu: sensitivity, invert, FOV, music volume, key bindings (`UserConfig`)
 - [x] Skill selection (easy … nightmare)
 - [ ] Gamepad input (`Controllers`)
-- [ ] Rotating / bobbing items, weapon bob
+- [x] View and weapon bob, weapon lag, landing dip, damage kicks (items already rotate like `EF_ROTATE`; Quake 2 items don't bob)
 - [ ] Frame-accurate weapon and monster attacks
 - [ ] Monster `ambush`, dodging, `trigger_monsterjump`, navigation fallback
 - [ ] Swept player box (`PM_StepSlideMove`)

@@ -141,6 +141,7 @@ begin
   WalkNavigation.InvertVerticalMouseLook := Settings.InvertMouse;
   { The design's camera uses a horizontal field of view, like Quake 2 }
   MainViewport.Camera.Perspective.FieldOfView := DegToRad(Settings.FieldOfView);
+  PlayerMovement.ViewBob := Settings.ViewBob;
   Settings.ApplyAudio;
 end;
 
@@ -329,6 +330,10 @@ begin
     Action := UpperCase(Cmd);
     Param := '';
   end;
+  { Actions that move or turn the camera work on the view without bob / kicks }
+  if (Action = 'T') or (Action = 'A') or (Action = 'P') or (Action = 'M') or (Action = 'N') or
+     (Action = 'I') or (Action = 'D') or (Action = 'R') or (Action = 'G') then
+    PlayerMovement.ClearViewEffects;
 
   if Action = 'W' then { Wait }
   begin
@@ -345,13 +350,13 @@ begin
     CaptureScreenshot(FAutoTestPrefix)
   else
   if Action = 'X' then
-    FWorld.FireWeapon(MainViewport.Camera.Translation, MainViewport.Camera.Direction)
+    FWorld.FireWeapon(PlayerMovement.AimPosition, PlayerMovement.AimDirection)
   else
   if Action = 'H' then { Hold / release fire }
     FDemoFireHeld := not FDemoFireHeld
   else
   if Action = 'U' then
-    FWorld.ActivateUse(MainViewport.Camera.Translation, MainViewport.Camera.Direction)
+    FWorld.ActivateUse(PlayerMovement.AimPosition, PlayerMovement.AimDirection)
   else
   if Action = 'A' then { Absolute yaw (Quake degrees) }
     PlaceCamera(MainViewport.Camera.Translation, StrToFloatDef(Param, 0))
@@ -454,8 +459,10 @@ begin
   else
   if Action = 'V' then { Log mover states }
   begin
-    WritelnLog('Demo', 'Player at %s ladder %s water level %d on ground %s velocity %s health %d', [
-      MainViewport.Camera.Translation.ToString, BoolToStr(PlayerMovement.OnLadder, True), PlayerMovement.WaterLevel,
+    WritelnLog('Demo', 'Player at %s (view offset %s, pitch %.1f roll %.1f, gun %s) ladder %s water level %d on ground %s velocity %s health %d', [
+      PlayerMovement.AimPosition.ToString, (MainViewport.Camera.Translation - PlayerMovement.AimPosition).ToString,
+      PlayerMovement.ViewKickPitch, PlayerMovement.ViewKickRoll,
+      PlayerMovement.GunAngles.ToString, BoolToStr(PlayerMovement.OnLadder, True), PlayerMovement.WaterLevel,
       BoolToStr(PlayerMovement.OnGround, True), PlayerMovement.Velocity.ToString,
       FWorld.Stats.Health]);
     for J := 0 to FWorld.Geometry.Movers.Count - 1 do
@@ -591,10 +598,10 @@ begin
   end;
   Obj := FWorld.SaveState;
   try
-    Obj.Add('camera', TJSONArray.Create([MainViewport.Camera.Translation.X,
-      MainViewport.Camera.Translation.Y, MainViewport.Camera.Translation.Z]));
-    Obj.Add('direction', TJSONArray.Create([MainViewport.Camera.Direction.X,
-      MainViewport.Camera.Direction.Y, MainViewport.Camera.Direction.Z]));
+    Obj.Add('camera', TJSONArray.Create([PlayerMovement.AimPosition.X,
+      PlayerMovement.AimPosition.Y, PlayerMovement.AimPosition.Z]));
+    Obj.Add('direction', TJSONArray.Create([PlayerMovement.AimDirection.X,
+      PlayerMovement.AimDirection.Y, PlayerMovement.AimDirection.Z]));
     Obj.Add('unitLevels', FWorld.UnitLevelsToJson);
     Text := Obj.FormatJSON;
   finally
@@ -714,7 +721,8 @@ begin
   end;
 
   UpdateMovementInput(SecondsPassed);
-  FWorld.Update(SecondsPassed, MainViewport.Camera.Translation, MainViewport.Camera.Direction);
+  FWorld.Update(SecondsPassed, PlayerMovement.AimPosition, PlayerMovement.AimDirection);
+  FWorld.SetGunAngles(PlayerMovement.GunAngles);
   FWorld.Geometry.UpdateVisibility(CgeToQuake(MainViewport.Camera.Translation));
   FWorld.CullEntities;
   FWorld.UpdateLoopSounds(MainViewport.Camera.Translation);
@@ -737,7 +745,7 @@ begin
   if not Console.IsOpen and not Menu.Exists then
     Firing := Firing or Container.Pressed[Settings.Keys[qaFire]] or (buttonLeft in Container.MousePressed);
   if Firing then
-    FWorld.FireWeapon(MainViewport.Camera.Translation, MainViewport.Camera.Direction);
+    FWorld.FireWeapon(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
 end;
 
 function TViewPlay.Press(const Event: TInputPressRelease): Boolean;
@@ -787,7 +795,7 @@ begin
 
   if Event.IsKey(Settings.Keys[qaUse]) then
   begin
-    FWorld.ActivateUse(MainViewport.Camera.Translation, MainViewport.Camera.Direction);
+    FWorld.ActivateUse(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
     Exit(True);
   end;
 

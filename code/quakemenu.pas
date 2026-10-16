@@ -18,7 +18,7 @@ type
   TMenuPage = (smMain, smSkill, smMaps, smOptions, smControls, smShowcase);
 
   { Rows of the Options page }
-  TOptionItem = (oiCamera, oiSensitivity, oiInvert, oiFieldOfView, oiSoundVolume,
+  TOptionItem = (oiCamera, oiSensitivity, oiInvert, oiViewBob, oiFieldOfView, oiSoundVolume,
     oiMusicVolume, oiControls, oiBack);
 
   TOnMenuActionEvent = procedure(const Action: TMenuAction; const Param: String) of object;
@@ -138,6 +138,7 @@ begin
         FItems.Add('Camera View: [' + FCameraModeName + ']');
         FItems.Add(Format('Mouse Sensitivity: [%.2f]', [Settings.MouseSensitivity]));
         FItems.Add('Invert Mouse: [' + OnOff(Settings.InvertMouse) + ']');
+        FItems.Add('View Bob: [' + OnOff(Settings.ViewBob) + ']');
         FItems.Add(Format('Field of View: [%d]', [Settings.FieldOfView]));
         FItems.Add(Format('Sound Volume: [%d%%]', [Settings.SoundVolume]));
         FItems.Add(Format('Music Volume: [%d%%]', [Settings.MusicVolume]));
@@ -189,6 +190,8 @@ begin
       Settings.MouseSensitivity := EnsureRange(Settings.MouseSensitivity + 0.25 * Delta, 0.25, 3);
     oiInvert:
       Settings.InvertMouse := not Settings.InvertMouse;
+    oiViewBob:
+      Settings.ViewBob := not Settings.ViewBob;
     oiFieldOfView:
       Settings.FieldOfView := EnsureRange(Settings.FieldOfView + 5 * Delta, 70, 120);
     oiSoundVolume:
