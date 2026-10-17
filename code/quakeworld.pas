@@ -129,6 +129,14 @@ type
       1000 units that can hear it (PHS, connected areas) wake; AMBUSH ones
       only if they also see it }
     procedure PlayerNoise(const Pos: TVector3);
+    { Quake 2 check_dodge: the monster first hit by a player's shot from
+      Origin along Dir, if it faces the player, may dodge before it arrives
+      (easy: a quarter as often) }
+    procedure CheckDodge(const Origin, Dir: TVector3; const Speed: Single);
+    { WorldRayCast for shots: a ducking monster only has the lower part of
+      its body (Quake 2 ducks to maxs.z = -8, 8 units below the origin), so
+      higher hits pass over it }
+    function ShotRayCast(const Origin, Dir: TVector3; out Dist: Single): TCastleTransform;
     procedure Explode(const Pos: TVector3; const Damage: Integer; const Radius: Single;
       const FromPlayer: Boolean; const ExplosionSound: Boolean = True);
     function MonsterByTransform(const T: TCastleTransform): TQuakeMonster;
@@ -1500,7 +1508,7 @@ begin
   { The railgun pierces through monsters }
   for Pierce := 0 to 4 do
   begin
-    Hit := FItems.WorldRayCast(Start, ShotDir, Dist);
+    Hit := ShotRayCast(Start, ShotDir, Dist);
     if (Hit = nil) or (Dist > 8192) then
     begin
       if Rail then
@@ -1672,6 +1680,9 @@ var
 begin
   Proj := TQuakeProjectile.Create(FItems, Kind, Origin, Dir * Speed, Damage, FromPlayer);
   Proj.Owner := Owner;
+  { fire_blaster, fire_rocket and fire_bfg let the target dodge }
+  if FromPlayer and (Kind in [pkBlasterBolt, pkRocket, pkBfg]) then
+    CheckDodge(Origin, Dir, Speed);
   case Kind of
     pkRocket:
       begin
@@ -1735,6 +1746,52 @@ begin
          M.WouldNotice(S.Transform.Translation - M.Transform.Translation) and
          M.HasLineOfSight(S.EyePos) then
         M.Alert;
+end;
+
+function TQuakeWorld.ShotRayCast(const Origin, Dir: TVector3; out Dist: Single): TCastleTransform;
+var
+  M: TQuakeMonster;
+  Skipped: array of TCastleScene;
+  I: Integer;
+begin
+  Skipped := nil;
+  try
+    repeat
+      Result := FItems.WorldRayCast(Origin, Dir, Dist);
+      M := MonsterByTransform(Result);
+      if (M = nil) or (M.State <> msDuck) or (M.Model = nil) or
+         ((Origin + Dir * Dist).Y <= M.Transform.Translation.Y - 8) or (Length(Skipped) >= 8) then
+        Exit;
+      { Over the ducked monster: look further }
+      WritelnLog('QuakeWorld', 'Shot passes over ducking %s', [M.Transform.Name]);
+      M.Model.Scene.Pickable := False;
+      SetLength(Skipped, Length(Skipped) + 1);
+      Skipped[High(Skipped)] := M.Model.Scene;
+    until False;
+  finally
+    for I := 0 to High(Skipped) do
+      Skipped[I].Pickable := True;
+  end;
+end;
+
+procedure TQuakeWorld.CheckDodge(const Origin, Dir: TVector3; const Speed: Single);
+var
+  Hit: TCastleTransform;
+  Dist: Single;
+  M: TQuakeMonster;
+begin
+  if (Speed <= 0) or ((GameSkill = 0) and (Random > 0.25)) then
+    Exit;
+  Hit := FItems.WorldRayCast(Origin, Dir, Dist);
+  if (Hit = nil) or (Dist > 8192) then
+    Exit;
+  M := MonsterByTransform(Hit);
+  if (M = nil) or not M.IsAlive then
+    Exit;
+  { infront(monster, player) }
+  if TVector3.DotProduct(YawToCgeDir(M.FacingAngle), (FPlayerPos - M.Transform.Translation).Normalize) <= 0.3 then
+    Exit;
+  M.Dodge(Max(0, Dist - 16) / Speed);
 end;
 
 procedure TQuakeWorld.PlayerNoise(const Pos: TVector3);
@@ -1863,7 +1920,7 @@ begin
       Continue;
     end;
 
-    Hit := FItems.WorldRayCast(OldPos, Dir, Dist);
+    Hit := ShotRayCast(OldPos, Dir, Dist);
     M := MonsterByTransform(Hit);
     if (M <> nil) and (M = Proj.Owner) then
       Hit := nil; { don't hit yourself right after firing }

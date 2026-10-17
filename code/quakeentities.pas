@@ -85,7 +85,8 @@ type
 
   TQuakePickupList = specialize TObjectList<TQuakePickup>;
 
-  TMonsterState = (msIdle, msChase, msAttack, msPain, msDying, msDead);
+  { msDuck is last so savegames' state numbers stay valid }
+  TMonsterState = (msIdle, msChase, msAttack, msPain, msDying, msDead, msDuck);
   { Quake 2 POWER_ARMOR_NONE / SCREEN / SHIELD }
   TPowerArmorType = (paNone, paScreen, paShield);
 
@@ -105,6 +106,7 @@ type
     FDetourDir: TVector3;
     FDetourTime: Single;
     FDetourSide: Single;
+    FDuckTime: Single;
     FAttackFired: Boolean;
     FIdleTimer: Single;
     FLostSightTime: Single;
@@ -194,6 +196,12 @@ type
     { TRIGGER_SPAWN: appear now (monster_triggered_spawn) }
     procedure Spawn;
     procedure SetDormant(const Value: Boolean);
+    { A shot of the player will reach it in Eta seconds (Quake 2
+      monsterinfo.dodge, from check_dodge): soldiers, infantry, gunners,
+      medics and iron maidens duck a quarter of the time, so it may fly over }
+    procedure Dodge(const Eta: Single);
+    { Has a dodge (duck) reaction }
+    function CanDodge: Boolean;
     { Owns the scene: used to map ray hits back to monsters }
     function OwnsTransform(const T: TCastleTransform): Boolean;
     { Restore from a savegame: position, facing, health, alive / dead / gibbed }
@@ -685,6 +693,34 @@ begin
     Alert;
 end;
 
+function TQuakeMonster.CanDodge: Boolean;
+begin
+  { The monsters with monsterinfo.dodge in the Quake 2 game code }
+  Result := (Copy(Def^.ClassName, 1, 15) = 'monster_soldier') or
+    (Def^.ClassName = 'monster_infantry') or (Def^.ClassName = 'monster_gunner') or
+    (Def^.ClassName = 'monster_medic') or (Def^.ClassName = 'monster_chick');
+end;
+
+procedure TQuakeMonster.Dodge(const Eta: Single);
+begin
+  if Dormant or not IsAlive or not CanDodge or (Model = nil) or
+     (State in [msPain, msDuck]) then
+    Exit;
+  { soldier_dodge & co.: only a quarter of the time }
+  if Random > 0.25 then
+    Exit;
+  if not Alerted then
+    Alert;
+  { Down until the shot passed (pausetime = eta + 0.3), within reason }
+  FDuckTime := EnsureRange(Eta + 0.3, 0.4, 1.5);
+  if not Model.PlayAnim('duck', False, 5 / FDuckTime) then
+    Exit;
+  State := msDuck;
+  StateTimer := 0;
+  SetWalking(False);
+  WritelnLog('QuakeEntities', '%s ducks (shot in %.2f s)', [Transform.Name, Eta]);
+end;
+
 function TQuakeMonster.WouldNotice(const Delta: TVector3): Boolean;
 var
   Dist: Single;
@@ -776,6 +812,7 @@ begin
         Model.PlayAnim('walk,stand', True, 10);
     msAttack: Model.PlayAnim('attak,attack,atk,fire,shoot,melee,swing,stand', False, 12);
     msPain: Model.PlayAnim('pain', False, 12);
+    msDuck: ; { started by Dodge, which picks the speed }
     msDying: Model.PlayAnim('death,die,dead', False, 10);
     msDead: ;
   end;
@@ -1046,6 +1083,14 @@ begin
     msPain:
       begin
         if (Model = nil) or Model.AnimDone or (StateTimer > 0.6) then
+          SetState(msChase);
+        Exit;
+      end;
+    msDuck:
+      begin
+        { Down (smaller bounding box: shots pass over) until the shot passed }
+        StickToFloor(SecondsPassed);
+        if StateTimer >= FDuckTime then
           SetState(msChase);
         Exit;
       end;
