@@ -13,7 +13,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp, skins, shells (quad, invulnerability, power armor) | `EF_POWERSCREEN` model, glow, rotating / bobbing items. |
 | Sprites | SP2 (BFG, explosions) | SP2 loader, BFG ball / explosion sprites | Other sprite users (bubbles, flashes). |
 | Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove as `TQuakePlayerMovement` with the 32 × 32 × 56 player box | Swept box traces with plane clipping (`PM_StepSlideMove`) instead of overlap tests. |
-| Weapons | 10 + hand grenades, frame-timed | 10 + hand grenades, chaingun spin-up, cooldown timers | Firing on the MD2 frames Quake 2 uses. |
+| Weapons | 10 + hand grenades, frame-timed | 10 + hand grenades on Quake 2's gun frames (`Weapon_Generic`: fire frames, refire, put away / raise, chaingun spin, BFG delay, grenade cook) | — |
 | Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses), skill levels | Sight / chase / attack wind-up / pain / death, patrols, combat points, steering, 19 types tunable in the editor, skill 0–3 | Pathfinding, medic revive, boss behaviour. |
 | Props / effects | Barrels, banners, ships, lasers, splashes, explosion models | All of these used by the demo maps | Gib models with velocities, `misc_viper`, `target_blaster`, `trigger_monsterjump`, `func_killbox`. |
 | Level flow | Units, cross-level triggers, help computer, intermission, savegames | All of these (JSON savegames, including projectiles in flight and pending delayed events) | — |
@@ -40,7 +40,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - ~~View feel~~ — done: Quake 2's view bob, weapon bob and lag, running tilt, landing dip and damage kicks (`SV_CalcViewOffset`, `SV_CalcGunOffset`, `P_DamageFeedback`), with an *Options → View Bob* switch. Items already rotate (`EF_ROTATE`); Quake 2 items don't bob.
 
 ### 2. Feel of combat
-- **Frame-accurate attacks** for weapons and monsters: fire on the MD2 frame indices the Quake 2 game code uses (its `mframe_t` tables) instead of cooldown timers, so animation and damage line up.
+- **Frame-accurate attacks**: ~~player weapons~~ — done (`QuakeWeaponFrames`: Quake 2's `Weapon_Generic` / `Weapon_Grenade` frame state machine, so animation, refire, switching and damage line up). Still to do for monsters: fire on the frames of their `mframe_t` attack tables instead of a wind-up timer.
 - **Monster AI gaps**: ~~ambush, trigger-spawned monsters, Quake 2 sight / hearing rules~~ — done (`FindTarget`: front cone and ranges, `show_hostile`, hearing through the PHS and connected areas, `sight_entity` group wake, TRIGGER_SPAWN monsters stay away until triggered). Dodging done too (`check_dodge`: soldiers, infantry, gunners, medics and iron maidens duck under blaster bolts, rockets and BFG balls). Navigation: monsters that lose the player follow Quake 2's player trail (last sighting, then up to 8 breadcrumbs, `p_trail.c`). Still to do: `trigger_monsterjump` (not in the demo maps); real pathfinding (BSP leaf portals or a walkable grid) only if the trail proves too weak on the full game's maps.
 - **Swept player box** (`PM_StepSlideMove`): trace the 32 × 32 × 56 box against BSP brushes with plane clipping, removing the remaining snag cases on diagonal walls and stairs.
 
@@ -125,7 +125,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Skill selection (easy … nightmare)
 - [x] Gamepad input (`Controllers`; virtual pad in autotests)
 - [x] View and weapon bob, weapon lag, landing dip, damage kicks (items already rotate like `EF_ROTATE`; Quake 2 items don't bob)
-- [ ] Frame-accurate weapon and monster attacks
+- [x] Frame-accurate player weapons (Quake 2 `Weapon_Generic`)
+- [ ] Frame-accurate monster attacks (`mframe_t` tables)
 - [x] Monster perception like Quake 2: ambush, trigger-spawned monsters, front cone, hearing through the PHS, group wake
 - [x] Monster dodging (duck under blaster bolts, rockets, BFG balls)
 - [x] Monster pursuit along the player trail (Quake 2 `p_trail.c`)

@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames;
 
 var
   Passed, Failed: Integer;
@@ -597,6 +597,174 @@ begin
   Check(ClassSupport('misc_viper', NoteText) = csUnsupported, 'misc_viper is unsupported');
 end;
 
+type
+  { Records what the gun asks the world to do }
+  TGunProbe = class
+    Gun: TQuakeGun;
+    AmmoLeft: Integer;
+    Events: array of TGunEvent;
+    Times: array of Single;
+    Shots: array of Integer;
+    procedure OnEvent(const Event: TGunEvent);
+    function OnAmmo(const Slot: Integer): Integer;
+    function Count(const Event: TGunEvent): Integer;
+    function FirstTime(const Event: TGunEvent): Single;
+    { Run for Seconds in 0.01 s steps, holding fire if Hold }
+    procedure Run(const Seconds: Single; const Hold: Boolean);
+  end;
+
+procedure TGunProbe.OnEvent(const Event: TGunEvent);
+begin
+  SetLength(Events, Length(Events) + 1);
+  Events[High(Events)] := Event;
+  SetLength(Times, Length(Times) + 1);
+  Times[High(Times)] := Gun.Time;
+  SetLength(Shots, Length(Shots) + 1);
+  Shots[High(Shots)] := Gun.Shots;
+  if Event = geFire then
+    Dec(AmmoLeft, Gun.Shots);
+end;
+
+function TGunProbe.OnAmmo(const Slot: Integer): Integer;
+begin
+  Result := AmmoLeft;
+end;
+
+function TGunProbe.Count(const Event: TGunEvent): Integer;
+var
+  E: TGunEvent;
+begin
+  Result := 0;
+  for E in Events do
+    if E = Event then
+      Inc(Result);
+end;
+
+function TGunProbe.FirstTime(const Event: TGunEvent): Single;
+var
+  I: Integer;
+begin
+  for I := 0 to High(Events) do
+    if Events[I] = Event then
+      Exit(Times[I]);
+  Result := -1;
+end;
+
+procedure TGunProbe.Run(const Seconds: Single; const Hold: Boolean);
+var
+  I: Integer;
+  WasHeld: Boolean;
+begin
+  WasHeld := Gun.Attack;
+  for I := 1 to Round(Seconds / 0.01) do
+  begin
+    { Like TQuakeWorld: a new press is latched and thinks at once }
+    if Hold and not WasHeld then
+      Gun.AttackLatched := True;
+    Gun.Attack := Hold;
+    WasHeld := Hold;
+    Gun.Update(0.01);
+  end;
+end;
+
+{ Fresh gun with Slot ready and Ammo shots }
+function NewProbe(const Slot, Ammo: Integer): TGunProbe;
+begin
+  Result := TGunProbe.Create;
+  Result.Gun := TQuakeGun.Create;
+  Result.Gun.RandomPauses := False;
+  Result.Gun.OnEvent := @Result.OnEvent;
+  Result.Gun.OnAmmo := @Result.OnAmmo;
+  Result.AmmoLeft := Ammo;
+  Result.Gun.Reset(Slot, False);
+end;
+
+procedure FreeProbe(var P: TGunProbe);
+begin
+  P.Gun.Free;
+  FreeAndNil(P);
+end;
+
+procedure TestGun;
+var
+  P: TGunProbe;
+  I: Integer;
+  T: Single;
+begin
+  { Weapon_Generic timing: the blaster refires every 0.5 s, the shot leaves
+    on the press, not on the next frame }
+  P := NewProbe(1, MaxInt);
+  P.Run(1.95, True);
+  CheckEquals(4, P.Count(geFire), 'blaster held 1.95 s fires 4 bolts (0.5 s refire)');
+  Check(SameValue(P.FirstTime(geFire), 0.01, 0.001), 'the first shot leaves on the press');
+  FreeProbe(P);
+  P := NewProbe(2, MaxInt);
+  P.Run(2.35, True);
+  CheckEquals(2, P.Count(geFire), 'shotgun refires after its 1.2 s of frames');
+  FreeProbe(P);
+  P := NewProbe(4, MaxInt);
+  P.Run(0.95, True);
+  CheckEquals(10, P.Count(geFire), 'machinegun fires every frame (frames 4 / 5) while held');
+  FreeProbe(P);
+  { Machinegun tap: one bullet, then back to ready }
+  P := NewProbe(4, MaxInt);
+  P.Run(0.01, True);
+  P.Run(0.5, False);
+  Check((P.Count(geFire) = 1) and (P.Gun.State = gsReady), 'machinegun tap fires one bullet');
+  FreeProbe(P);
+  { Chaingun spin up: 1, 1, 1, 1, then 2 a frame, then 3 }
+  P := NewProbe(5, 1000);
+  P.Run(1.995, True);
+  Check((Length(P.Shots) > 0) and (P.Events[0] = geChaingunUp), 'chaingun spin-up sound first');
+  I := 0;
+  T := 0;
+  for I := 0 to High(P.Events) do
+    if P.Events[I] = geFire then
+      T := T + P.Shots[I];
+  CheckEquals(47, Round(T), 'chaingun fires 47 bullets in 2 s (Chaingun_Fire spin-up)');
+  Check(P.Gun.LoopSound <> '', 'chaingun spinning has a loop sound');
+  P.Run(1.5, False);
+  Check((P.Gun.State = gsReady) and (P.Gun.LoopSound = '') and (P.Count(geChaingunDown) = 1),
+    'released chaingun spins down to ready');
+  FreeProbe(P);
+  { BFG: flash on the press, the ball 0.8 s later }
+  P := NewProbe(10, 1);
+  P.Run(1.0, True);
+  Check((P.Count(geBfgFlash) = 1) and (P.Count(geFire) = 1) and
+    SameValue(P.FirstTime(geFire) - P.FirstTime(geBfgFlash), 0.8, 0.02), 'BFG ball leaves 0.8 s after the flash');
+  FreeProbe(P);
+  { Switching: blaster put away (3 frames) then the shotgun raised (7) }
+  P := NewProbe(1, MaxInt);
+  P.Gun.Select(2);
+  P.Run(0.45, False);
+  Check((P.Count(geChangeWeapon) = 1) and (P.Gun.Slot = 2) and (P.Gun.State = gsActivating),
+    'blaster put away after 0.4 s of frames');
+  P.Run(0.8, False);
+  Check(P.Gun.State = gsReady, 'shotgun raised and ready');
+  P.Run(0.5, True);
+  CheckEquals(1, P.Count(geFire), 'raised shotgun fires');
+  FreeProbe(P);
+  { No ammo: one click a second }
+  P := NewProbe(2, 0);
+  P.Run(1.55, True);
+  Check((P.Count(geNoAmmo) = 2) and (P.Count(geFire) = 0), 'no ammo clicks once a second');
+  FreeProbe(P);
+  { Hand grenade tap: pin on frame 5, thrown on frame 12 with ~3.1 s fuse }
+  P := NewProbe(HandGrenadeSlot, 5);
+  P.Run(0.01, True);
+  P.Run(1.5, False);
+  Check((P.Count(geGrenadePin) = 1) and (P.Count(geGrenadeThrow) = 1) and (P.Gun.Fuse > 3.0) and
+    (P.Gun.Fuse < 3.2), 'hand grenade thrown with a full fuse');
+  FreeProbe(P);
+  { Held: the fuse runs down and it goes off in the hand }
+  P := NewProbe(HandGrenadeSlot, 5);
+  P.Run(5.0, True);
+  Check((P.Count(geGrenadeBlowUp) = 1) and (P.Count(geGrenadeThrow) = 0) and
+    SameValue(P.FirstTime(geGrenadeBlowUp), 1.1 + 3.2, 0.05),
+    'held hand grenade blows up 3.2 s after the throw frame (4.3 s after the press)');
+  FreeProbe(P);
+end;
+
 procedure TestGamepad;
 var
   V: TVector2;
@@ -691,6 +859,7 @@ begin
   TestMapReport;
   TestPlayerTrail;
   TestGamepad;
+  TestGun;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then

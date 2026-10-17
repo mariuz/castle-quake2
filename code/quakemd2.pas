@@ -91,6 +91,9 @@ type
     procedure Update(const SecondsPassed: Single);
     { Show a fixed frame }
     procedure SetFrame(const Index: Integer);
+    { Show frame A blended towards frame B by T (0..1), like Quake 2's
+      gun lerp between the old and the current frame }
+    procedure ShowFrames(const A, B: Integer; const T: Single);
     { Lighting tint (0..1+, see TQuakeLighting.SampleLight) }
     procedure SetTint(const Color: TVector3);
     { Switch to another skin of the model (ignored if missing) }
@@ -609,6 +612,25 @@ begin
   FAnim.Count := 1;
   FAnimTime := 0;
   Update(0);
+end;
+
+procedure TQuakeMd2Instance.ShowFrames(const A, B: Integer; const T: Single);
+var
+  FA, FB: Integer;
+begin
+  FA := EnsureRange(A, 0, FModel.FrameCount - 1);
+  FB := EnsureRange(B, 0, FModel.FrameCount - 1);
+  FAnim.First := FA;
+  FAnim.Count := 1;
+  if (FA = FLastA) and (FB = FLastB) and SameValue(T, FLastT, 0.01) then
+    Exit;
+  FLastA := FA;
+  FLastB := FB;
+  FLastT := T;
+  FModel.LerpFrames(FA, FB, T, FTemp);
+  FCoord.SetPoint(FTemp);
+  if not FShellColor.IsPerfectlyZero then
+    UpdateShell;
 end;
 
 procedure TQuakeMd2Instance.SetSkin(const SkinIndex: Integer);

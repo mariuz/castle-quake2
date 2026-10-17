@@ -173,6 +173,8 @@ begin
   FWorld.AttachWeaponToCamera(WeaponViewport.Camera);
   FWorld.Hud := Hud;
   FWorld.Player := PlayerMovement;
+  { Screenshots must not depend on random idle pauses of the view weapon }
+  FWorld.Gun.RandomPauses := FAutoTestMap = '';
   Particles.SetParent(MainViewport.Items);
   Particles.Camera := MainViewport.Camera;
   Console.OnCommand := @HandleConsoleCommand;
@@ -608,6 +610,10 @@ begin
           BoolToStr(FWorld.Monsters[J].CanSeePlayer, True),
           PointsDistance(FWorld.Monsters[J].Transform.Translation, PlayerMovement.AimPosition)]);
     WritelnLog('Demo', 'Projectiles: %d, delayed targets: %d', [FWorld.ProjectileCount, FWorld.DelayedCount]);
+    WritelnLog('Demo', 'Gun: weapon %d state %d frame %d, ammo shells %d bullets %d grenades %d cells %d slugs %d', [
+      FWorld.Gun.Slot, Ord(FWorld.Gun.State), FWorld.Gun.Frame, FWorld.Stats.Ammo[atShells],
+      FWorld.Stats.Ammo[atBullets], FWorld.Stats.Ammo[atGrenades], FWorld.Stats.Ammo[atCells],
+      FWorld.Stats.Ammo[atSlugs]]);
     for J := 0 to FWorld.Lasers.Count - 1 do
       WritelnLog('Demo', 'Laser %d on %s length %.0f', [J,
         BoolToStr(FWorld.Lasers[J].IsOn, True), FWorld.Lasers[J].Length]);

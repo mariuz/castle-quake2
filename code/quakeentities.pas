@@ -36,7 +36,6 @@ type
     Icon: String;
     AmmoType: TAmmoType;
     AmmoPerShot: Integer;
-    Cooldown: Single;
     Sound: String;
   end;
 
@@ -448,18 +447,18 @@ const
 
   { Weapon slots 1..11 (key 0 selects slot 10, G slot 11) }
   WeaponDefs: array[1..WeaponSlots] of TQuakeWeaponDef = (
-    (Name: 'Blaster'; ViewModel: 'models/weapons/v_blast/tris.md2'; Icon: 'w_blaster'; AmmoType: atNone; AmmoPerShot: 0; Cooldown: 0.5; Sound: 'sound/weapons/blastf1a.wav'),
-    (Name: 'Shotgun'; ViewModel: 'models/weapons/v_shotg/tris.md2'; Icon: 'w_shotgun'; AmmoType: atShells; AmmoPerShot: 1; Cooldown: 1.0; Sound: 'sound/weapons/shotgf1b.wav'),
-    (Name: 'Super Shotgun'; ViewModel: 'models/weapons/v_shotg2/tris.md2'; Icon: 'w_sshotgun'; AmmoType: atShells; AmmoPerShot: 2; Cooldown: 1.1; Sound: 'sound/weapons/sshotf1b.wav'),
-    (Name: 'Machinegun'; ViewModel: 'models/weapons/v_machn/tris.md2'; Icon: 'w_machinegun'; AmmoType: atBullets; AmmoPerShot: 1; Cooldown: 0.1; Sound: 'sound/weapons/machgf1b.wav'),
-    (Name: 'Chaingun'; ViewModel: 'models/weapons/v_chain/tris.md2'; Icon: 'w_chaingun'; AmmoType: atBullets; AmmoPerShot: 1; Cooldown: 0.1; Sound: 'sound/weapons/machgf2b.wav'),
-    (Name: 'Grenade Launcher'; ViewModel: 'models/weapons/v_launch/tris.md2'; Icon: 'w_glauncher'; AmmoType: atGrenades; AmmoPerShot: 1; Cooldown: 0.8; Sound: 'sound/weapons/grenlf1a.wav'),
-    (Name: 'Rocket Launcher'; ViewModel: 'models/weapons/v_rocket/tris.md2'; Icon: 'w_rlauncher'; AmmoType: atRockets; AmmoPerShot: 1; Cooldown: 0.8; Sound: 'sound/weapons/rocklf1a.wav'),
-    (Name: 'HyperBlaster'; ViewModel: 'models/weapons/v_hyperb/tris.md2'; Icon: 'w_hyperblaster'; AmmoType: atCells; AmmoPerShot: 1; Cooldown: 0.1; Sound: 'sound/weapons/hyprbf1a.wav'),
-    (Name: 'Railgun'; ViewModel: 'models/weapons/v_rail/tris.md2'; Icon: 'w_railgun'; AmmoType: atSlugs; AmmoPerShot: 1; Cooldown: 1.5; Sound: 'sound/weapons/railgf1a.wav'),
-    (Name: 'BFG10K'; ViewModel: 'models/weapons/v_bfg/tris.md2'; Icon: 'w_bfg'; AmmoType: atCells; AmmoPerShot: 50; Cooldown: 2.5; Sound: 'sound/weapons/bfg__f1y.wav'),
+    (Name: 'Blaster'; ViewModel: 'models/weapons/v_blast/tris.md2'; Icon: 'w_blaster'; AmmoType: atNone; AmmoPerShot: 0; Sound: 'sound/weapons/blastf1a.wav'),
+    (Name: 'Shotgun'; ViewModel: 'models/weapons/v_shotg/tris.md2'; Icon: 'w_shotgun'; AmmoType: atShells; AmmoPerShot: 1; Sound: 'sound/weapons/shotgf1b.wav'),
+    (Name: 'Super Shotgun'; ViewModel: 'models/weapons/v_shotg2/tris.md2'; Icon: 'w_sshotgun'; AmmoType: atShells; AmmoPerShot: 2; Sound: 'sound/weapons/sshotf1b.wav'),
+    (Name: 'Machinegun'; ViewModel: 'models/weapons/v_machn/tris.md2'; Icon: 'w_machinegun'; AmmoType: atBullets; AmmoPerShot: 1; Sound: 'sound/weapons/machgf1b.wav'),
+    (Name: 'Chaingun'; ViewModel: 'models/weapons/v_chain/tris.md2'; Icon: 'w_chaingun'; AmmoType: atBullets; AmmoPerShot: 1; Sound: 'sound/weapons/machgf2b.wav'),
+    (Name: 'Grenade Launcher'; ViewModel: 'models/weapons/v_launch/tris.md2'; Icon: 'w_glauncher'; AmmoType: atGrenades; AmmoPerShot: 1; Sound: 'sound/weapons/grenlf1a.wav'),
+    (Name: 'Rocket Launcher'; ViewModel: 'models/weapons/v_rocket/tris.md2'; Icon: 'w_rlauncher'; AmmoType: atRockets; AmmoPerShot: 1; Sound: 'sound/weapons/rocklf1a.wav'),
+    (Name: 'HyperBlaster'; ViewModel: 'models/weapons/v_hyperb/tris.md2'; Icon: 'w_hyperblaster'; AmmoType: atCells; AmmoPerShot: 1; Sound: 'sound/weapons/hyprbf1a.wav'),
+    (Name: 'Railgun'; ViewModel: 'models/weapons/v_rail/tris.md2'; Icon: 'w_railgun'; AmmoType: atSlugs; AmmoPerShot: 1; Sound: 'sound/weapons/railgf1a.wav'),
+    (Name: 'BFG10K'; ViewModel: 'models/weapons/v_bfg/tris.md2'; Icon: 'w_bfg'; AmmoType: atCells; AmmoPerShot: 50; Sound: 'sound/weapons/bfg__f1y.wav'),
     { Thrown on release; picking up grenades gives it (Quake 2 "Grenades") }
-    (Name: 'Hand Grenades'; ViewModel: 'models/weapons/v_handgr/tris.md2'; Icon: 'w_hgrenade'; AmmoType: atGrenades; AmmoPerShot: 1; Cooldown: 1.0; Sound: 'sound/weapons/hgrent1a.wav')
+    (Name: 'Hand Grenades'; ViewModel: 'models/weapons/v_handgr/tris.md2'; Icon: 'w_hgrenade'; AmmoType: atGrenades; AmmoPerShot: 1; Sound: 'sound/weapons/hgrent1a.wav')
   );
 
   AmmoIcons: array[TAmmoType] of String = ('', 'a_shells', 'a_bullets', 'a_grenades',

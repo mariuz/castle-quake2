@@ -10,7 +10,7 @@ uses
   SysUtils, Classes, Math, Generics.Collections, fpjson, jsonparser,
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions,
   QuakePak, QuakeBsp, QuakeGeometry, QuakeMap, QuakeMd2, QuakePlayer, QuakeLight, QuakeSound, QuakeHud, QuakeSettings,
-  QuakeParticles, QuakeEntities;
+  QuakeParticles, QuakeEntities, QuakeWeaponFrames;
 
 const
   { Quake 2 player: eye 22 above origin, origin 24 above the feet }
@@ -57,16 +57,12 @@ type
     FWeaponTransform: TCastleTransform;
     FWeaponModel: TQuakeMd2Instance;
     FWeaponModelSlot: Integer;
-    FWeaponCooldown: Single;
     FWeaponKick: Single;
-    { Fire was held during the previous frame (FireWeapon is called every
-      frame while held; Update looks at it to detect the release) }
-    FFireHeld: Boolean;
-    { Chaingun: seconds of continuous fire (more bullets per shot when spun up) }
-    FChainSpin: Single;
-    { Hand grenade cooking: fuse time left while the pin is pulled }
-    FGrenadeCooking: Boolean;
-    FGrenadeFuse: Single;
+    { The player's gun: Quake 2's weapon frame state machine }
+    FGun: TQuakeGun;
+    { Fire held this frame (FireWeapon is called every frame while held) and
+      in the previous one (to latch new presses) }
+    FFireHeld, FPrevFireHeld: Boolean;
     FLevelExited: Boolean;
     FNextMap: String;
     FSpawnPoint: TVector3;
@@ -99,7 +95,6 @@ type
     procedure SpawnEntities(const SpawnName: String);
     function ModelBox(const AModel: String; out Box: TBox3D): Boolean;
     procedure UpdateWeaponModel;
-    procedure PlayWeaponAnim(const Names: String; const Loop: Boolean);
     procedure CheckPickups;
     procedure CheckTriggers(const SecondsPassed: Single);
     procedure CheckMovers;
@@ -111,8 +106,14 @@ type
     function DamageMultiplier: Integer;
     procedure FireHitscan(const Origin, Dir: TVector3; const Damage: Integer;
       const HSpread, VSpread: Single; const Rail: Boolean = False);
-    procedure ThrowHandGrenade(const Origin, Dir: TVector3);
-    procedure UpdateHeldFire(const SecondsPassed: Single);
+    procedure ThrowHandGrenade(const Fuse: Single);
+    procedure UpdateGun(const SecondsPassed: Single);
+    procedure GunEvent(const Event: TGunEvent);
+    function GunAmmo(const Slot: Integer): Integer;
+    { Fire the current weapon (the gun reached a fire frame) }
+    procedure FireGun;
+    { Quake 2 NoAmmoWeaponChange: best weapon with ammo }
+    procedure NoAmmoWeaponChange;
     procedure SpawnProjectile(const Kind: TProjectileKind; const Origin, Dir: TVector3;
       const Speed: Single; const Damage: Integer; const FromPlayer: Boolean;
       const Owner: TQuakeMonster = nil);
@@ -183,6 +184,8 @@ type
     procedure UpdateLoopSounds(const Listener: TVector3);
     { Entities shown / considered by the last CullEntities }
     property VisibleEntities: Integer read FVisibleEntities;
+    { The player's gun (weapon frames); autotests turn off its random idle pauses }
+    property Gun: TQuakeGun read FGun;
     property CulledEntities: Integer read FCulledEntities;
 
     { Player fires the current weapon }
@@ -293,6 +296,9 @@ begin
   FPickups := TQuakePickupList.Create(True);
   FMonsters := TQuakeMonsterList.Create(True);
   FSightEntities := specialize TList<TQuakeMonster>.Create;
+  FGun := TQuakeGun.Create;
+  FGun.OnEvent := @GunEvent;
+  FGun.OnAmmo := @GunAmmo;
   PlayerTrail := TQuakePlayerTrail.Create;
   FProjectiles := TQuakeProjectileList.Create(True);
   FTriggers := TQuakeTriggerList.Create(True);
@@ -316,6 +322,7 @@ begin
   ClearLevel;
   FreeAndNil(FWeaponModel);
   FreeAndNil(FWeaponTransform);
+  FreeAndNil(FGun);
   FPickups.Free;
   FMonsters.Free;
   FSightEntities.Free;
@@ -403,14 +410,8 @@ begin
     FWeaponModel.Scene.Collides := False;
     FWeaponModel.Scene.Pickable := False;
     FWeaponTransform.Add(FWeaponModel.Scene);
-    PlayWeaponAnim('active,idle', False); { v_handgr has no 'active' }
+    FWeaponModel.ShowFrames(FGun.OldFrame, FGun.Frame, FGun.FrameLerp);
   end;
-end;
-
-procedure TQuakeWorld.PlayWeaponAnim(const Names: String; const Loop: Boolean);
-begin
-  if FWeaponModel <> nil then
-    FWeaponModel.PlayAnim(Names, Loop, 10);
 end;
 
 function TQuakeWorld.ModelBox(const AModel: String; out Box: TBox3D): Boolean;
@@ -703,8 +704,9 @@ begin
     LoadState(FLevelStates.Objects[FBsp.MapName], False);
     WritelnLog('QuakeWorld', 'Restored remembered state of "%s"', [FBsp.MapName]);
   end;
+  { Raise the weapon (Quake 2 starts levels with the activate frames) }
+  FGun.Reset(FStats.CurrentWeapon);
   UpdateWeaponModel;
-  PlayWeaponAnim('active', False);
 
   World := FBsp.FindEntity('worldspawn');
   Sounds.StopMusic;
@@ -1551,52 +1553,115 @@ begin
   end;
 end;
 
-procedure TQuakeWorld.ThrowHandGrenade(const Origin, Dir: TVector3);
+procedure TQuakeWorld.ThrowHandGrenade(const Fuse: Single);
 const
   { Quake 2 weapon_grenade_fire: speed grows with the time the pin was pulled }
-  GrenadeTimer = 3.0;
   MinSpeed = 400;
   MaxSpeed = 800;
-var
-  Held: Single;
 begin
-  FGrenadeCooking := False;
-  Held := GrenadeTimer - FGrenadeFuse;
-  SpawnProjectile(pkHandGrenade, Origin + Dir * 16, (Dir + Vector3(0, 0.1, 0)).Normalize,
-    MinSpeed + Held * (MaxSpeed - MinSpeed) / GrenadeTimer, 125 * DamageMultiplier, True);
-  FProjectiles.Last.Life := Max(0.1, FGrenadeFuse);
+  if FStats.Ammo[atGrenades] > 0 then
+    Dec(FStats.Ammo[atGrenades]);
+  SpawnProjectile(pkHandGrenade, FPlayerPos + FPlayerDir * 16, (FPlayerDir + Vector3(0, 0.1, 0)).Normalize,
+    MinSpeed + (GrenadeTimer - Fuse) * (MaxSpeed - MinSpeed) / GrenadeTimer, 125 * DamageMultiplier, True);
+  FProjectiles.Last.Life := Max(0.1, Fuse);
   Sounds.Play('sound/weapons/hgrent1a.wav', 1, chWeapon);
-  PlayWeaponAnim('throw', False);
-  FWeaponCooldown := WeaponDefs[11].Cooldown;
 end;
 
-procedure TQuakeWorld.UpdateHeldFire(const SecondsPassed: Single);
+procedure TQuakeWorld.UpdateGun(const SecondsPassed: Single);
 begin
-  { Released the trigger: spin the chaingun down, throw a cooked grenade }
-  if not FFireHeld then
+  if FDead then
   begin
-    if FChainSpin > 0 then
-    begin
-      if FChainSpin > 0.5 then
-        Sounds.Play('sound/weapons/chngnd1a.wav');
-      FChainSpin := 0;
-      PlayWeaponAnim('idle', True);
-    end;
-    if FGrenadeCooking then
-      ThrowHandGrenade(FPlayerPos, FPlayerDir);
+    FGun.Attack := False;
+    FGun.AttackLatched := False;
+    FFireHeld := False;
+    FPrevFireHeld := False;
+    Exit;
   end;
+  { FireWeapon of the previous frame set FFireHeld }
+  FGun.Attack := FFireHeld;
+  FGun.Update(SecondsPassed);
+  FPrevFireHeld := FFireHeld;
   FFireHeld := False;
+  FGun.Attack := False;
+end;
 
-  if FGrenadeCooking then
+function TQuakeWorld.GunAmmo(const Slot: Integer): Integer;
+var
+  Def: TQuakeWeaponDef;
+begin
+  Def := WeaponDefs[Slot];
+  if (Def.AmmoType = atNone) or (Def.AmmoPerShot <= 0) then
+    Result := MaxInt
+  else
+    Result := FStats.Ammo[Def.AmmoType] div Def.AmmoPerShot;
+end;
+
+procedure TQuakeWorld.NoAmmoWeaponChange;
+
+  function Has(const Slot: Integer; const Ammo: TAmmoType; const Count: Integer): Boolean;
   begin
-    FGrenadeFuse := FGrenadeFuse - SecondsPassed;
-    if FGrenadeFuse <= 0 then
-    begin
-      { Held too long: it goes off in the hand }
-      FGrenadeCooking := False;
-      FWeaponCooldown := WeaponDefs[11].Cooldown;
-      Explode(FPlayerPos + FPlayerDir * 16, 125 * DamageMultiplier, 165, True);
-    end;
+    Result := ((FStats.WeaponMask and (1 shl Slot)) <> 0) and (FStats.Ammo[Ammo] >= Count);
+  end;
+
+begin
+  if Has(9, atSlugs, 1) then
+    SelectWeapon(9)
+  else
+  if Has(8, atCells, 1) then
+    SelectWeapon(8)
+  else
+  if Has(5, atBullets, 1) then
+    SelectWeapon(5)
+  else
+  if Has(4, atBullets, 1) then
+    SelectWeapon(4)
+  else
+  if Has(3, atShells, 2) then
+    SelectWeapon(3)
+  else
+  if Has(2, atShells, 1) then
+    SelectWeapon(2)
+  else
+    SelectWeapon(1);
+end;
+
+procedure TQuakeWorld.GunEvent(const Event: TGunEvent);
+begin
+  case Event of
+    geFire: FireGun;
+    geBfgFlash:
+      begin
+        { weapon_bfg_fire frame 9: flash and sound, the ball follows on frame 17 }
+        Sounds.Play(WeaponDefs[10].Sound, 1, chWeapon);
+        Lighting.TriggerMuzzleFlash(FPlayerPos + FPlayerDir * 16);
+        FLastFireTime := FTime;
+        PlayerNoise(FPlayerPos);
+      end;
+    geNoAmmo:
+      begin
+        Sounds.Play('sound/weapons/noammo.wav', 1, chVoice);
+        if FHud <> nil then
+          FHud.ShowMessage('No ammo for ' + WeaponDefs[FGun.Slot].Name, 1.5);
+        NoAmmoWeaponChange;
+      end;
+    geChangeWeapon:
+      begin
+        if FGun.PendingSlot <> 0 then
+          FStats.CurrentWeapon := FGun.PendingSlot;
+        UpdateWeaponModel;
+      end;
+    geGrenadePin: Sounds.Play('sound/weapons/hgrena1b.wav', 1, chWeapon);
+    geGrenadeThrow: ThrowHandGrenade(FGun.Fuse);
+    geGrenadeBlowUp:
+      begin
+        { Held too long: it goes off in the hand }
+        if FStats.Ammo[atGrenades] > 0 then
+          Dec(FStats.Ammo[atGrenades]);
+        Explode(FPlayerPos + FPlayerDir * 16, 125 * DamageMultiplier, 165, True);
+      end;
+    geChaingunUp: Sounds.Play('sound/weapons/chngnu1a.wav');
+    geChaingunDown: Sounds.Play('sound/weapons/chngnd1a.wav');
+    geHyperBlasterDown: Sounds.Play('sound/weapons/hyprbd1a.wav');
   end;
 end;
 
@@ -1645,6 +1710,9 @@ begin
       if Mover.MoveSoundOn and Mover.Transform.Exists and FGeometry.BoxVisible(Mover.WorldBox) then
         Sounds.AddLoop(Mover.MoveSound, Mover.Center);
   end;
+  { The player's weapon sound (chaingun / hyperblaster spin, grenade fuse) }
+  if (FGun.LoopSound <> '') and not FDead then
+    Sounds.AddLoop(FGun.LoopSound, Listener);
   Sounds.EndLoops;
 end;
 
@@ -2204,22 +2272,18 @@ begin
 
   UpdateTimersAndLasers(SecondsPassed);
   UpdateLiquids(SecondsPassed);
-  UpdateHeldFire(SecondsPassed);
+  UpdateGun(SecondsPassed);
   UpdateProjectiles(SecondsPassed);
   AddProjectileLights;
   Particles.Update(SecondsPassed);
   Lighting.Update(SecondsPassed);
   SetSurfaceLights;
 
-  { View weapon: animation, kick and lighting }
-  if FWeaponCooldown > 0 then
-    FWeaponCooldown := FWeaponCooldown - SecondsPassed;
+  { View weapon: gun frames, kick and lighting }
   FWeaponKick := Max(0, FWeaponKick - SecondsPassed * 6);
   if FWeaponModel <> nil then
   begin
-    FWeaponModel.Update(SecondsPassed);
-    if FWeaponModel.AnimDone then
-      PlayWeaponAnim('idle', True);
+    FWeaponModel.ShowFrames(FGun.OldFrame, FGun.Frame, FGun.FrameLerp);
     FWeaponModel.SetTint(Lighting.SampleLight(FPlayerPos - Vector3(0, 20, 0)));
     { Powerup shells: quad RF_SHELL_BLUE, invulnerability RF_SHELL_RED;
       they blink in the last 3 seconds, like the Quake 2 HUD icons }
@@ -2247,93 +2311,86 @@ procedure TQuakeWorld.SelectWeapon(const Slot: Integer);
 begin
   if (Slot < 1) or (Slot > WeaponSlots) or ((FStats.WeaponMask and (1 shl Slot)) = 0) then
     Exit;
-  if (Slot = FStats.CurrentWeapon) or FGrenadeCooking then
+  if Slot = FStats.CurrentWeapon then
     Exit;
-  FChainSpin := 0;
-  FStats.CurrentWeapon := Slot;
-  UpdateWeaponModel;
-  FWeaponCooldown := 0.3;
+  { Put the current weapon away, then raise this one (Quake 2 newweapon) }
+  FGun.Select(Slot);
 end;
 
 procedure TQuakeWorld.FireWeapon(const Origin, Dir: TVector3);
+begin
+  FPlayerPos := Origin;
+  FPlayerDir := Dir;
+  if (FBsp = nil) or FDead then
+    Exit;
+  { A new press is latched (a short tap still fires) and thinks at once }
+  if not FFireHeld and not FPrevFireHeld then
+    FGun.AttackLatched := True;
+  FFireHeld := True;
+  FGun.Attack := True;
+  FGun.Update(0);
+  FGun.Attack := False;
+end;
+
+procedure TQuakeWorld.FireGun;
 var
   Def: TQuakeWeaponDef;
-  I, Mult, Shots: Integer;
-  MuzzlePos: TVector3;
+  I, Mult, Slot, Shots: Integer;
+  Origin, Dir, MuzzlePos, Right, Up: TVector3;
+  Angle: Single;
 begin
-  FFireHeld := True;
-  if (FBsp = nil) or FDead or (FWeaponCooldown > 0) or FGrenadeCooking then
-    Exit;
-  Def := WeaponDefs[FStats.CurrentWeapon];
-  if (Def.AmmoType <> atNone) and (FStats.Ammo[Def.AmmoType] < Def.AmmoPerShot) then
-  begin
-    Sounds.Play('sound/weapons/noammo.wav', 1, chVoice);
-    FWeaponCooldown := 0.5;
-    if FHud <> nil then
-      FHud.ShowMessage('No ammo for ' + Def.Name, 1.5);
-    Exit;
-  end;
+  Origin := FPlayerPos;
+  Dir := FPlayerDir;
+  Slot := FGun.Slot;
+  Def := WeaponDefs[Slot];
+  Shots := 1;
+  if Slot = 5 then
+    Shots := FGun.Shots;
   if Def.AmmoType <> atNone then
-    Dec(FStats.Ammo[Def.AmmoType], Def.AmmoPerShot);
+    FStats.Ammo[Def.AmmoType] := Max(0, FStats.Ammo[Def.AmmoType] - Def.AmmoPerShot * Shots);
 
-  { Hand grenades: pull the pin now, throw when fire is released }
-  if FStats.CurrentWeapon = 11 then
-  begin
-    FGrenadeCooking := True;
-    FGrenadeFuse := 3.0;
-    Sounds.Play('sound/weapons/hgrena1b.wav', 1, chWeapon);
-    PlayWeaponAnim('throw', False);
-    Exit;
-  end;
-
-  FWeaponCooldown := Def.Cooldown;
   FWeaponKick := 1.0;
   Mult := DamageMultiplier;
   MuzzlePos := Origin + Dir * 16;
-  Lighting.TriggerMuzzleFlash(MuzzlePos);
-  if FStats.CurrentWeapon in [4, 5] then
-    Sounds.Play(Format('sound/weapons/machgf%db.wav', [1 + Random(5)]), 1, chWeapon)
-  else
-    Sounds.Play(Def.Sound, 1, chWeapon);
+  if Slot <> 10 then { the BFG flashed on frame 9 }
+  begin
+    Lighting.TriggerMuzzleFlash(MuzzlePos);
+    if Slot in [4, 5] then
+      Sounds.Play(Format('sound/weapons/machgf%db.wav', [1 + Random(5)]), 1, chWeapon)
+    else
+      Sounds.Play(Def.Sound, 1, chWeapon);
+  end;
   if Mult > 1 then
     Sounds.Play('sound/items/damage3.wav', 1, chItem);
-  if FStats.CurrentWeapon = 5 then
-    PlayWeaponAnim('pow', True)
-  else
-    PlayWeaponAnim('fire,shoot,attack', False);
 
   { Firing makes noise (PNOISE_WEAPON) and shows the player hostile }
   FLastFireTime := FTime;
   PlayerNoise(Origin);
 
-  case FStats.CurrentWeapon of
+  case Slot of
     1: SpawnProjectile(pkBlasterBolt, MuzzlePos, Dir, 1000, 15 * Mult, True);
     2: for I := 1 to 12 do
          FireHitscan(Origin, Dir, 4 * Mult, 500, 500);
     3: for I := 1 to 20 do
          FireHitscan(Origin, Dir, 6 * Mult, 1000, 500);
     4: FireHitscan(Origin, Dir, 8 * Mult, 300, 500);
-    5:
-      begin
-        { Quake 2 Chaingun_Fire: 1, then 2, then 3 bullets per frame as it spins up }
-        if FChainSpin = 0 then
-          Sounds.Play('sound/weapons/chngnu1a.wav');
-        if FChainSpin < 0.5 then
-          Shots := 1
-        else
-        if FChainSpin < 1.0 then
-          Shots := 2
-        else
-          Shots := 3;
-        Shots := Min(Shots, FStats.Ammo[atBullets] + 1); { one was already taken }
-        Dec(FStats.Ammo[atBullets], Shots - 1);
-        for I := 1 to Shots do
-          FireHitscan(Origin, Dir, 6 * Mult, 300, 500);
-        FChainSpin := FChainSpin + Def.Cooldown;
-      end;
+    { Chaingun_Fire: 1, then 2, then 3 bullets a frame as it spins up }
+    5: for I := 1 to Shots do
+         FireHitscan(Origin, Dir, 6 * Mult, 300, 500);
     6: SpawnProjectile(pkGrenade, MuzzlePos, (Dir + Vector3(0, 0.15, 0)).Normalize, 600, 120 * Mult, True);
     7: SpawnProjectile(pkRocket, MuzzlePos, Dir, 650, 100 * Mult, True);
-    8: SpawnProjectile(pkBlasterBolt, MuzzlePos, Dir, 1000, 15 * Mult, True);
+    8:
+      begin
+        { Weapon_HyperBlaster_Fire: the bolt origin circles the muzzle }
+        Angle := (FGun.Frame - 5) * 2 * Pi / 6;
+        Right := TVector3.CrossProduct(Dir, Vector3(0, 1, 0));
+        if Right.IsZero then
+          Right := Vector3(1, 0, 0);
+        Right := Right.Normalize;
+        Up := TVector3.CrossProduct(Right, Dir).Normalize;
+        SpawnProjectile(pkBlasterBolt, MuzzlePos - Dir * (4 * Sin(Angle)) + Up * (4 * Cos(Angle)),
+          Dir, 1000, 15 * Mult, True);
+      end;
     9: FireHitscan(Origin, Dir, 100 * Mult, 0, 0, True);
     10: SpawnProjectile(pkBfg, MuzzlePos, Dir, 400, 200 * Mult, True);
   end;
@@ -2609,9 +2666,12 @@ begin
       FHud.HelpPrimary := FHelpPrimary;
       FHud.HelpSecondary := FHelpSecondary;
     end;
-    FStats.CurrentWeapon := 1;
-    SelectWeapon(O.Get('weapon', 1));
-    FWeaponCooldown := 0;
+    I := O.Get('weapon', 1);
+    if (I < 1) or (I > WeaponSlots) or ((FStats.WeaponMask and (1 shl I)) = 0) then
+      I := 1;
+    FStats.CurrentWeapon := I;
+    FGun.Reset(I, False);
+    UpdateWeaponModel;
   end;
 
   Arr := Obj.Get('monsters', TJSONArray(nil));
