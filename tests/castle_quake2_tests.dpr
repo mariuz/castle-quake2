@@ -597,6 +597,30 @@ begin
   Check(ClassSupport('misc_viper', NoteText) = csUnsupported, 'misc_viper is unsupported');
 end;
 
+procedure TestPlayerTrail;
+var
+  Trail: TQuakePlayerTrail;
+  I: Integer;
+  Pos: TVector3;
+  T: Single;
+begin
+  Trail := TQuakePlayerTrail.Create;
+  try
+    for I := 1 to 10 do
+    begin
+      Trail.Now := I;
+      Trail.Add(Vector3(I, 0, 0));
+    end;
+    CheckEquals(TQuakePlayerTrail.Length, Trail.Count, 'trail keeps the last 8 spots');
+    Check(Trail.FirstAfter(0, Pos, T) and (T = 3) and (Pos.X = 3), 'oldest spot first');
+    Check(Trail.FirstAfter(5, Pos, T) and (T = 6), 'next spot after a time');
+    Check(not Trail.FirstAfter(10, Pos, T), 'no spot after the newest');
+    Check(Trail.LastSpot.X = 10, 'last spot is the newest');
+  finally
+    Trail.Free;
+  end;
+end;
+
 const
   PakPath = '../data/paks/quake2_demo.pak';
 begin
@@ -628,6 +652,7 @@ begin
   TestSettings;
   TestSounds;
   TestMapReport;
+  TestPlayerTrail;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then

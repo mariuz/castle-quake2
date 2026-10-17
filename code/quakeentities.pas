@@ -92,6 +92,26 @@ type
 
   TQuakeMonster = class;
   TMonsterAttackEvent = procedure(const Monster: TQuakeMonster) of object;
+
+  { Quake 2 p_trail.c: up to 8 spots the player passed, a new one each time
+    the newest went out of the player's sight. Monsters that lost sight of
+    the player follow it (oldest first), which takes them around corners. }
+  TQuakePlayerTrail = class
+  public
+    const
+      Length = 8;
+    var
+      Spots: array[0..Length - 1] of TVector3;
+      Times: array[0..Length - 1] of Single;
+      Count: Integer;
+      { Game time, set by the world every frame }
+      Now: Single;
+    procedure Clear;
+    procedure Add(const Pos: TVector3);
+    function LastSpot: TVector3;
+    { Oldest spot newer than AfterTime; False if none }
+    function FirstAfter(const AfterTime: Single; out Pos: TVector3; out Time: Single): Boolean;
+  end;
   { Pick an entity by targetname (random one if several, like G_PickTarget) }
   TPickTargetEvent = function(const ATargetName: String): TQuakeEntity of object;
   TUseTargetsEvent = procedure(const ATarget: String) of object;
@@ -110,6 +130,13 @@ type
     FAttackFired: Boolean;
     FIdleTimer: Single;
     FLostSightTime: Single;
+    { Losing the player (Quake 2 AI_PURSUIT_LAST_SEEN): go where he was
+      last seen, then along the player trail }
+    FLastSighting: TVector3;
+    FHasLastSighting: Boolean;
+    FTrailTime: Single;
+    FTrailGoal: TVector3;
+    FHasTrailGoal: Boolean;
     FSearched: Boolean;
     FWalking: Boolean;
     { Power armor absorbed a hit recently: show the green shell (powerarmor_time) }
@@ -135,6 +162,8 @@ type
     procedure SetWalking(const Value: Boolean);
     function GetEntityClass: String;
     procedure SetState(const NewState: TMonsterState);
+    { Where to run when the player can't be seen; False: towards him }
+    function PursuitGoal(out Goal: TVector3): Boolean;
     procedure StickToFloor(const SecondsPassed: Single);
   public
     Def: PQuakeMonsterDef;
@@ -484,6 +513,8 @@ var
   { The player fired in the last second (Quake 2 show_hostile): monsters
     nearby notice him even when he's not in front of them }
   PlayerShowHostile: Boolean = False;
+  { The player's trail (created and fed by TQuakeWorld) }
+  PlayerTrail: TQuakePlayerTrail;
 
 implementation
 
@@ -1046,7 +1077,7 @@ end;
 
 procedure TQuakeMonster.UpdateAI(const SecondsPassed: Single; const PlayerPos: TVector3);
 var
-  Delta, MoveVec: TVector3;
+  Delta, MoveVec, Goal: TVector3;
   Dist, TargetYaw, Diff: Single;
 begin
   if Dormant then
@@ -1109,6 +1140,11 @@ begin
     if CanSeePlayer then
     begin
       FLostSightTime := 0;
+      FLastSighting := PlayerPos;
+      FHasLastSighting := True;
+      FHasTrailGoal := False;
+      if PlayerTrail <> nil then
+        FTrailTime := PlayerTrail.Now;
       FSearched := False;
     end else
     if Alerted then
@@ -1192,6 +1228,9 @@ begin
   if (Def^.Attack = akMelee) or (Dist > Def^.AttackRange * 0.6) or not CanSeePlayer then
   begin
     MoveVec := Delta;
+    { Out of sight: last sighting, then the player trail (ai_run) }
+    if (not CanSeePlayer) and PursuitGoal(Goal) then
+      MoveVec := Goal - Transform.Translation;
     if not Def^.Flying then
       MoveVec.Y := 0
     else
@@ -1227,6 +1266,53 @@ begin
   Result := Transform.Move(Dir * Def^.Speed * SpeedScale * SecondsPassed, False, True);
 end;
 
+function TQuakeMonster.PursuitGoal(out Goal: TVector3): Boolean;
+const
+  Reached = 40;
+var
+  Spot: TVector3;
+  SpotTime: Single;
+
+  function Near(const P: TVector3): Boolean;
+  var
+    D: TVector3;
+  begin
+    D := P - Transform.Translation;
+    D.Y := 0;
+    Result := D.Length < Reached;
+  end;
+
+begin
+  Result := False;
+  if Def^.Flying then
+    Exit; { flyers keep heading for the player }
+  { First where the player was last seen }
+  if FHasLastSighting then
+  begin
+    if not Near(FLastSighting) then
+    begin
+      Goal := FLastSighting;
+      Exit(True);
+    end;
+    FHasLastSighting := False;
+  end;
+  if PlayerTrail = nil then
+    Exit;
+  { Then the trail, spot by spot (PlayerTrail_PickFirst / PickNext) }
+  if FHasTrailGoal and Near(FTrailGoal) then
+    FHasTrailGoal := False;
+  if not FHasTrailGoal then
+  begin
+    if not PlayerTrail.FirstAfter(FTrailTime, Spot, SpotTime) then
+      Exit;
+    FTrailGoal := Spot;
+    FTrailTime := SpotTime;
+    FHasTrailGoal := True;
+  end;
+  Goal := FTrailGoal;
+  Result := True;
+end;
+
 procedure TQuakeMonster.Steer(const WantDir: TVector3; const SecondsPassed: Single;
   const SpeedScale: Single);
 const
@@ -1257,6 +1343,53 @@ begin
     end;
   end;
   FDetourSide := -FDetourSide;
+end;
+
+{ TQuakePlayerTrail }
+
+procedure TQuakePlayerTrail.Clear;
+begin
+  Count := 0;
+end;
+
+procedure TQuakePlayerTrail.Add(const Pos: TVector3);
+var
+  I: Integer;
+begin
+  if Count = Length then
+  begin
+    for I := 1 to Length - 1 do
+    begin
+      Spots[I - 1] := Spots[I];
+      Times[I - 1] := Times[I];
+    end;
+    Dec(Count);
+  end;
+  Spots[Count] := Pos;
+  Times[Count] := Now;
+  Inc(Count);
+end;
+
+function TQuakePlayerTrail.LastSpot: TVector3;
+begin
+  if Count = 0 then
+    Result := TVector3.Zero
+  else
+    Result := Spots[Count - 1];
+end;
+
+function TQuakePlayerTrail.FirstAfter(const AfterTime: Single; out Pos: TVector3; out Time: Single): Boolean;
+var
+  I: Integer;
+begin
+  for I := 0 to Count - 1 do
+    if Times[I] > AfterTime then
+    begin
+      Pos := Spots[I];
+      Time := Times[I];
+      Exit(True);
+    end;
+  Result := False;
 end;
 
 { TQuakeProjectile }

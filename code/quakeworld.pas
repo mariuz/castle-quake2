@@ -51,6 +51,7 @@ type
     FTime: Single;
     { Last time the player fired (Quake 2 show_hostile lasts 1 s) }
     FLastFireTime: Single;
+    FTrailTimer: Single;
     { Monsters that found the player this frame (Quake 2 level.sight_entity) }
     FSightEntities: specialize TList<TQuakeMonster>;
     FWeaponTransform: TCastleTransform;
@@ -123,6 +124,9 @@ type
     { Non-ambush monsters that see a monster which just found the player
       join in (FindTarget's sight_entity check) }
     procedure ProcessSightEntities;
+    { ClientThink: drop a trail spot where the player is when the newest one
+      went out of his sight }
+    procedure UpdatePlayerTrail(const SecondsPassed: Single);
     procedure SetSurfaceLights;
     procedure CullTransform(const T: TCastleTransform; const Box: TBox3D);
     { The player made a noise at Pos (Quake 2 PlayerNoise): monsters within
@@ -289,6 +293,7 @@ begin
   FPickups := TQuakePickupList.Create(True);
   FMonsters := TQuakeMonsterList.Create(True);
   FSightEntities := specialize TList<TQuakeMonster>.Create;
+  PlayerTrail := TQuakePlayerTrail.Create;
   FProjectiles := TQuakeProjectileList.Create(True);
   FTriggers := TQuakeTriggerList.Create(True);
   FSpeakers := TQuakeSpeakerList.Create(True);
@@ -314,6 +319,7 @@ begin
   FPickups.Free;
   FMonsters.Free;
   FSightEntities.Free;
+  FreeAndNil(PlayerTrail);
   FProjectiles.Free;
   FTriggers.Free;
   FSpeakers.Free;
@@ -344,6 +350,8 @@ end;
 
 procedure TQuakeWorld.ClearLevel;
 begin
+  if PlayerTrail <> nil then
+    PlayerTrail.Clear;
   FPickups.Clear;
   FSightEntities.Clear;
   FMonsters.Clear;
@@ -1726,6 +1734,31 @@ begin
     FSightEntities.Add(Monster);
 end;
 
+procedure TQuakeWorld.UpdatePlayerTrail(const SecondsPassed: Single);
+var
+  Origin, ToSpot: TVector3;
+  Hit: TCastleTransform;
+  Dist: Single;
+begin
+  PlayerTrail.Now := FTime;
+  FTrailTimer := FTrailTimer - SecondsPassed;
+  if (FTrailTimer > 0) or FDead then
+    Exit;
+  FTrailTimer := 0.1;
+  { The player's origin: 22 below the eye }
+  Origin := FPlayerPos - Vector3(0, 22, 0);
+  if PlayerTrail.Count > 0 then
+  begin
+    ToSpot := PlayerTrail.LastSpot - Origin;
+    if ToSpot.Length < 1 then
+      Exit;
+    Hit := FItems.WorldRayCast(Origin, ToSpot.Normalize, Dist);
+    if (Hit = nil) or (Dist >= ToSpot.Length - 1) then
+      Exit; { still sees the last spot }
+  end;
+  PlayerTrail.Add(Origin);
+end;
+
 procedure TQuakeWorld.ProcessSightEntities;
 var
   Spotters: array of TQuakeMonster;
@@ -2111,6 +2144,7 @@ begin
   FPlayerPos := PlayerPos;
   FPlayerDir := PlayerDir;
   PlayerShowHostile := (FLastFireTime > 0) and (FTime - FLastFireTime < 1);
+  UpdatePlayerTrail(SecondsPassed);
   FTime := FTime + SecondsPassed;
   FStats.LevelTime := FStats.LevelTime + SecondsPassed;
   FStats.QuadTime := Max(0, FStats.QuadTime - SecondsPassed);

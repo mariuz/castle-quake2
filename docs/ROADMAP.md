@@ -41,7 +41,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 
 ### 2. Feel of combat
 - **Frame-accurate attacks** for weapons and monsters: fire on the MD2 frame indices the Quake 2 game code uses (its `mframe_t` tables) instead of cooldown timers, so animation and damage line up.
-- **Monster AI gaps**: ~~ambush, trigger-spawned monsters, Quake 2 sight / hearing rules~~ — done (`FindTarget`: front cone and ranges, `show_hostile`, hearing through the PHS and connected areas, `sight_entity` group wake, TRIGGER_SPAWN monsters stay away until triggered). Dodging done too (`check_dodge`: soldiers, infantry, gunners, medics and iron maidens duck under blaster bolts, rockets and BFG balls). Still to do: `trigger_monsterjump` (not in the demo maps), and a short-range **navigation fallback** (a breadth-first search over BSP leaf portals or a coarse grid of walkable cells) when steering fails.
+- **Monster AI gaps**: ~~ambush, trigger-spawned monsters, Quake 2 sight / hearing rules~~ — done (`FindTarget`: front cone and ranges, `show_hostile`, hearing through the PHS and connected areas, `sight_entity` group wake, TRIGGER_SPAWN monsters stay away until triggered). Dodging done too (`check_dodge`: soldiers, infantry, gunners, medics and iron maidens duck under blaster bolts, rockets and BFG balls). Navigation: monsters that lose the player follow Quake 2's player trail (last sighting, then up to 8 breadcrumbs, `p_trail.c`). Still to do: `trigger_monsterjump` (not in the demo maps); real pathfinding (BSP leaf portals or a walkable grid) only if the trail proves too weak on the full game's maps.
 - **Swept player box** (`PM_StepSlideMove`): trace the 32 × 32 × 56 box against BSP brushes with plane clipping, removing the remaining snag cases on diagonal walls and stairs.
 
 ### 3. Full game support (needs the retail PAK)
@@ -128,7 +128,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [ ] Frame-accurate weapon and monster attacks
 - [x] Monster perception like Quake 2: ambush, trigger-spawned monsters, front cone, hearing through the PHS, group wake
 - [x] Monster dodging (duck under blaster bolts, rockets, BFG balls)
-- [ ] `trigger_monsterjump`, monster navigation fallback
+- [x] Monster pursuit along the player trail (Quake 2 `p_trail.c`)
+- [ ] `trigger_monsterjump`
 - [ ] Swept player box (`PM_StepSlideMove`)
 - [x] Savegames include projectiles and delayed events
 - [x] Map compatibility report (`--map-report`, demo report in docs, checked in CI)
