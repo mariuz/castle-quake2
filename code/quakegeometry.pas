@@ -249,6 +249,9 @@ type
     FVisibleRegions: Integer;
     FNoVis: Boolean;
     FPvs, FAreaBits, FPortalOpen: TBytes;
+    { CanHear cache: PHS row of FHearCluster }
+    FHearPhs, FHearAreas: TBytes;
+    FHearCluster: Integer;
     FAreaPortals: TQuakeAreaPortalList;
     procedure BuildVisRegions;
     procedure BuildAreaPortals;
@@ -280,6 +283,10 @@ type
       UpdateVisibility: does it touch a leaf in a potentially visible
       cluster and a connected area (Quake 2 SV_BuildClientFrame)? }
     function BoxVisible(const Box: TBox3D): Boolean;
+    { Can a sound at FromPos be heard at ToPos (map / CGE space): ToPos in
+      the PHS of FromPos's cluster and in an area connected to it through
+      open portals (Quake 2 gi.inPHS + gi.AreasConnected) }
+    function CanHear(const FromPos, ToPos: TVector3): Boolean;
     function VisRegionCount: Integer;
 
     { func_areaportal used by a trigger (not a door): toggle it }
@@ -1753,6 +1760,35 @@ begin
       Exit(True);
   end;
   Result := False;
+end;
+
+function TQuakeGeometry.CanHear(const FromPos, ToPos: TVector3): Boolean;
+var
+  FromLeaf, ToLeaf, FromCluster, ToCluster, FromArea, ToArea: Integer;
+begin
+  if FBsp.ClusterCount = 0 then
+    Exit(True);
+  FromLeaf := FBsp.PointLeaf(CgeToQuake(FromPos));
+  ToLeaf := FBsp.PointLeaf(CgeToQuake(ToPos));
+  FromCluster := FBsp.LeafCluster(FromLeaf);
+  ToCluster := FBsp.LeafCluster(ToLeaf);
+  { In a wall or outside the map: don't block the sound }
+  if (FromCluster < 0) or (ToCluster < 0) then
+    Exit(True);
+  if (FHearPhs = nil) or (FromCluster <> FHearCluster) then
+  begin
+    FBsp.ClusterPHS(FromCluster, FHearPhs);
+    FHearCluster := FromCluster;
+  end;
+  if (FHearPhs[ToCluster shr 3] and (1 shl (ToCluster and 7))) = 0 then
+    Exit(False);
+  FromArea := FBsp.LeafArea(FromLeaf);
+  ToArea := FBsp.LeafArea(ToLeaf);
+  if (FromArea <= 0) or (ToArea <= 0) or (FromArea = ToArea) then
+    Exit(True);
+  { Portal states as of the last UpdateVisibility (updated every frame) }
+  FBsp.FloodAreas(FromArea, FPortalOpen, FHearAreas);
+  Result := (FHearAreas[ToArea shr 3] and (1 shl (ToArea and 7))) <> 0;
 end;
 
 procedure TQuakeGeometry.SetNoVis(const Value: Boolean);

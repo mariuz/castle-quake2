@@ -81,6 +81,7 @@ var
   World: TQuakeEntity;
   C: TVector3;
   Cluster, I, Seen: Integer;
+  Same: Boolean;
   Pvs, PortalOpen, AreaBits: TBytes;
   Leafs: array[0..63] of Integer;
   LeafCount: Integer;
@@ -120,6 +121,17 @@ begin
       if (Pvs[I shr 3] and (1 shl (I and 7))) <> 0 then
         Inc(Seen);
     Check((Seen > 1) and (Seen < Bsp.ClusterCount), Format('PVS culls clusters (%d of %d seen)', [Seen, Bsp.ClusterCount]));
+    Bsp.ClusterPHS(Cluster, PortalOpen);
+    Check((PortalOpen[Cluster shr 3] and (1 shl (Cluster and 7))) <> 0, 'a cluster hears itself');
+    Same := True;
+    I := 0;
+    while I < Bsp.ClusterCount do
+    begin
+      if ((Pvs[I shr 3] and (1 shl (I and 7))) <> 0) and ((PortalOpen[I shr 3] and (1 shl (I and 7))) = 0) then
+        Same := False;
+      Inc(I);
+    end;
+    Check(Same, 'PHS contains the PVS');
     CheckEquals(-1, Bsp.PointCluster(Vector3(100000, 0, 0)), 'no cluster outside the map');
     Bsp.ClusterPVS(-1, Pvs);
     Check(Pvs[0] = $FF, 'cluster -1 sees everything');

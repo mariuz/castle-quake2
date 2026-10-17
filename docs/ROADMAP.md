@@ -14,7 +14,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Sprites | SP2 (BFG, explosions) | SP2 loader, BFG ball / explosion sprites | Other sprite users (bubbles, flashes). |
 | Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove as `TQuakePlayerMovement` with the 32 × 32 × 56 player box | Swept box traces with plane clipping (`PM_StepSlideMove`) instead of overlap tests. |
 | Weapons | 10 + hand grenades, frame-timed | 10 + hand grenades, chaingun spin-up, cooldown timers | Firing on the MD2 frames Quake 2 uses. |
-| Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses), skill levels | Sight / chase / attack wind-up / pain / death, patrols, combat points, steering, 19 types tunable in the editor, skill 0–3 | Pathfinding, `ambush` spawnflag, dodging, medic revive, boss behaviour. |
+| Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses), skill levels | Sight / chase / attack wind-up / pain / death, patrols, combat points, steering, 19 types tunable in the editor, skill 0–3 | Pathfinding, dodging, medic revive, boss behaviour. |
 | Props / effects | Barrels, banners, ships, lasers, splashes, explosion models | All of these used by the demo maps | Gib models with velocities, `misc_viper`, `target_blaster`, `trigger_monsterjump`, `func_killbox`. |
 | Level flow | Units, cross-level triggers, help computer, intermission, savegames | All of these (JSON savegames) | Projectiles and pending delayed events are not saved. |
 | Audio | 3D sounds, entity channels, merged loop sounds, CD music | Quake 2 attenuation (incl. `ATTN_STATIC`), `CHAN_*` channels, point sounds that outlive entities, loop mixer (one voice per sound, PVS-checked, `SOUND_LOOPATTENUATE`), 32 sources, OGG tracks, named sounds editable in the editor | Stereo panning curve (OpenAL's, not Quake 2's), `s_volume` style master limiter. |
@@ -41,7 +41,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 
 ### 2. Feel of combat
 - **Frame-accurate attacks** for weapons and monsters: fire on the MD2 frame indices the Quake 2 game code uses (its `mframe_t` tables) instead of cooldown timers, so animation and damage line up.
-- **Monster AI gaps**: `ambush` spawnflag (stay asleep until seen), dodging rockets / grenades (`monster_dodge`), `trigger_monsterjump`, and a short-range **navigation fallback** (a breadth-first search over BSP leaf portals or a coarse grid of walkable cells) when steering fails.
+- **Monster AI gaps**: ~~ambush, trigger-spawned monsters, Quake 2 sight / hearing rules~~ — done (`FindTarget`: front cone and ranges, `show_hostile`, hearing through the PHS and connected areas, `sight_entity` group wake, TRIGGER_SPAWN monsters stay away until triggered). Still to do: dodging rockets / grenades (`monster_dodge`), `trigger_monsterjump` (not in the demo maps), and a short-range **navigation fallback** (a breadth-first search over BSP leaf portals or a coarse grid of walkable cells) when steering fails.
 - **Swept player box** (`PM_StepSlideMove`): trace the 32 × 32 × 56 box against BSP brushes with plane clipping, removing the remaining snag cases on diagonal walls and stairs.
 
 ### 3. Full game support (needs the retail PAK)
@@ -126,7 +126,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [ ] Gamepad input (`Controllers`)
 - [x] View and weapon bob, weapon lag, landing dip, damage kicks (items already rotate like `EF_ROTATE`; Quake 2 items don't bob)
 - [ ] Frame-accurate weapon and monster attacks
-- [ ] Monster `ambush`, dodging, `trigger_monsterjump`, navigation fallback
+- [x] Monster perception like Quake 2: ambush, trigger-spawned monsters, front cone, hearing through the PHS, group wake
+- [ ] Monster dodging, `trigger_monsterjump`, navigation fallback
 - [ ] Swept player box (`PM_StepSlideMove`)
 - [ ] Savegames include projectiles and delayed events
 - [ ] Map compatibility report over a full PAK

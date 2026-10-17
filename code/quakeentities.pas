@@ -160,7 +160,15 @@ type
     { Power armor (monster_brain: screen 100) and its remaining cells }
     PowerArmorType: TPowerArmorType;
     PowerArmorPower: Integer;
+    { Quake 2 monster spawnflags: AMBUSH (1) doesn't wake from noise unless
+      it also sees the player, nor from other monsters spotting him;
+      TRIGGER_SPAWN (2) stays Dormant (absent) until its targetname is used }
+    Ambush: Boolean;
+    Dormant: Boolean;
     OnAttack: TMonsterAttackEvent;
+    { Called when the monster finds the player (Quake 2 FoundTarget, which
+      makes it level.sight_entity for others to notice) }
+    OnFoundTarget: TMonsterAttackEvent;
     OnPickTarget: TPickTargetEvent;
     OnUseTargets: TUseTargetsEvent;
     constructor CreateMonster(const AParent: TCastleTransform; const ADef: PQuakeMonsterDef;
@@ -177,6 +185,15 @@ type
     function AbsorbPowerArmor(const Dmg: Integer): Integer;
     procedure Alert;
     function IsAlive: Boolean;
+    { Would it notice something at Delta from it that it can see (Quake 2
+      FindTarget): within 1000 units; beyond melee range only in front
+      (cos > 0.3), or within 500 units also when the player just fired }
+    function WouldNotice(const Delta: TVector3): Boolean;
+    { Clear line from the monster's eye to a point }
+    function HasLineOfSight(const Target: TVector3): Boolean;
+    { TRIGGER_SPAWN: appear now (monster_triggered_spawn) }
+    procedure Spawn;
+    procedure SetDormant(const Value: Boolean);
     { Owns the scene: used to map ray hits back to monsters }
     function OwnsTransform(const T: TCastleTransform): Boolean;
     { Restore from a savegame: position, facing, health, alive / dead / gibbed }
@@ -190,6 +207,8 @@ type
     property SeesPlayer: Boolean read CanSeePlayer;
     property Facing: Single read FacingAngle;
     property PowerArmor: Integer read PowerArmorPower;
+    property IsAmbush: Boolean read Ambush;
+    property IsDormant: Boolean read Dormant;
   end;
 
   TQuakeMonsterList = specialize TObjectList<TQuakeMonster>;
@@ -454,6 +473,9 @@ var
   { Quake 2 "notarget" cheat: monsters don't notice the player
     (also keeps the CI screenshot comparison free of combat) }
   NoTarget: Boolean = False;
+  { The player fired in the last second (Quake 2 show_hostile): monsters
+    nearby notice him even when he's not in front of them }
+  PlayerShowHostile: Boolean = False;
 
 implementation
 
@@ -638,8 +660,51 @@ begin
     Transform.Add(Model.Scene);
   end;
   SetState(msIdle);
+  Ambush := (AEntity.SpawnFlags and 1) <> 0;
   Transform.AddBehavior(Self);
   AParent.Add(Transform);
+  if ((AEntity.SpawnFlags and 2) <> 0) and (AEntity.TargetName <> '') then
+    SetDormant(True);
+end;
+
+procedure TQuakeMonster.SetDormant(const Value: Boolean);
+begin
+  Dormant := Value;
+  { Absent: not drawn, doesn't collide, can't be hit }
+  Transform.Exists := not Value;
+end;
+
+procedure TQuakeMonster.Spawn;
+begin
+  if not Dormant then
+    Exit;
+  SetDormant(False);
+  WritelnLog('QuakeEntities', 'Monster %s spawned (trigger_spawn)', [Transform.Name]);
+  { monster_triggered_spawn: hunts whoever triggered it, unless AMBUSH }
+  if not Ambush then
+    Alert;
+end;
+
+function TQuakeMonster.WouldNotice(const Delta: TVector3): Boolean;
+var
+  Dist: Single;
+  InFront: Boolean;
+begin
+  Dist := Delta.Length;
+  if Dist > 1000 then
+    Exit(False); { RANGE_FAR }
+  if Dist < 80 then
+    Exit(True); { RANGE_MELEE }
+  InFront := TVector3.DotProduct(YawToCgeDir(FacingAngle), Delta / Dist) > 0.3;
+  if Dist < 500 then
+    Result := InFront or PlayerShowHostile { RANGE_NEAR }
+  else
+    Result := InFront; { RANGE_MID }
+end;
+
+function TQuakeMonster.HasLineOfSight(const Target: TVector3): Boolean;
+begin
+  Result := Transform.LineOfSight(EyePos, Target);
 end;
 
 destructor TQuakeMonster.Destroy;
@@ -718,7 +783,7 @@ end;
 
 procedure TQuakeMonster.Alert;
 begin
-  if Alerted or not IsAlive or NoTarget then
+  if Alerted or not IsAlive or NoTarget or Dormant then
     Exit;
   Alerted := True;
   Sounds.PlayAt(MonsterSound(Def, Def^.SightSound), Transform, 1, 1, chVoice);
@@ -728,6 +793,8 @@ begin
     GoalEntity := OnPickTarget(CombatTarget);
   CombatTarget := '';
   SetState(msChase);
+  if Assigned(OnFoundTarget) then
+    OnFoundTarget(Self);
 end;
 
 procedure TQuakeMonster.ResolveTargets;
@@ -872,6 +939,8 @@ end;
 
 procedure TQuakeMonster.TakeDamage(const Dmg: Integer);
 begin
+  if Dormant then
+    Exit;
   if not IsAlive then
   begin
     { Shooting corpses gibs them }
@@ -943,6 +1012,8 @@ var
   Delta, MoveVec: TVector3;
   Dist, TargetYaw, Diff: Single;
 begin
+  if Dormant then
+    Exit;
   if Model <> nil then
   begin
     Model.Update(SecondsPassed);
@@ -1005,7 +1076,7 @@ begin
           Sounds.PlayAt(MonsterSearchSound(Def), Transform, 1, ATTN_IDLE, chVoice);
       end;
     end;
-    if (not Alerted) and CanSeePlayer and (Dist < 1200) and not NoTarget then
+    if (not Alerted) and CanSeePlayer and WouldNotice(Delta) and not NoTarget then
       Alert;
   end;
 

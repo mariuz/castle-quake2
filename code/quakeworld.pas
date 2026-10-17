@@ -46,6 +46,10 @@ type
     FPlayerPos: TVector3;
     FPlayerDir: TVector3;
     FTime: Single;
+    { Last time the player fired (Quake 2 show_hostile lasts 1 s) }
+    FLastFireTime: Single;
+    { Monsters that found the player this frame (Quake 2 level.sight_entity) }
+    FSightEntities: specialize TList<TQuakeMonster>;
     FWeaponTransform: TCastleTransform;
     FWeaponModel: TQuakeMd2Instance;
     FWeaponModelSlot: Integer;
@@ -112,8 +116,16 @@ type
     { Rockets, blaster bolts and BFG balls light their surroundings }
     procedure AddProjectileLights;
     { Send the dynamic lights nearest to the player to the world shader }
+    procedure MonsterFoundTarget(const Monster: TQuakeMonster);
+    { Non-ambush monsters that see a monster which just found the player
+      join in (FindTarget's sight_entity check) }
+    procedure ProcessSightEntities;
     procedure SetSurfaceLights;
     procedure CullTransform(const T: TCastleTransform; const Box: TBox3D);
+    { The player made a noise at Pos (Quake 2 PlayerNoise): monsters within
+      1000 units that can hear it (PHS, connected areas) wake; AMBUSH ones
+      only if they also see it }
+    procedure PlayerNoise(const Pos: TVector3);
     procedure Explode(const Pos: TVector3; const Damage: Integer; const Radius: Single;
       const FromPlayer: Boolean; const ExplosionSound: Boolean = True);
     function MonsterByTransform(const T: TCastleTransform): TQuakeMonster;
@@ -261,6 +273,7 @@ begin
   Sounds.WorldParent := AItems;
   FPickups := TQuakePickupList.Create(True);
   FMonsters := TQuakeMonsterList.Create(True);
+  FSightEntities := specialize TList<TQuakeMonster>.Create;
   FProjectiles := TQuakeProjectileList.Create(True);
   FTriggers := TQuakeTriggerList.Create(True);
   FSpeakers := TQuakeSpeakerList.Create(True);
@@ -285,6 +298,7 @@ begin
   FreeAndNil(FWeaponTransform);
   FPickups.Free;
   FMonsters.Free;
+  FSightEntities.Free;
   FProjectiles.Free;
   FTriggers.Free;
   FSpeakers.Free;
@@ -316,6 +330,7 @@ end;
 procedure TQuakeWorld.ClearLevel;
 begin
   FPickups.Clear;
+  FSightEntities.Clear;
   FMonsters.Clear;
   FProjectiles.Clear;
   FTriggers.Clear;
@@ -438,6 +453,7 @@ var
   ItemDef: PQuakeItemDef;
   MonsterDef: PQuakeMonsterDef;
   Monster: TQuakeMonster;
+  AmbushCount, DormantCount: Integer;
   Box: TBox3D;
   Trig: TQuakeTrigger;
   SpawnFlags: Integer;
@@ -470,6 +486,7 @@ begin
     begin
       Monster := TQuakeMonster.CreateMonster(FMap, MonsterDef, Ent, Pos, Ent.Angle);
       Monster.OnAttack := @MonsterAttack;
+      Monster.OnFoundTarget := @MonsterFoundTarget;
       Monster.OnPickTarget := @PickTarget;
       Monster.OnUseTargets := @UseTargets;
       Monster.ResolveTargets;
@@ -570,6 +587,17 @@ begin
   WritelnLog('QuakeWorld', 'Spawned %d pickups, %d monsters, %d triggers, %d movers, %d speakers, %d props, %d lasers, %d timers',
     [FPickups.Count, FMonsters.Count, FTriggers.Count, FGeometry.Movers.Count, FSpeakers.Count,
      FProps.Count, FLasers.Count, FTimers.Count]);
+  AmbushCount := 0;
+  DormantCount := 0;
+  for Monster in FMonsters do
+  begin
+    if Monster.Ambush then
+      Inc(AmbushCount);
+    if Monster.Dormant then
+      Inc(DormantCount);
+  end;
+  WritelnLog('QuakeWorld', '%d ambush monsters, %d waiting for a trigger to spawn',
+    [AmbushCount, DormantCount]);
 end;
 
 function TQuakeWorld.LoadMap(const AMapName: String): Boolean;
@@ -1002,7 +1030,12 @@ begin
   begin
     for M in FMonsters do
       if M.Entity = Ent then
-        M.Alert;
+      begin
+        if M.Dormant then
+          M.Spawn { TRIGGER_SPAWN }
+        else
+          M.Alert;
+      end;
   end else
   if Copy(CName, 1, 8) = 'trigger_' then
   begin
@@ -1633,6 +1666,48 @@ begin
   FProjectiles.Add(Proj);
 end;
 
+procedure TQuakeWorld.MonsterFoundTarget(const Monster: TQuakeMonster);
+begin
+  if FSightEntities.IndexOf(Monster) < 0 then
+    FSightEntities.Add(Monster);
+end;
+
+procedure TQuakeWorld.ProcessSightEntities;
+var
+  Spotters: array of TQuakeMonster;
+  S, M: TQuakeMonster;
+  I: Integer;
+begin
+  if FSightEntities.Count = 0 then
+    Exit;
+  { Monsters woken here find the player too: they act as sight entities
+    on the next frame, like Quake 2's one sight_entity per frame }
+  SetLength(Spotters, FSightEntities.Count);
+  for I := 0 to FSightEntities.Count - 1 do
+    Spotters[I] := FSightEntities[I];
+  FSightEntities.Clear;
+  for S in Spotters do
+    for M in FMonsters do
+      if (M <> S) and not M.Alerted and not M.Ambush and not M.Dormant and M.IsAlive and
+         M.WouldNotice(S.Transform.Translation - M.Transform.Translation) and
+         M.HasLineOfSight(S.EyePos) then
+        M.Alert;
+end;
+
+procedure TQuakeWorld.PlayerNoise(const Pos: TVector3);
+var
+  M: TQuakeMonster;
+begin
+  if NoTarget or (FGeometry = nil) then
+    Exit;
+  for M in FMonsters do
+    if (not M.Alerted) and (not M.Dormant) and M.IsAlive and
+       (PointsDistance(M.Transform.Translation, Pos) <= 1000) and
+       FGeometry.CanHear(Pos, M.Transform.Translation) and
+       ((not M.Ambush) or M.HasLineOfSight(Pos)) then
+      M.Alert;
+end;
+
 procedure TQuakeWorld.Explode(const Pos: TVector3; const Damage: Integer; const Radius: Single;
   const FromPlayer: Boolean; const ExplosionSound: Boolean);
 var
@@ -1643,6 +1718,9 @@ var
   Points: Integer;
 begin
   Particles.SpawnExplosion(Pos);
+  { Quake 2 rocket / grenade impacts: PlayerNoise(PNOISE_IMPACT) }
+  if FromPlayer then
+    PlayerNoise(Pos);
   { Heard from where it happens (Quake 2 TE_ROCKET_EXPLOSION, ATTN_NORM) }
   if ExplosionSound then
     Sounds.PlayAtPoint('sound/weapons/rocklx1a.wav', Pos);
@@ -1932,6 +2010,7 @@ begin
     Exit;
   FPlayerPos := PlayerPos;
   FPlayerDir := PlayerDir;
+  PlayerShowHostile := (FLastFireTime > 0) and (FTime - FLastFireTime < 1);
   FTime := FTime + SecondsPassed;
   FStats.LevelTime := FStats.LevelTime + SecondsPassed;
   FStats.QuadTime := Max(0, FStats.QuadTime - SecondsPassed);
@@ -1983,6 +2062,7 @@ begin
       UseTargets(M.DeathTarget);
     end;
   end;
+  ProcessSightEntities;
   FGeometry.ScenePlayerClip.Collides := True;
 
   UpdateTimersAndLasers(SecondsPassed);
@@ -2085,10 +2165,9 @@ begin
   else
     PlayWeaponAnim('fire,shoot,attack', False);
 
-  { Firing makes noise: wake up monsters nearby }
-  for I := 0 to FMonsters.Count - 1 do
-    if PointsDistance(FMonsters[I].Transform.Translation, Origin) < 800 then
-      FMonsters[I].Alert;
+  { Firing makes noise (PNOISE_WEAPON) and shows the player hostile }
+  FLastFireTime := FTime;
+  PlayerNoise(Origin);
 
   case FStats.CurrentWeapon of
     1: SpawnProjectile(pkBlasterBolt, MuzzlePos, Dir, 1000, 15 * Mult, True);
@@ -2218,6 +2297,7 @@ begin
     O.Add('state', Ord(FMonsters[I].State));
     O.Add('alerted', FMonsters[I].Alerted);
     O.Add('gibbed', FMonsters[I].Gibbed);
+    O.Add('dormant', FMonsters[I].Dormant);
     Arr.Add(O);
   end;
   Result.Add('monsters', Arr);
@@ -2372,6 +2452,7 @@ begin
       FMonsters[I].RestoreState(JsonToVec(O.Find('pos')), O.Get('facing', 0.0),
         O.Get('health', 0), TMonsterState(O.Get('state', 0)),
         O.Get('alerted', False), O.Get('gibbed', False));
+      FMonsters[I].SetDormant(O.Get('dormant', False));
     end;
 
   Arr := Obj.Get('pickups', TJSONArray(nil));

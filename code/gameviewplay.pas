@@ -486,6 +486,16 @@ begin
           BoolToStr(FWorld.Monsters[J].MoveTarget <> nil, True),
           BoolToStr(FWorld.Monsters[J].GoalEntity <> nil, True), FWorld.Monsters[J].CombatTarget,
           BoolToStr(FWorld.Monsters[J].HoldGround, True)]);
+    P := 0;
+    Val := 0;
+    for J := 0 to FWorld.Monsters.Count - 1 do
+      if FWorld.Monsters[J].IsAlive and not FWorld.Monsters[J].Dormant then
+      begin
+        Val := Val + 1;
+        if FWorld.Monsters[J].Alerted then
+          Inc(P);
+      end;
+    WritelnLog('Demo', 'Monsters: %d alerted of %d alive', [P, Round(Val)]);
     for J := 0 to FWorld.Lasers.Count - 1 do
       WritelnLog('Demo', 'Laser %d on %s length %.0f', [J,
         BoolToStr(FWorld.Lasers[J].IsOn, True), FWorld.Lasers[J].Length]);

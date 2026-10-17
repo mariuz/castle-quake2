@@ -216,6 +216,7 @@ type
     function GetFaceCount: Integer; inline;
     function GetModelCount: Integer; inline;
     function GetLeafCount: Integer; inline;
+    procedure DecompressVis(const Cluster, Kind: Integer; var Row: TBytes);
     procedure ParseEntities(const Text: String);
     procedure LoadTextures;
     procedure LoadLadderBrushes(const Data: PByte; const Hdr: Pointer);
@@ -269,6 +270,9 @@ type
       ClusterBytes bytes (CM_ClusterPVS). All bits set when the map has no
       visibility data or Cluster is -1. }
     procedure ClusterPVS(const Cluster: Integer; var Row: TBytes);
+    { Clusters that can hear Cluster (potentially hearable set: the PVS
+      of all clusters in its PVS), same format as ClusterPVS }
+    procedure ClusterPHS(const Cluster: Integer; var Row: TBytes);
     function ClusterBytes: Integer;
 
     { Area of a leaf (0 for solid leafs / none) }
@@ -1157,6 +1161,16 @@ begin
 end;
 
 procedure TQuakeBsp.ClusterPVS(const Cluster: Integer; var Row: TBytes);
+begin
+  DecompressVis(Cluster, 0, Row);
+end;
+
+procedure TQuakeBsp.ClusterPHS(const Cluster: Integer; var Row: TBytes);
+begin
+  DecompressVis(Cluster, 1, Row);
+end;
+
+procedure TQuakeBsp.DecompressVis(const Cluster, Kind: Integer; var Row: TBytes);
 var
   RowSize, Ofs, Count: Integer;
   OutPos: Integer;
@@ -1169,8 +1183,8 @@ begin
     Exit;
   end;
   FillChar(Row[0], RowSize, 0);
-  { bitofs[Cluster][DVIS_PVS] }
-  Ofs := PLongInt(@FVisData[SizeOf(LongInt) * (1 + 2 * Cluster)])^;
+  { bitofs[Cluster][Kind]: DVIS_PVS = 0, DVIS_PHS = 1 }
+  Ofs := PLongInt(@FVisData[SizeOf(LongInt) * (1 + 2 * Cluster + Kind)])^;
   OutPos := 0;
   { Run-length decompression like Quake 2's CM_DecompressVis: a zero byte
     is followed by the number of zero bytes it stands for }
