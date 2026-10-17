@@ -77,10 +77,14 @@ type
     procedure Accelerate(const WishDir: TVector3; const WishSpeed, Accel, SecondsPassed: Single);
     procedure ApplyFriction(const SecondsPassed: Single);
     function TryHorizontalMove(const Pos: TVector3; const Delta: TVector3): TVector3;
+    procedure ApplyTurn;
   public
     { Input for this frame, set by the view: -1..1 }
     InputForward, InputSide: Single;
     InputJump, InputCrouch: Boolean;
+    { Degrees to turn this frame (gamepad look): yaw left, pitch up; applied
+      to the view without effects, then cleared }
+    InputYaw, InputPitch: Single;
     { Temporarily frozen (dead, intermission) }
     Suspended: Boolean;
     constructor Create(AOwner: TComponent); override;
@@ -506,8 +510,35 @@ begin
   if (not FActive) or Suspended or (Parent = nil) or (World = nil) or (SecondsPassed <= 0) then
     Exit;
   ClearViewEffects;
+  ApplyTurn;
   Move(SecondsPassed);
   UpdateViewEffects(SecondsPassed);
+end;
+
+procedure TQuakePlayerMovement.ApplyTurn;
+const
+  { Keep the view away from straight up / down, like mouse look }
+  MaxPitch = 89;
+var
+  Dir, Side: TVector3;
+  Pitch, NewPitch: Single;
+begin
+  if (InputYaw = 0) and (InputPitch = 0) then
+    Exit;
+  Dir := Parent.Direction;
+  if InputYaw <> 0 then
+    Dir := RotatePointAroundAxisRad(DegToRad(InputYaw), Dir, Vector3(0, 1, 0));
+  if InputPitch <> 0 then
+  begin
+    Pitch := RadToDeg(ArcSin(EnsureRange(Dir.Normalize.Y, -1, 1)));
+    NewPitch := EnsureRange(Pitch + InputPitch, -MaxPitch, MaxPitch);
+    Side := TVector3.CrossProduct(Dir, Vector3(0, 1, 0));
+    if not Side.IsZero then
+      Dir := RotatePointAroundAxisRad(DegToRad(NewPitch - Pitch), Dir, Side);
+  end;
+  Parent.SetView(Dir, Vector3(0, 1, 0));
+  InputYaw := 0;
+  InputPitch := 0;
 end;
 
 procedure TQuakePlayerMovement.Move(const SecondsPassed: Single);

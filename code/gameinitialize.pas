@@ -11,7 +11,7 @@ uses
   SysUtils, Classes,
   CastleWindow, CastleLog, CastleUIControls, CastleApplicationProperties, CastleParameters,
   CastleUtils, CastleFilesUtils, CastleUriUtils,
-  QuakePak, QuakePalette, QuakeSound, QuakeGeometry, QuakeMonsterTypes, QuakeSettings, CastleConfig
+  QuakePak, QuakePalette, QuakeSound, QuakeGeometry, QuakeMonsterTypes, QuakeSettings, QuakeGamepad, CastleConfig
   {$region 'Castle Initialization Uses'}
   // The content here may be automatically updated by CGE editor.
   , GameViewMenu
@@ -137,6 +137,9 @@ begin
   end else
     Settings.Persistent := False;
   GameSkill := Settings.Skill;
+  { Game controllers; not in autotests (results must not depend on devices) }
+  if AutoTestMap = '' then
+    InitializeGamepads;
   Settings.ApplyAudio;
   { Designs editable in the CGE editor: monster tunables, named sounds }
   LoadMonsterTypes;

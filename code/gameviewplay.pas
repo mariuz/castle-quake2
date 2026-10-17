@@ -14,7 +14,7 @@ uses
   CastleViewport, CastleCameras, CastleTransform, CastleColors, CastleLog,
   CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound,
-  QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap,
+  QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad,
   QuakePlayer, QuakeSettings, QuakeMapReport, fpjson, jsonparser, CastleDownload;
 
 type
@@ -53,6 +53,8 @@ type
     FDemoIndex: Integer;
     FDemoTimer: Single;
     FDemoFireHeld: Boolean;
+    { Right trigger held this frame }
+    FGamepadFire: Boolean;
     FIntermission: Boolean;
     FIntermissionTime: Single;
     { Demo script movement: hold forward / side input until FDemoMoveTime runs out }
@@ -215,8 +217,12 @@ end;
 procedure TViewPlay.UpdateMovementInput(const SecondsPassed: Single);
 var
   Typing: Boolean;
+  Pad: TGamepadInput;
 begin
   Typing := Console.IsOpen or Menu.Exists or FIntermission or FWorld.Dead;
+  FGamepadFire := False;
+  PlayerMovement.InputYaw := 0;
+  PlayerMovement.InputPitch := 0;
   PlayerMovement.InputForward := 0;
   PlayerMovement.InputSide := 0;
   PlayerMovement.InputJump := False;
@@ -234,6 +240,18 @@ begin
       PlayerMovement.InputSide := PlayerMovement.InputSide - 1;
     PlayerMovement.InputJump := Container.Pressed[Settings.Keys[qaJump]];
     PlayerMovement.InputCrouch := Container.Pressed[Settings.Keys[qaCrouch]];
+    { Game controllers (sticks add to the keys) }
+    Pad := ReadGamepads(SecondsPassed, Settings.MouseSensitivity, Settings.InvertMouse);
+    if Pad.Connected then
+    begin
+      PlayerMovement.InputForward := EnsureRange(PlayerMovement.InputForward + Pad.Forward, -1, 1);
+      PlayerMovement.InputSide := EnsureRange(PlayerMovement.InputSide + Pad.Side, -1, 1);
+      PlayerMovement.InputYaw := Pad.YawDeg;
+      PlayerMovement.InputPitch := Pad.PitchDeg;
+      PlayerMovement.InputJump := PlayerMovement.InputJump or Pad.Jump;
+      PlayerMovement.InputCrouch := PlayerMovement.InputCrouch or Pad.Crouch;
+      FGamepadFire := Pad.Fire;
+    end;
   end;
   { Scripted movement for autotests }
   if FDemoMoveTime > 0 then
@@ -366,6 +384,9 @@ var
   Dir, Target: TVector3;
   Ignore: TCastleTransform;
   Key, K: TKey;
+  Vals: TStringArray;
+  Button: TGameControllerButton;
+  PadEvent: TInputPressRelease;
 begin
   if FDemoIndex >= FDemoCommands.Count then
   begin
@@ -460,6 +481,33 @@ begin
       Container.EventRelease(InputKey(TVector2.Zero, Key, '', []));
     end else
       WritelnWarning('Demo', 'Unknown key "%s"', [Param]);
+  end else
+  if Action = 'GP' then { Virtual gamepad: "GP:lx ly rx ry lt rt" (sticks -1..1, triggers 0..1), "GP:" off }
+  begin
+    Vals := Param.Split([' '], TStringSplitOptions.ExcludeEmpty);
+    VirtualGamepad := Default(TVirtualGamepad);
+    VirtualGamepad.Active := Length(Vals) > 0;
+    for J := 0 to Min(High(Vals), 5) do
+      case J of
+        0: VirtualGamepad.Left.X := StrToFloatDef(Vals[J], 0);
+        1: VirtualGamepad.Left.Y := StrToFloatDef(Vals[J], 0);
+        2: VirtualGamepad.Right.X := StrToFloatDef(Vals[J], 0);
+        3: VirtualGamepad.Right.Y := StrToFloatDef(Vals[J], 0);
+        4: VirtualGamepad.LeftTrigger := StrToFloatDef(Vals[J], 0);
+        5: VirtualGamepad.RightTrigger := StrToFloatDef(Vals[J], 0);
+      end;
+  end else
+  if Action = 'GB' then { Press and release a gamepad button, e.g. "GB:south" }
+  begin
+    if GamepadButtonFromName(Param, Button) then
+    begin
+      PadEvent := Default(TInputPressRelease);
+      PadEvent.EventType := itGameController;
+      PadEvent.Controller.Button := Button;
+      Container.EventPress(PadEvent);
+      Container.EventRelease(PadEvent);
+    end else
+      WritelnWarning('Demo', 'Unknown gamepad button "%s"', [Param]);
   end else
   if Action = 'J' then { Jump }
     FDemoJump := True
@@ -817,7 +865,8 @@ begin
   { Hold to fire (left mouse / Ctrl) }
   Firing := FDemoFireHeld;
   if not Console.IsOpen and not Menu.Exists then
-    Firing := Firing or Container.Pressed[Settings.Keys[qaFire]] or (buttonLeft in Container.MousePressed);
+    Firing := Firing or Container.Pressed[Settings.Keys[qaFire]] or (buttonLeft in Container.MousePressed) or
+      FGamepadFire;
   if Firing then
     FWorld.FireWeapon(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
 end;
@@ -827,6 +876,7 @@ const
   WeaponKeys: array[1..10] of TKey = (key1, key2, key3, key4, key5, key6, key7, key8, key9, key0);
 var
   Slot: Integer;
+  MenuEvent: TInputPressRelease;
 begin
   Result := False;
 
@@ -843,9 +893,11 @@ begin
   if Menu.Exists then
   begin
     { The menu uses Escape to go back from a page or cancel a key binding }
-    if Menu.Press(Event) then
+    { Game controller buttons act as the menu keys }
+    MenuEvent := GamepadMenuEvent(Event);
+    if Menu.Press(MenuEvent) then
       Exit(True);
-    if Event.IsKey(keyEscape) then
+    if MenuEvent.IsKey(keyEscape) then
     begin
       Menu.Exists := False;
       WalkNavigation.MouseLook := FAutoTestMap = '';
@@ -860,10 +912,30 @@ begin
     Exit(True);
   end;
 
-  if Event.IsKey(keyEscape) then
+  if Event.IsKey(keyEscape) or Event.IsController(gbMenu) then
   begin
     Menu.Exists := True;
     WalkNavigation.MouseLook := False;
+    Exit(True);
+  end;
+
+  if Event.EventType = itGameController then
+  begin
+    if GamepadWeaponCycle(Event.Controller.Button) <> 0 then
+    begin
+      CycleWeapon(GamepadWeaponCycle(Event.Controller.Button));
+      Exit(True);
+    end;
+    case Event.Controller.Button of
+      gbWest: FWorld.ActivateUse(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
+      gbNorth: FWorld.SelectWeapon(11); { hand grenades }
+      gbView:
+        begin
+          Hud.HelpVisible := not Hud.HelpVisible;
+          Sounds.Play('sound/misc/pc_up.wav');
+        end;
+      else Exit(False);
+    end;
     Exit(True);
   end;
 

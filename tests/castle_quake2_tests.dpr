@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad;
 
 var
   Passed, Failed: Integer;
@@ -597,6 +597,43 @@ begin
   Check(ClassSupport('misc_viper', NoteText) = csUnsupported, 'misc_viper is unsupported');
 end;
 
+procedure TestGamepad;
+var
+  V: TVector2;
+  F, S, Yaw, Pitch, Yaw2, Pitch2: Single;
+  E: TInputPressRelease;
+begin
+  { Deadzone: small drift ignored, output starts at 0 and reaches 1 }
+  Check(ApplyDeadZone(Vector2(0.15, 0.1)).IsZero, 'stick drift inside the deadzone ignored');
+  V := ApplyDeadZone(Vector2(0, 0.21));
+  Check((V.Y > 0) and (V.Y < 0.05), 'stick just past the deadzone gives a small value');
+  Check(SameValue(ApplyDeadZone(Vector2(0, 1)).Y, 1, 1e-5) and
+    SameValue(ApplyDeadZone(Vector2(1.2, 0)).X, 1, 1e-5), 'full stick is 1 (clamped)');
+  StickToMove(Vector2(0, 1), F, S);
+  Check((F > 0.99) and (Abs(S) < 1e-5), 'left stick up moves forward');
+  StickToMove(Vector2(-1, 0), F, S);
+  Check(S < -0.99, 'left stick left strafes left');
+  { Look: right turns right (negative yaw), up looks up, half deflection is
+    a quarter speed, sensitivity and invert apply }
+  StickToLook(Vector2(1, 0), 1, 1, False, Yaw, Pitch);
+  Check(SameValue(Yaw, -GamepadYawSpeed, 0.01) and (Pitch = 0), 'right stick right turns right at full speed');
+  StickToLook(Vector2(0, 0.6), 0.5, 1, False, Yaw, Pitch);
+  StickToLook(Vector2(0, 0.6), 0.5, 2, True, Yaw2, Pitch2);
+  Check((Pitch > 0) and SameValue(Pitch, 0.5 * 0.25 * GamepadPitchSpeed, 0.01), 'look response is squared');
+  Check(SameValue(Pitch2, -2 * Pitch, 0.01), 'sensitivity and invert apply to the stick');
+  { Menus }
+  CheckEquals(Ord(keyArrowDown), Ord(StickToArrow(Vector2(0.2, -0.9))), 'stick down is the down arrow');
+  CheckEquals(Ord(keyNone), Ord(StickToArrow(Vector2(0.3, 0.3))), 'centered stick is no arrow');
+  CheckEquals(Ord(keyEnter), Ord(GamepadMenuKey(gbSouth)), 'A confirms in menus');
+  CheckEquals(Ord(keyEscape), Ord(GamepadMenuKey(gbEast)), 'B goes back in menus');
+  E := Default(TInputPressRelease);
+  E.EventType := itGameController;
+  E.Controller.Button := gbDPadUp;
+  Check(GamepadMenuEvent(E).IsKey(keyArrowUp), 'D-pad up is the up arrow in menus');
+  CheckEquals(1, GamepadWeaponCycle(gbRightBumper), 'right bumper selects the next weapon');
+  CheckEquals(-1, GamepadWeaponCycle(gbLeftBumper), 'left bumper selects the previous weapon');
+end;
+
 procedure TestPlayerTrail;
 var
   Trail: TQuakePlayerTrail;
@@ -653,6 +690,7 @@ begin
   TestSounds;
   TestMapReport;
   TestPlayerTrail;
+  TestGamepad;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then

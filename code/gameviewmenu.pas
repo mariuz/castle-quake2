@@ -32,7 +32,7 @@ implementation
 
 uses
   CastleWindow,
-  QuakeSound, GameViewPlay;
+  QuakeSound, QuakeGamepad, GameViewPlay;
 
 constructor TViewMenu.Create(AOwner: TComponent);
 begin
@@ -67,7 +67,7 @@ begin
   Result := inherited Press(Event);
   if Result then
     Exit;
-  Result := Menu.Press(Event);
+  Result := Menu.Press(GamepadMenuEvent(Event));
 end;
 
 end.

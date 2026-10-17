@@ -102,6 +102,9 @@ jobs:
           # Menu: Single Player -> Hard starts the first map; Options -> field of view
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo2 test_output/menu --demo "O:notarget,W:1,B:escape,B:enter,B:down,B:down,B:enter,W:1,B:escape,B:down,B:down,B:enter,B:down,B:down,B:down,B:down,B:right,B:right,W:0.2,S,B:escape,B:escape,W:0.5,S,Q" > test_output/menu.log 2>&1
           grep -q "Spawned 35 pickups, 33 monsters" test_output/menu.log && ! grep -q Exception test_output/menu.log || { echo "::error::Hard skill new game from the menu"; exit 1; }
+          # Virtual gamepad: left stick walks, right stick turns, right trigger fires, Menu opens the menu
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/gamepad --demo "O:notarget,W:1.5,K,C:2,W:0.5,GP:0 1 0.6 0 0 1,W:1.2,GP:,W:0.3,V,GB:menu,W:0.3,S,Q" > test_output/gamepad.log 2>&1
+          ! grep -q "Demo: Player at 128 46 320 " test_output/gamepad.log && grep -q "Demo: Player at" test_output/gamepad.log && ! grep -q Exception test_output/gamepad.log || { echo "::error::Virtual gamepad did not move the player"; exit 1; }
           # Map compatibility report of the demo PAK (docs/map-report-demo.md):
           # every entity class of the demo maps must stay handled
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --map-report test_output/map-report.md > test_output/map-report.log 2>&1

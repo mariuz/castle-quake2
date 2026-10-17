@@ -8,7 +8,7 @@ interface
 uses
   SysUtils, Classes, Math,
   CastleVectors, CastleUIControls, CastleControls, CastleKeysMouse, CastleColors,
-  CastleRectangles, CastleGLUtils, CastleImages, CastleSoundEngine, QuakePak, QuakeSound, QuakeSettings;
+  CastleRectangles, CastleGLUtils, CastleImages, CastleSoundEngine, QuakePak, QuakeSound, QuakeSettings, QuakeGamepad;
 
 type
   TMenuAction = (
@@ -35,6 +35,9 @@ type
     { Controls page: action waiting for a key press, or False }
     FBinding: Boolean;
     FBindingAction: TQuakeAction;
+    { Gamepad stick as arrows: direction held and time to the next repeat }
+    FStickArrow: TKey;
+    FStickRepeat: Single;
     procedure RebuildMenuItems(const KeepSelection: Boolean = False);
     procedure ExecuteSelection;
     procedure ShowPage(const Page: TMenuPage);
@@ -47,6 +50,7 @@ type
     destructor Destroy; override;
 
     function Press(const Event: TInputPressRelease): Boolean; override;
+    procedure Update(const SecondsPassed: Single; var HandleInput: Boolean); override;
     procedure Render; override;
 
     property OnMenuAction: TOnMenuActionEvent read FOnMenuAction write FOnMenuAction;
@@ -304,6 +308,34 @@ begin
       end;
     smShowcase:
       ShowPage(smMain);
+  end;
+end;
+
+procedure TQuakeMenu.Update(const SecondsPassed: Single; var HandleInput: Boolean);
+var
+  Arrow: TKey;
+begin
+  inherited Update(SecondsPassed, HandleInput);
+  { The left stick works like the arrow keys, repeating while held }
+  Arrow := ReadGamepads(0, 1, False).MenuArrow;
+  if (Arrow = keyNone) or FBinding then
+  begin
+    FStickArrow := keyNone;
+    Exit;
+  end;
+  if Arrow <> FStickArrow then
+  begin
+    FStickArrow := Arrow;
+    FStickRepeat := 0.4;
+    Press(InputKey(TVector2.Zero, Arrow, '', []));
+  end else
+  begin
+    FStickRepeat := FStickRepeat - SecondsPassed;
+    if FStickRepeat <= 0 then
+    begin
+      FStickRepeat := 0.15;
+      Press(InputKey(TVector2.Zero, Arrow, '', []));
+    end;
   end;
 end;
 
