@@ -110,6 +110,8 @@ castle-engine compile
 .\castle-quake2-tests.exe   # parser unit tests (PAK, PCX, WAL, BSP, MD2, SP2) against the demo PAK
 ```
 
+`castle-quake2 --map-report report.md` loads every map in the loaded PAKs and writes a compatibility report (load times, entity counts, unsupported and partially supported entity classes); see [`docs/map-report-demo.md`](docs/map-report-demo.md). With a full Quake 2 install (`-basedir`) it shows what the game still lacks.
+
 CI also runs the `--autotest` demo scripts on Linux (xvfb + Mesa), uploads their screenshots, and compares an early screenshot of each demo map with `tests/reference/*.png` (`castle-quake2-tests --compare`, 64x36 block averages), so rendering regressions fail the build.
 
 ### Command line

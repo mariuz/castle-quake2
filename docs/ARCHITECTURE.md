@@ -164,4 +164,6 @@ Quake 2's `SV_CalcViewOffset` / `SV_CalcGunOffset` / `P_DamageFeedback`: every f
 
 ## 9. Automated testing
 
+`--map-report <file.md>` runs like an autotest (default options) but loads every map of the PAKs through `TQuakeWorld.LoadMap` (`*map`, a fresh unit each) and writes a Markdown report (`QuakeMapReport.TMapReport`): load time, faces, entities, monsters, items, and the entity classes the game doesn't handle (`EntitySupport`: supported = spawned, used by targets, drawn or used as markers; partial = generic monster AI, `func_*` brushes without their behaviour, `func_wall` toggles; unsupported = the rest), counting only entities spawned on the current skill. CI runs it on the demo PAK and fails if an unsupported class appears.
+
 `--autotest <map> <prefix> --demo "<script>"` loads a map, runs the script (see README) and exits after a final screenshot. Screenshots log the FPS and camera position, `V` logs every mover's state, and `N:` / `I:` / `D:` place the camera on a floor near a monster / item / mover, which makes visual regression checks of AI, pickups and movers possible without a human player.

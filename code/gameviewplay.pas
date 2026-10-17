@@ -15,7 +15,7 @@ uses
   CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound,
   QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap,
-  QuakePlayer, QuakeSettings, fpjson, jsonparser, CastleDownload;
+  QuakePlayer, QuakeSettings, QuakeMapReport, fpjson, jsonparser, CastleDownload;
 
 type
   TCameraMode = (cmFirstPerson, cmNoclip);
@@ -47,6 +47,7 @@ type
     FAutoTestPrefix: String;
     FAutoTestDemo: String;
     FAutoTestActive: Boolean;
+    FMapReportFile: String;
     FAutoTestShots: Integer;
     FDemoCommands: TStringList;
     FDemoIndex: Integer;
@@ -74,6 +75,7 @@ type
     { Autotest helper: stand on a floor near Target, looking at it }
     procedure GoNear(const Target: TVector3);
     procedure QuitNow;
+    procedure RunMapReport;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -93,6 +95,8 @@ type
     property AutoTestMap: String read FAutoTestMap write FAutoTestMap;
     property AutoTestPrefix: String read FAutoTestPrefix write FAutoTestPrefix;
     property AutoTestDemo: String read FAutoTestDemo write FAutoTestDemo;
+    { Load every map and write a compatibility report here, then quit }
+    property MapReportFile: String read FMapReportFile write FMapReportFile;
   end;
 
 var
@@ -174,6 +178,11 @@ begin
   SetCameraMode(FCameraMode);
   ApplySettings;
 
+  if FMapReportFile <> '' then
+  begin
+    RunMapReport;
+    QuitNow;
+  end else
   if FAutoTestMap <> '' then
   begin
     FAutoTestActive := True;
@@ -276,6 +285,55 @@ begin
   except
     on E: Exception do
       WritelnWarning('GameViewPlay', 'Failed to save screenshot "%s": %s', [OutPath, E.Message]);
+  end;
+end;
+
+procedure TViewPlay.RunMapReport;
+var
+  Report: TMapReport;
+  Maps: TStringList;
+  I: Integer;
+  ReportMap: String;
+  StartTime: QWord;
+  Entry: TMapReportEntry;
+  MapLoaded: Boolean;
+begin
+  Report := TMapReport.Create;
+  Maps := Pak.FindFiles('maps/', '.bsp');
+  try
+    Maps.Sort;
+    for I := 0 to Maps.Count - 1 do
+    begin
+      ReportMap := ChangeFileExt(ExtractFileName(Maps[I]), '');
+      StartTime := GetTickCount64;
+      try
+        { "*" starts a new unit: no state remembered from the previous map }
+        MapLoaded := FWorld.LoadMap('*' + ReportMap);
+      except
+        on E: Exception do
+        begin
+          WritelnWarning('MapReport', 'Map %s failed: %s', [ReportMap, E.Message]);
+          MapLoaded := False;
+        end;
+      end;
+      if MapLoaded and (FWorld.Bsp <> nil) then
+      begin
+        Entry := Default(TMapReportEntry);
+        Entry.MapName := ReportMap;
+        Entry.Loaded := True;
+        Entry.LoadSeconds := (GetTickCount64 - StartTime) / 1000;
+        Entry.Monsters := FWorld.Monsters.Count;
+        Entry.Items := FWorld.Pickups.Count;
+        Report.AddMap(Entry, FWorld.Bsp);
+      end else
+        Report.AddFailedMap(ReportMap);
+    end;
+    Report.SaveMarkdown(FMapReportFile, Pak.PakList);
+    WritelnLog('MapReport', 'Wrote "%s": %d maps, %d entities of unsupported classes',
+      [FMapReportFile, Report.MapCount, Report.UnsupportedCount]);
+  finally
+    Maps.Free;
+    Report.Free;
   end;
 end;
 

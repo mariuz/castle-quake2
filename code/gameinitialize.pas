@@ -21,6 +21,7 @@ uses
 var
   Window: TCastleWindow;
   AutoTestMap: String;
+  MapReportFile: String;
   AutoTestPrefix: String;
   AutoTestDemo: String;
   CmdWarp: String;
@@ -60,6 +61,12 @@ begin
       AutoTestPrefix := Parameters[I + 2];
       Inc(I, 2);
     end else
+    if (Parameters[I] = '--map-report') and (I + 1 <= Parameters.High) then
+    begin
+      MapReportFile := Parameters[I + 1];
+      { Runs like an autotest: default options, nothing saved }
+      AutoTestMap := 'report';
+    end;
     if (Parameters[I] = '--demo') and (I + 1 <= Parameters.High) then
     begin
       AutoTestDemo := Parameters[I + 1];
@@ -147,6 +154,7 @@ begin
   if AutoTestMap <> '' then
   begin
     ViewPlay.AutoTestMap := AutoTestMap;
+    ViewPlay.MapReportFile := MapReportFile;
     ViewPlay.AutoTestPrefix := AutoTestPrefix;
     ViewPlay.AutoTestDemo := AutoTestDemo;
     Window.Container.View := ViewPlay;

@@ -47,7 +47,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 ### 3. Full game support (needs the retail PAK)
 - **Medic revive**, **boss behaviour** (supertank, Makron, jorg) and the missing entities (`misc_viper`, `target_blaster`, `func_killbox`, `turret_*`). Test with a local `baseq2` in a nightly-style workflow that is skipped when the PAK isn't available.
 - ~~Save projectiles and delayed events~~ — done (also fixed `trigger_relay` ignoring `delay` and delayed `target_explosion`s, so demo1's opening explosions now come in sequence).
-- A **map compatibility report**: autotest every map in a PAK (`maps` console command), log unknown classnames and load times, so missing entities are found systematically.
+- ~~Map compatibility report~~ — done: `castle-quake2 --map-report report.md` loads every map in the PAKs and lists load times, counts and the unsupported / partially supported entity classes (`QuakeMapReport`); the demo's is in [`map-report-demo.md`](map-report-demo.md) and CI keeps it free of unsupported classes. Run it with a retail `baseq2` to find what to implement next.
 
 ### 4. Editor and inspectability
 - **Property editors** (under `{$ifdef CASTLE_DESIGN_MODE}`): a dropdown of maps in the PAK for `TQuakeMap.MapName`, a file picker for `PakUrl`, a *Reload map* verb (like `TImageGridEditor` in the custom_component sample). Needs the Lazarus-built editor to verify.
@@ -131,5 +131,5 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [ ] `trigger_monsterjump`, monster navigation fallback
 - [ ] Swept player box (`PM_StepSlideMove`)
 - [x] Savegames include projectiles and delayed events
-- [ ] Map compatibility report over a full PAK
+- [x] Map compatibility report (`--map-report`, demo report in docs, checked in CI)
 - [ ] Android build with touch controls

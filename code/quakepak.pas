@@ -38,6 +38,9 @@ type
     { Add a PAK archive from file or castle-data URL. Returns true if successful. }
     function AddFile(const AUrlOrFilename: String): Boolean;
 
+    { Loaded PAK files, comma separated (for reports) }
+    function PakList: String;
+
     { Was this PAK URL / filename already added? }
     function HasPak(const AUrlOrFilename: String): Boolean;
 
@@ -204,6 +207,19 @@ begin
   WritelnLog('QuakePak', 'Loaded PAK "%s": %d files (total indexed: %d)',
     [AUrlOrFilename, Count, FEntries.Count]);
   Result := True;
+end;
+
+function TQuakePak.PakList: String;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 0 to FFilenames.Count - 1 do
+  begin
+    if Result <> '' then
+      Result := Result + ', ';
+    Result := Result + ExtractFileName(FFilenames[I]);
+  end;
 end;
 
 function TQuakePak.HasPak(const AUrlOrFilename: String): Boolean;

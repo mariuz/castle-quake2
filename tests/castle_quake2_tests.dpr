@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport;
 
 var
   Passed, Failed: Integer;
@@ -585,6 +585,18 @@ begin
   end;
 end;
 
+procedure TestMapReport;
+var
+  NoteText: String;
+begin
+  Check(ClassSupport('monster_soldier', NoteText) = csSupported, 'soldiers are fully supported');
+  Check(ClassSupport('weapon_railgun', NoteText) = csSupported, 'items are supported');
+  Check(ClassSupport('func_group', NoteText) = csSupported, 'func_group is merged into the world');
+  Check((ClassSupport('monster_medic', NoteText) = csPartial) and (NoteText <> ''), 'medic is partial (no revive)');
+  Check(ClassSupport('func_conveyor', NoteText) = csPartial, 'unknown func_ brushes are drawn (partial)');
+  Check(ClassSupport('misc_viper', NoteText) = csUnsupported, 'misc_viper is unsupported');
+end;
+
 const
   PakPath = '../data/paks/quake2_demo.pak';
 begin
@@ -615,6 +627,7 @@ begin
   TestDesigns;
   TestSettings;
   TestSounds;
+  TestMapReport;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then
