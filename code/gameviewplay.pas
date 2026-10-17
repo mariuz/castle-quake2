@@ -496,6 +496,7 @@ begin
           Inc(P);
       end;
     WritelnLog('Demo', 'Monsters: %d alerted of %d alive', [P, Round(Val)]);
+    WritelnLog('Demo', 'Projectiles: %d, delayed targets: %d', [FWorld.ProjectileCount, FWorld.DelayedCount]);
     for J := 0 to FWorld.Lasers.Count - 1 do
       WritelnLog('Demo', 'Laser %d on %s length %.0f', [J,
         BoolToStr(FWorld.Lasers[J].IsOn, True), FWorld.Lasers[J].Length]);

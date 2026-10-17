@@ -17,9 +17,12 @@ const
   PlayerEyeHeight = 46.0;
 
 type
+  { Something to do later: use the entities named Target, or (Entity set)
+    do Entity's own delayed action (target_explosion) }
   TDelayedTarget = record
     Time: Single;
     Target: String;
+    Entity: TQuakeEntity;
   end;
 
   { World simulation manager }
@@ -131,6 +134,8 @@ type
     function MonsterByTransform(const T: TCastleTransform): TQuakeMonster;
     function MoverByTransform(const T: TCastleTransform): TQuakeMover;
     procedure UseEntity(const Ent: TQuakeEntity);
+    { Use Ent's targets now, or after its "delay" }
+    procedure UseTargetsOf(const Ent: TQuakeEntity);
     function TimerInterval(const Ent: TQuakeEntity): Single;
     function EntityMoveDir(const Ent: TQuakeEntity): TVector3;
     { A transform at the entity origin, for positional one-shot sounds }
@@ -222,6 +227,8 @@ type
     property RestartPending: Boolean read FRestartPending;
     property Dead: Boolean read FDead;
     property Monsters: TQuakeMonsterList read FMonsters;
+    function ProjectileCount: Integer;
+    function DelayedCount: Integer;
     property Pickups: TQuakePickupList read FPickups;
     property Props: TQuakePropList read FProps;
     property Lasers: TQuakeLaserList read FLasers;
@@ -567,6 +574,7 @@ begin
       begin
         D.Time := FTime + Ent.GetFloat('delay', 1);
         D.Target := Ent.Target;
+        D.Entity := nil;
         FDelayed.Add(D);
         WritelnLog('QuakeWorld', 'Cross-level target will fire "%s"', [Ent.Target]);
       end;
@@ -845,6 +853,21 @@ begin
   end;
 end;
 
+procedure TQuakeWorld.UseTargetsOf(const Ent: TQuakeEntity);
+var
+  D: TDelayedTarget;
+begin
+  { G_UseTargets: an entity's "delay" postpones the use of its targets }
+  if Ent.GetFloat('delay', 0) > 0 then
+  begin
+    D.Time := FTime + Ent.GetFloat('delay', 0);
+    D.Target := Ent.Target;
+    D.Entity := nil;
+    FDelayed.Add(D);
+  end else
+    UseTargets(Ent.Target);
+end;
+
 procedure TQuakeWorld.UseEntity(const Ent: TQuakeEntity);
 var
   CName, Msg, MapName: String;
@@ -1003,7 +1026,15 @@ begin
   end else
   if CName = 'target_explosion' then
   begin
-    Explode(QuakeToCge(Ent.Origin), Ent.GetInt('dmg', 0), 120, False);
+    { use_target_explosion: its own "delay" postpones the blast }
+    if Ent.GetFloat('delay', 0) > 0 then
+    begin
+      D.Time := FTime + Ent.GetFloat('delay', 0);
+      D.Target := '';
+      D.Entity := Ent;
+      FDelayed.Add(D);
+    end else
+      Explode(QuakeToCge(Ent.Origin), Ent.GetInt('dmg', 0), 120, False);
   end else
   if CName = 'target_help' then
   begin
@@ -1024,7 +1055,7 @@ begin
     Sounds.Play('sound/world/quake.wav')
   else
   if CName = 'trigger_relay' then
-    UseTargets(Ent.Target)
+    UseTargetsOf(Ent)
   else
   if Copy(CName, 1, 8) = 'monster_' then
   begin
@@ -1069,6 +1100,7 @@ begin
     begin
       D.Time := FTime + Ent.GetFloat('delay', 0);
       D.Target := Ent.Target;
+      D.Entity := nil;
       FDelayed.Add(D);
     end else
       UseTargets(Ent.Target);
@@ -1348,6 +1380,7 @@ begin
       begin
         D.Time := FTime + Trig.Entity.GetFloat('delay', 0);
         D.Target := Trig.Entity.Target;
+        D.Entity := nil;
         FDelayed.Add(D);
       end else
         UseTargets(Trig.Entity.Target);
@@ -1664,6 +1697,16 @@ begin
       end;
   end;
   FProjectiles.Add(Proj);
+end;
+
+function TQuakeWorld.ProjectileCount: Integer;
+begin
+  Result := FProjectiles.Count;
+end;
+
+function TQuakeWorld.DelayedCount: Integer;
+begin
+  Result := FDelayed.Count;
 end;
 
 procedure TQuakeWorld.MonsterFoundTarget(const Monster: TQuakeMonster);
@@ -2037,7 +2080,10 @@ begin
     begin
       D := FDelayed[I];
       FDelayed.Delete(I);
-      UseTargets(D.Target);
+      if (D.Entity <> nil) and (D.Entity.ClassName = 'target_explosion') then
+        Explode(QuakeToCge(D.Entity.Origin), D.Entity.GetInt('dmg', 0), 120, False)
+      else
+        UseTargets(D.Target);
     end;
 
   for I := 0 to FPickups.Count - 1 do
@@ -2331,6 +2377,37 @@ begin
   end;
   Result.Add('movers', Arr);
 
+  { Projectiles in flight and grenades waiting to explode }
+  Arr := TJSONArray.Create;
+  for I := 0 to FProjectiles.Count - 1 do
+  begin
+    O := TJSONObject.Create;
+    O.Add('kind', Ord(FProjectiles[I].Kind));
+    O.Add('pos', VecToJson(FProjectiles[I].Transform.Translation));
+    O.Add('velocity', VecToJson(FProjectiles[I].Velocity));
+    O.Add('damage', FProjectiles[I].Damage);
+    O.Add('splashDamage', FProjectiles[I].SplashDamage);
+    O.Add('splashRadius', FProjectiles[I].SplashRadius);
+    O.Add('life', FProjectiles[I].Life);
+    O.Add('fromPlayer', FProjectiles[I].FromPlayer);
+    O.Add('owner', FMonsters.IndexOf(FProjectiles[I].Owner));
+    Arr.Add(O);
+  end;
+  Result.Add('projectiles', Arr);
+
+  { Targets fired later (trigger "delay"), as seconds from now: the world
+    clock starts again from 0 when a level is loaded }
+  Arr := TJSONArray.Create;
+  for I := 0 to FDelayed.Count - 1 do
+  begin
+    O := TJSONObject.Create;
+    O.Add('in', Max(0, FDelayed[I].Time - FTime));
+    O.Add('target', FDelayed[I].Target);
+    O.Add('entity', FBsp.Entities.IndexOf(FDelayed[I].Entity));
+    Arr.Add(O);
+  end;
+  Result.Add('delayed', Arr);
+
   Arr := TJSONArray.Create;
   for I := 0 to FGeometry.AreaPortals.Count - 1 do
     Arr.Add(FGeometry.AreaPortals[I].Toggled);
@@ -2396,6 +2473,8 @@ var
   A: TAmmoType;
   Mover: TQuakeMover;
   Prop: TQuakeProp;
+  Proj: TQuakeProjectile;
+  D: TDelayedTarget;
   Key: String;
 begin
   O := Obj.Get('player', TJSONObject(nil));
@@ -2490,6 +2569,53 @@ begin
     for I := 0 to Min(Arr.Count, FGeometry.AreaPortals.Count) - 1 do
       FGeometry.AreaPortals[I].Toggled := Arr.Booleans[I];
 
+  { Savegames restore projectiles and pending events. A revisited level
+    (IncludePlayer = False) starts without projectiles and keeps the events
+    scheduled at spawn: Quake 2's ReadLevel re-arms target_crosslevel_target
+    the same way. }
+  if not IncludePlayer then
+    FProjectiles.Clear;
+  Arr := Obj.Get('projectiles', TJSONArray(nil));
+  if (Arr <> nil) and IncludePlayer then
+  begin
+    FProjectiles.Clear;
+    for I := 0 to Arr.Count - 1 do
+    begin
+      O := Arr.Objects[I];
+      Idx := O.Get('kind', 0);
+      if (Idx < Ord(Low(TProjectileKind))) or (Idx > Ord(High(TProjectileKind))) then
+        Continue;
+      Proj := TQuakeProjectile.Create(FItems, TProjectileKind(Idx), JsonToVec(O.Find('pos')),
+        JsonToVec(O.Find('velocity')), O.Get('damage', 0), O.Get('fromPlayer', False));
+      Proj.SplashDamage := O.Get('splashDamage', 0);
+      Proj.SplashRadius := O.Get('splashRadius', 0.0);
+      Proj.Life := O.Get('life', Proj.Life);
+      Idx := O.Get('owner', -1);
+      if (Idx >= 0) and (Idx < FMonsters.Count) then
+        Proj.Owner := FMonsters[Idx];
+      FProjectiles.Add(Proj);
+    end;
+  end;
+
+  Arr := Obj.Get('delayed', TJSONArray(nil));
+  if IncludePlayer then
+    FDelayed.Clear;
+  if (Arr <> nil) and IncludePlayer then
+  begin
+    FDelayed.Clear;
+    for I := 0 to Arr.Count - 1 do
+    begin
+      D.Time := FTime + Arr.Objects[I].Get('in', 0.0);
+      D.Target := Arr.Objects[I].Get('target', '');
+      Idx := Arr.Objects[I].Get('entity', -1);
+      if (Idx >= 0) and (Idx < FBsp.Entities.Count) then
+        D.Entity := FBsp.Entities[Idx]
+      else
+        D.Entity := nil;
+      FDelayed.Add(D);
+    end;
+  end;
+
   Arr := Obj.Get('props', TJSONArray(nil));
   if Arr <> nil then
     for I := 0 to Min(Arr.Count, FProps.Count) - 1 do
@@ -2552,12 +2678,6 @@ begin
     for I := 0 to Min(Arr.Count, 31) - 1 do
       Lighting.SetStyle(32 + I, Arr.Strings[I]);
 
-  { Pending events from before a save are not restored. When revisiting a
-    level, keep the ones scheduled at spawn: Quake 2's ReadLevel re-arms
-    target_crosslevel_target the same way. }
-  if IncludePlayer then
-    FDelayed.Clear;
-  FProjectiles.Clear;
 end;
 
 function TQuakeWorld.IntermissionSpot(out Pos: TVector3; out Yaw, Pitch: Single): Boolean;

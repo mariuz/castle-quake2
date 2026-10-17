@@ -138,6 +138,10 @@ Audio can be checked headless with OpenAL Soft's wave backend (`ALSOFT_CONF` wit
 
 `TQuakeWorld.SaveState` / `LoadState` write and read a `fpjson` object: player stats and inventory, then arrays per entity list (monsters, pickups, movers, props, triggers, lasers, speakers) in spawn order, plus `func_timer` / `trigger_counter` state keyed by BSP entity index and light styles 32–62. Loading reloads the map fresh and applies the state on top (`TQuakeMonster.RestoreState`, `TQuakeMover.ApplyPose`). The view adds the camera and stores the file with `UrlSaveStream('castle-config:/saves/<name>.json')`.
 
+Projectiles in flight (kind, position, velocity, damage, splash, remaining life, owner monster index) and pending delayed events (seconds left, targetname or the BSP entity index for a delayed `target_explosion`) are saved too, so a quick save mid-fight restores exactly. The world clock restarts at 0 on load, hence the delays are stored relative. A level revisited in a unit (`IncludePlayer = False`) starts without projectiles and keeps the events scheduled at spawn (Quake 2's `ReadLevel` re-arms `target_crosslevel_target` that way).
+
+`delay` follows Quake 2: an entity's `delay` postpones the use of its targets (`UseTargetsOf`, `G_UseTargets` for relays, `target_*`, `trigger_*`), and `target_explosion` delays its own blast (`use_target_explosion`).
+
 ## 7. Castle Game Engine editor integration
 
 | CGE convention (from templates / samples) | How Castle Quake 2 follows it |

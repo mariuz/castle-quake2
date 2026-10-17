@@ -1234,7 +1234,11 @@ begin
   Transform.Name := Format('Projectile%.3d', [NextEntityNumber]);
   Transform.Translation := Pos;
   { Orient the model along the velocity (Quake models face +X) }
-  Dir := Vel.Normalize;
+  { A grenade at rest (restored from a savegame) has no velocity }
+  if Vel.IsZero then
+    Dir := Vector3(1, 0, 0)
+  else
+    Dir := Vel.Normalize;
   Yaw := ArcTan2(-Dir.Z, Dir.X);
   Pitch := ArcSin(EnsureRange(Dir.Y, -1, 1));
   Transform.Rotation := (QuatFromAxisAngle(Vector3(0, 1, 0), Yaw) *

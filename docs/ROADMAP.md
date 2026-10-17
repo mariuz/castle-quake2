@@ -16,7 +16,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Weapons | 10 + hand grenades, frame-timed | 10 + hand grenades, chaingun spin-up, cooldown timers | Firing on the MD2 frames Quake 2 uses. |
 | Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses), skill levels | Sight / chase / attack wind-up / pain / death, patrols, combat points, steering, 19 types tunable in the editor, skill 0–3 | Pathfinding, dodging, medic revive, boss behaviour. |
 | Props / effects | Barrels, banners, ships, lasers, splashes, explosion models | All of these used by the demo maps | Gib models with velocities, `misc_viper`, `target_blaster`, `trigger_monsterjump`, `func_killbox`. |
-| Level flow | Units, cross-level triggers, help computer, intermission, savegames | All of these (JSON savegames) | Projectiles and pending delayed events are not saved. |
+| Level flow | Units, cross-level triggers, help computer, intermission, savegames | All of these (JSON savegames, including projectiles in flight and pending delayed events) | — |
 | Audio | 3D sounds, entity channels, merged loop sounds, CD music | Quake 2 attenuation (incl. `ATTN_STATIC`), `CHAN_*` channels, point sounds that outlive entities, loop mixer (one voice per sound, PVS-checked, `SOUND_LOOPATTENUATE`), 32 sources, OGG tracks, named sounds editable in the editor | Stereo panning curve (OpenAL's, not Quake 2's), `s_volume` style master limiter. |
 | Input / options | Key bindings, mouse sensitivity, joystick, skill | Options menu (sensitivity, invert, FOV, volumes), key rebinding, skill selection, saved in `UserConfig` | Gamepad. |
 | Multiplayer | Deathmatch / coop over UDP | Single player only | Out of scope for now (see below). |
@@ -46,7 +46,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 
 ### 3. Full game support (needs the retail PAK)
 - **Medic revive**, **boss behaviour** (supertank, Makron, jorg) and the missing entities (`misc_viper`, `target_blaster`, `func_killbox`, `turret_*`). Test with a local `baseq2` in a nightly-style workflow that is skipped when the PAK isn't available.
-- **Save projectiles and delayed events**, so a quick save mid-fight restores exactly.
+- ~~Save projectiles and delayed events~~ — done (also fixed `trigger_relay` ignoring `delay` and delayed `target_explosion`s, so demo1's opening explosions now come in sequence).
 - A **map compatibility report**: autotest every map in a PAK (`maps` console command), log unknown classnames and load times, so missing entities are found systematically.
 
 ### 4. Editor and inspectability
@@ -129,6 +129,6 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Monster perception like Quake 2: ambush, trigger-spawned monsters, front cone, hearing through the PHS, group wake
 - [ ] Monster dodging, `trigger_monsterjump`, navigation fallback
 - [ ] Swept player box (`PM_StepSlideMove`)
-- [ ] Savegames include projectiles and delayed events
+- [x] Savegames include projectiles and delayed events
 - [ ] Map compatibility report over a full PAK
 - [ ] Android build with touch controls
