@@ -62,7 +62,7 @@ implementation
 
 uses
   Math, StrUtils,
-  QuakeEntities, QuakeGeometry, QuakeSettings;
+  QuakeEntities, QuakeGeometry, QuakeSettings, QuakeMonsterAttacks;
 
 const
   { Spawned, used by targets, drawn or used as markers by the game code }
@@ -102,6 +102,9 @@ begin
     if (CName = 'monster_supertank') or (CName = 'monster_boss2') or (CName = 'monster_jorg') or
        (CName = 'monster_makron') then
       Note := 'boss with the generic monster AI'
+    else
+    if Length(MonsterAttackSeqs(CName)) > 0 then
+      Note := 'Quake 2 attack frames, generic movement (no special moves)'
     else
       Note := 'generic monster AI (one attack, no special moves)';
     Exit(csPartial);

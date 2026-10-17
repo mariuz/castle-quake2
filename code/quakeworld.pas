@@ -10,7 +10,7 @@ uses
   SysUtils, Classes, Math, Generics.Collections, fpjson, jsonparser,
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions,
   QuakePak, QuakeBsp, QuakeGeometry, QuakeMap, QuakeMd2, QuakePlayer, QuakeLight, QuakeSound, QuakeHud, QuakeSettings,
-  QuakeParticles, QuakeEntities, QuakeWeaponFrames;
+  QuakeParticles, QuakeEntities, QuakeWeaponFrames, QuakeMonsterAttacks;
 
 const
   { Quake 2 player: eye 22 above origin, origin 24 above the feet }
@@ -63,6 +63,8 @@ type
     { Fire held this frame (FireWeapon is called every frame while held) and
       in the previous one (to latch new presses) }
     FFireHeld, FPrevFireHeld: Boolean;
+    { Monster shots fired (demo log) }
+    FMonsterShots: Integer;
     FLevelExited: Boolean;
     FNextMap: String;
     FSpawnPoint: TVector3;
@@ -186,6 +188,8 @@ type
     property VisibleEntities: Integer read FVisibleEntities;
     { The player's gun (weapon frames); autotests turn off its random idle pauses }
     property Gun: TQuakeGun read FGun;
+    { Monster shots / hits fired since the level started (demo log) }
+    property MonsterShots: Integer read FMonsterShots;
     property CulledEntities: Integer read FCulledEntities;
 
     { Player fires the current weapon }
@@ -2092,53 +2096,56 @@ var
 begin
   if FDead then
     Exit;
+  Inc(FMonsterShots);
   Eye := Monster.EyePos;
   Target := FPlayerPos - Vector3(0, 12, 0);
   Dir := (Target - Eye).Normalize;
   Dist := PointsDistance(Eye, Target);
-  if Monster.Def^.Attack <> akMelee then
+  if Monster.AttackKind <> akMelee then
     Lighting.TriggerMuzzleFlash(Eye);
 
-  case Monster.Def^.Attack of
+  { Monster.AttackKind / AttackDamage / AttackBullets: the shot of its
+    attack sequence (or of the generic attack) }
+  case Monster.AttackKind of
     akMelee:
-      if Dist < Monster.Def^.AttackRange + 24 then
-        DamagePlayer(Monster.Def^.Damage, Eye);
+      if Dist < Monster.AttackReach then
+        DamagePlayer(Monster.AttackDamage, Eye);
     akHitscan, akPellets, akRail:
       if Monster.CanSeePlayer then
       begin
         { Accuracy falls off with distance }
         Accuracy := EnsureRange(1.1 - Dist / 1200, 0.25, 0.95);
-        if Monster.Def^.Attack = akPellets then
+        if Monster.AttackKind = akPellets then
         begin
           Hits := 0;
           for I := 1 to 9 do
             if Random < Accuracy * 0.8 then
               Inc(Hits);
           if Hits > 0 then
-            DamagePlayer(Hits * Monster.Def^.Damage, Eye);
+            DamagePlayer(Hits * Monster.AttackDamage, Eye);
         end else
-        if Monster.Def^.Attack = akRail then
+        if Monster.AttackKind = akRail then
         begin
           Particles.SpawnRailTrail(Eye, Target);
           Sounds.PlayAt('sound/weapons/railgf1a.wav', Monster.Transform, 1, 1, chWeapon);
           if Random < Accuracy then
-            DamagePlayer(Monster.Def^.Damage, Eye);
+            DamagePlayer(Monster.AttackDamage, Eye);
         end else
         begin
-          for I := 1 to 4 do
+          for I := 1 to Monster.AttackBullets do
             if Random < Accuracy * 0.6 then
-              DamagePlayer(Monster.Def^.Damage, Eye);
+              DamagePlayer(Monster.AttackDamage, Eye);
           Particles.SpawnImpact(Target + Vector3((Random - 0.5) * 40, (Random - 0.5) * 30,
             (Random - 0.5) * 40), -Dir);
         end;
       end;
     akBlaster:
-      SpawnProjectile(pkBlasterBolt, Eye + Dir * 20, Dir, 600, Monster.Def^.Damage * 3, False, Monster);
+      SpawnProjectile(pkBlasterBolt, Eye + Dir * 20, Dir, 600, Monster.AttackDamage, False, Monster);
     akRocket:
-      SpawnProjectile(pkRocket, Eye + Dir * 24, Dir, 500, Monster.Def^.Damage, False, Monster);
+      SpawnProjectile(pkRocket, Eye + Dir * 24, Dir, 500, Monster.AttackDamage, False, Monster);
     akGrenade:
       SpawnProjectile(pkGrenade, Eye + Dir * 24, (Dir + Vector3(0, 0.35, 0)).Normalize,
-        Min(600, Dist * 1.1), Monster.Def^.Damage, False, Monster);
+        Min(600, Dist * 1.1), Monster.AttackDamage, False, Monster);
   end;
 end;
 

@@ -14,7 +14,7 @@ interface
 uses
   SysUtils, Classes,
   CastleClassUtils, CastleTransform, CastleVectors,
-  QuakeEntities, QuakeMd2;
+  QuakeEntities, QuakeMd2, QuakeMonsterAttacks;
 
 type
   { One monster class (e.g. monster_soldier) and its tunables.

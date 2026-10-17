@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks;
 
 var
   Passed, Failed: Integer;
@@ -765,6 +765,133 @@ begin
   FreeProbe(P);
 end;
 
+type
+  TAttackProbe = class
+    Attack: TMonsterAttack;
+    Times: array of Single;
+    Damage: Integer;
+    Clock: Single;
+    procedure OnFire(const ShotIndex: Integer);
+    procedure Run(const Seq: TMonsterAttackSeq; const CanSee: Boolean);
+  end;
+
+procedure TAttackProbe.OnFire(const ShotIndex: Integer);
+begin
+  SetLength(Times, Length(Times) + 1);
+  Times[High(Times)] := Clock;
+  Damage := Damage + Attack.ShotDamage(ShotIndex);
+end;
+
+procedure TAttackProbe.Run(const Seq: TMonsterAttackSeq; const CanSee: Boolean);
+begin
+  Times := nil;
+  Damage := 0;
+  Clock := 0;
+  Attack.Start(Seq, CanSee);
+  while Attack.Active and (Clock < 30) do
+  begin
+    Clock := Clock + 0.01;
+    Attack.Update(0.01, CanSee);
+  end;
+end;
+
+{ Base of an MD2 frame name: attak203 -> attak2, att_c4 -> att_c }
+function FrameBase(const N: String): String;
+var
+  Digits: Integer;
+begin
+  Digits := 0;
+  while (Digits < Length(N)) and (N[Length(N) - Digits] in ['0'..'9']) do
+    Inc(Digits);
+  if Digits >= 3 then
+    Result := Copy(N, 1, Length(N) - 2)
+  else
+    Result := Copy(N, 1, Length(N) - Digits);
+end;
+
+procedure TestMonsterAttacks;
+const
+  MonsterClasses: array[0..8] of String = ('monster_soldier_light', 'monster_soldier', 'monster_soldier_ss',
+    'monster_infantry', 'monster_gunner', 'monster_berserk', 'monster_flyer', 'monster_parasite',
+    'monster_tank');
+var
+  C: String;
+  Seqs: TMonsterAttackSeqs;
+  Seq: TMonsterAttackSeq;
+  Mdl: TQuakeMd2;
+  First, I: Integer;
+  AllMatch: Boolean;
+  P: TAttackProbe;
+begin
+  { Every sequence lies on the model frames of one Quake 2 animation }
+  AllMatch := True;
+  for C in MonsterClasses do
+  begin
+    Seqs := MonsterAttackSeqs(C);
+    Mdl := Md2Manager.GetModel(FindMonsterDef(C)^.Model);
+    if (Length(Seqs) = 0) or (Mdl = nil) then
+    begin
+      AllMatch := False;
+      Writeln('  no attack table or model for ', C);
+      Continue;
+    end;
+    for Seq in Seqs do
+    begin
+      First := Mdl.FrameNames.IndexOf(Seq.FirstFrame);
+      if (First < 0) or (First + Seq.Count > Mdl.FrameCount) then
+      begin
+        AllMatch := False;
+        Writeln('  ', C, ': frame ', Seq.FirstFrame, ' missing');
+        Continue;
+      end;
+      for I := First to First + Seq.Count - 1 do
+        if FrameBase(Mdl.FrameNames[I]) <> FrameBase(Seq.FirstFrame) then
+        begin
+          AllMatch := False;
+          Writeln('  ', C, ': ', Seq.FirstFrame, ' + ', Seq.Count, ' runs into ', Mdl.FrameNames[I]);
+          Break;
+        end;
+    end;
+  end;
+  Check(AllMatch, 'monster attack sequences match the demo models frame names');
+  CheckEquals(0, Length(MonsterAttackSeqs('monster_supertank')), 'monsters without a table use the generic attack');
+
+  { Range choice like the Quake 2 attack functions }
+  Seqs := MonsterAttackSeqs('monster_infantry');
+  CheckEquals(1, ChooseAttackSeq(Seqs, 50, 0.3), 'infantry swings its gun in melee range');
+  CheckEquals(0, ChooseAttackSeq(Seqs, 400, 0.9), 'infantry fires its machinegun further away');
+  Seqs := MonsterAttackSeqs('monster_gunner');
+  CheckEquals(1, ChooseAttackSeq(Seqs, 50, 0.0), 'gunner uses the chaingun in melee range');
+
+  P := TAttackProbe.Create;
+  P.Attack := TMonsterAttack.Create;
+  P.Attack.OnFire := @P.OnFire;
+  try
+    { Soldier attack1: one shot on its third frame, 1.2 s long }
+    P.Run(MonsterAttackSeqs('monster_soldier_light')[0], True);
+    Check((Length(P.Times) = 1) and SameValue(P.Times[0], 0.2, 0.011) and SameValue(P.Clock, 1.2, 0.02),
+      'light soldier fires on attak103 of a 1.2 s attack');
+    { Machinegun soldier: burst holding the frame, not when it lost sight }
+    P.Run(MonsterAttackSeqs('monster_soldier_ss')[0], True);
+    Check((Length(P.Times) >= 4) and (Length(P.Times) <= 11), 'machinegun soldier fires a 4 .. 11 bullet burst');
+    P.Run(MonsterAttackSeqs('monster_soldier_ss')[0], False);
+    CheckEquals(1, Length(P.Times), 'no burst without sight of the player');
+    { Gunner grenades: four, 0.3 s apart }
+    P.Run(MonsterAttackSeqs('monster_gunner')[0], True);
+    Check((Length(P.Times) = 4) and SameValue(P.Times[0], 0.4, 0.011) and SameValue(P.Times[3], 1.3, 0.011),
+      'gunner launches four grenades on attak105 .. 114');
+    { Parasite drain: 5, then 2 a frame, 11 times }
+    P.Run(MonsterAttackSeqs('monster_parasite')[0], True);
+    Check((Length(P.Times) = 11) and (P.Damage = 25), 'parasite drains 5 then 2 a frame (25)');
+    { Tank rockets: three, 0.3 s apart, after leaning in for 2.1 s }
+    P.Run(MonsterAttackSeqs('monster_tank')[1], True);
+    Check((Length(P.Times) = 3) and SameValue(P.Times[0], 2.1, 0.011), 'tank fires three rockets after 2.1 s');
+  finally
+    P.Attack.Free;
+    P.Free;
+  end;
+end;
+
 procedure TestGamepad;
 var
   V: TVector2;
@@ -860,6 +987,7 @@ begin
   TestPlayerTrail;
   TestGamepad;
   TestGun;
+  TestMonsterAttacks;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then

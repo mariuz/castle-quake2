@@ -586,14 +586,15 @@ begin
       if FWorld.Monsters[J].IsAlive and (FWorld.Monsters[J].Alerted or
          (FWorld.Monsters[J].MoveTarget <> nil) or (FWorld.Monsters[J].GoalEntity <> nil) or
          (FWorld.Monsters[J].CombatTarget <> '')) then
-        WritelnLog('Demo', 'Monster %d %s state %d dist %.0f pos %s alerted %s patrol %s combatpoint %s %s hold %s', [J,
+        WritelnLog('Demo', 'Monster %d %s state %d dist %.0f pos %s alerted %s patrol %s combatpoint %s %s hold %s sees %s cooldown %.1f', [J,
           FWorld.Monsters[J].Def^.ClassName, Ord(FWorld.Monsters[J].State),
           PointsDistance(FWorld.Monsters[J].Transform.Translation, MainViewport.Camera.Translation),
           CgeToQuake(FWorld.Monsters[J].Transform.Translation).ToString,
           BoolToStr(FWorld.Monsters[J].Alerted, True),
           BoolToStr(FWorld.Monsters[J].MoveTarget <> nil, True),
           BoolToStr(FWorld.Monsters[J].GoalEntity <> nil, True), FWorld.Monsters[J].CombatTarget,
-          BoolToStr(FWorld.Monsters[J].HoldGround, True)]);
+          BoolToStr(FWorld.Monsters[J].HoldGround, True), BoolToStr(FWorld.Monsters[J].CanSeePlayer, True),
+          FWorld.Monsters[J].AttackCooldown]);
     P := 0;
     Val := 0;
     for J := 0 to FWorld.Monsters.Count - 1 do
@@ -610,6 +611,8 @@ begin
           BoolToStr(FWorld.Monsters[J].CanSeePlayer, True),
           PointsDistance(FWorld.Monsters[J].Transform.Translation, PlayerMovement.AimPosition)]);
     WritelnLog('Demo', 'Projectiles: %d, delayed targets: %d', [FWorld.ProjectileCount, FWorld.DelayedCount]);
+    WritelnLog('Demo', 'Monster shots: %d, player health %d armor %d', [FWorld.MonsterShots,
+      FWorld.Stats.Health, FWorld.Stats.Armor]);
     WritelnLog('Demo', 'Gun: weapon %d state %d frame %d, ammo shells %d bullets %d grenades %d cells %d slugs %d', [
       FWorld.Gun.Slot, Ord(FWorld.Gun.State), FWorld.Gun.Frame, FWorld.Stats.Ammo[atShells],
       FWorld.Stats.Ammo[atBullets], FWorld.Stats.Ammo[atGrenades], FWorld.Stats.Ammo[atCells],

@@ -9,7 +9,8 @@ uses
   SysUtils, Classes, Generics.Collections, Math,
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions, CastleUtils,
   CastleSoundEngine, CastleBehaviors, CastleColors, CastleRenderOptions,
-  QuakePak, QuakeBsp, QuakeMd2, QuakeLight, QuakeSound, QuakeHud, QuakeParticles, QuakeSprite, QuakeSettings;
+  QuakePak, QuakeBsp, QuakeMd2, QuakeLight, QuakeSound, QuakeHud, QuakeParticles, QuakeSprite, QuakeSettings,
+  QuakeMonsterAttacks;
 
 type
   TItemCategory = (icWeapon, icAmmo, icHealth, icArmor, icPowerup, icKey);
@@ -39,7 +40,7 @@ type
     Sound: String;
   end;
 
-  TAttackKind = (akMelee, akHitscan, akBlaster, akRocket, akGrenade, akRail, akPellets);
+  { Attack kinds (TAttackKind, akMelee ...) are in QuakeMonsterAttacks }
 
   { Static description of a Quake 2 monster classname }
   TQuakeMonsterDef = record
@@ -127,6 +128,11 @@ type
     FDetourSide: Single;
     FDuckTime: Single;
     FAttackFired: Boolean;
+    { Quake 2 attack sequences of this monster type and the one playing
+      (its first model frame in FAttackFirst) }
+    FAttackSeqs: TMonsterAttackSeqs;
+    FAttack: TMonsterAttack;
+    FAttackFirst: Integer;
     FIdleTimer: Single;
     FLostSightTime: Single;
     { Losing the player (Quake 2 AI_PURSUIT_LAST_SEEN): go where he was
@@ -144,6 +150,10 @@ type
     FPauseTime: Single;
     { Fraction of the attack animation at which the attack happens }
     function AttackFirePoint: Single;
+    { Start a Quake 2 attack sequence for the distance; False if the
+      monster has none (generic attack) }
+    function StartAttackSeq(const Dist: Single): Boolean;
+    procedure AttackSeqFire(const ShotIndex: Integer);
     { Move along Dir (with wall sliding) unless it walks off a ledge }
     function TryMove(const Dir: TVector3; const SecondsPassed: Single;
       const SpeedScale: Single = 1): Boolean;
@@ -196,6 +206,12 @@ type
     Ambush: Boolean;
     Dormant: Boolean;
     OnAttack: TMonsterAttackEvent;
+    { The shot OnAttack should fire: kind, damage (per bullet / pellet),
+      bullets for hitscan, reach for melee }
+    AttackKind: TAttackKind;
+    AttackDamage: Integer;
+    AttackBullets: Integer;
+    AttackReach: Single;
     { Called when the monster finds the player (Quake 2 FoundTarget, which
       makes it level.sight_entity for others to notice) }
     OnFoundTarget: TMonsterAttackEvent;
@@ -675,6 +691,9 @@ begin
   FSightTimer := Random * 0.2;
   FDetourSide := 1;
   FIdleTimer := 3 + Random * 12;
+  FAttack := TMonsterAttack.Create;
+  FAttack.OnFire := @AttackSeqFire;
+  FAttackSeqs := MonsterAttackSeqs(Def^.ClassName);
   { Quake 2 base game: only the brain has power armor (a power screen) }
   if Def^.ClassName = 'monster_brain' then
   begin
@@ -778,6 +797,7 @@ begin
   { BeforeDestruction already detached this behavior from Transform }
   FreeAndNil(Model);
   FreeAndNil(Transform);
+  FreeAndNil(FAttack);
   inherited Destroy;
 end;
 
@@ -833,6 +853,9 @@ procedure TQuakeMonster.SetState(const NewState: TMonsterState);
 begin
   State := NewState;
   StateTimer := 0;
+  { Pain, ducking or death interrupt an attack sequence }
+  if FAttack <> nil then
+    FAttack.Stop;
   if Model = nil then
     Exit;
   case NewState of
@@ -1193,13 +1216,30 @@ begin
 
   if State = msAttack then
   begin
-    { Like Quake 2's attack frames: the shot / hit happens partway through
-      the animation (melee later, when the swing lands), not when it starts }
+    { Quake 2 attack sequence: frames at 10 a second, shots on its fire frames }
+    if FAttack.Active then
+    begin
+      FAttack.Update(SecondsPassed, CanSeePlayer);
+      if Model <> nil then
+        Model.ShowFrames(FAttackFirst + FAttack.OldFrame, FAttackFirst + FAttack.Frame, FAttack.FrameLerp);
+      if not FAttack.Active then
+        SetState(msChase);
+      StickToFloor(SecondsPassed);
+      Exit;
+    end;
+    { Generic attack (monsters without a sequence table): the shot / hit
+      happens partway through the animation, not when it starts }
     if (not FAttackFired) and ((Model = nil) or (Model.AnimProgress >= AttackFirePoint) or
        (StateTimer > 0.8)) then
     begin
       FAttackFired := True;
       Sounds.PlayAt(MonsterSound(Def, Def^.AttackSound), Transform, 1, 1, chWeapon);
+      AttackKind := Def^.Attack;
+      AttackDamage := Def^.Damage;
+      if AttackKind = akBlaster then
+        AttackDamage := Def^.Damage * 3;
+      AttackBullets := 4;
+      AttackReach := Def^.AttackRange + 24;
       if Assigned(OnAttack) then
         OnAttack(Self);
     end;
@@ -1213,6 +1253,7 @@ begin
   begin
     SetState(msAttack);
     FAttackFired := False;
+    StartAttackSeq(Dist);
     AttackCooldown := Def^.AttackCooldown * SkillAttackDelay(GameSkill) * (0.8 + Random * 0.4);
     Exit;
   end;
@@ -1239,6 +1280,41 @@ begin
       Steer(MoveVec.Normalize, SecondsPassed);
   end;
   StickToFloor(SecondsPassed);
+end;
+
+function TQuakeMonster.StartAttackSeq(const Dist: Single): Boolean;
+var
+  I, First: Integer;
+begin
+  Result := False;
+  if (Model = nil) or (Length(FAttackSeqs) = 0) then
+    Exit;
+  I := ChooseAttackSeq(FAttackSeqs, Dist, Random);
+  if I < 0 then
+    Exit;
+  First := Model.Model.FrameNames.IndexOf(FAttackSeqs[I].FirstFrame);
+  if (First < 0) or (First + FAttackSeqs[I].Count > Model.Model.FrameCount) then
+    Exit;
+  FAttackFirst := First;
+  FAttack.Start(FAttackSeqs[I], CanSeePlayer);
+  Model.ShowFrames(First, First, 0);
+  Result := True;
+end;
+
+procedure TQuakeMonster.AttackSeqFire(const ShotIndex: Integer);
+var
+  Seq: TMonsterAttackSeq;
+begin
+  Seq := FAttack.Seq;
+  if (Seq.Sound <> '') and ((ShotIndex = 0) or not Seq.SoundOnce) then
+    Sounds.PlayAt(MonsterSound(Def, Seq.Sound), Transform, 1, 1, chWeapon);
+  AttackKind := Seq.Kind;
+  AttackDamage := FAttack.ShotDamage(ShotIndex);
+  AttackBullets := 1;
+  AttackReach := Max(Def^.AttackRange, MeleeDistance) + 24;
+  FAttackFired := True;
+  if Assigned(OnAttack) then
+    OnAttack(Self);
 end;
 
 function TQuakeMonster.AttackFirePoint: Single;
