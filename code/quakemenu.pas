@@ -477,7 +477,7 @@ begin
     UIFont.Print(CX - 280, CY - 40,  Vector4(0.9, 0.9, 0.9, 1.0), '- First/Third Person & Free-Fly Navigation (TCastleWalkNavigation)');
     UIFont.Print(CX - 280, CY - 65,  Vector4(0.9, 0.9, 0.9, 1.0), '- Brush Movers (doors, rotating doors, plats, buttons, trains) via TCastleTransform');
     UIFont.Print(CX - 280, CY - 90,  Vector4(0.9, 0.9, 0.9, 1.0), '- Billboard Particles (rail trails, blaster sparks, explosions, BFG)');
-    UIFont.Print(CX - 280, CY - 115, Vector4(0.9, 0.9, 0.9, 1.0), '- Ray Casts (WorldRayCast) for Hitscan Weapons and Projectiles');
+    UIFont.Print(CX - 280, CY - 115, Vector4(0.9, 0.9, 0.9, 1.0), '- Quake 2 Box Traces Against BSP Brushes for Movement, Shots and Sight');
 
     UIFont.Print(CX - 80, CY - 160, Vector4(1.0, 0.5, 0.1, 1.0), '[ Press Enter / Esc to Return ]');
     Exit;

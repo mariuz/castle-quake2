@@ -154,10 +154,6 @@ type
       Origin along Dir, if it faces the player, may dodge before it arrives
       (easy: a quarter as often) }
     procedure CheckDodge(const Origin, Dir: TVector3; const Speed: Single);
-    { WorldRayCast for shots: a ducking monster only has the lower part of
-      its body (Quake 2 ducks to maxs.z = -8, 8 units below the origin), so
-      higher hits pass over it }
-    function ShotRayCast(const Origin, Dir: TVector3; out Dist: Single): TCastleTransform;
     procedure Explode(const Pos: TVector3; const Damage: Integer; const Radius: Single;
       const FromPlayer: Boolean; const ExplosionSound: Boolean = True);
     function MonsterByTransform(const T: TCastleTransform): TQuakeMonster;
@@ -1271,9 +1267,7 @@ var
   Prop: TQuakeProp;
   List: TQuakeEntityList;
   Dist: Single;
-  Hit: TCastleTransform;
-  ToPlayer: TVector3;
-  Along: Single;
+  LaserTrace: TQuakeTrace;
 begin
   { func_timer }
   Fire := TQuakeEntityList.Create(False);
@@ -1295,14 +1289,14 @@ begin
   begin
     if not Laser.IsOn then
       Continue;
-    Hit := FItems.WorldRayCast(Laser.Origin, Laser.Direction, Dist);
-    if (Hit = nil) or (Dist > 2048) then
-      Dist := 2048;
+    { target_laser_think: a MASK_SHOT trace; it hurts what it stops on }
+    LaserTrace := WorldTrace(CgeToQuake(Laser.Origin), CgeToQuake(Laser.Origin + Laser.Direction * 2048),
+      TVector3.Zero, TVector3.Zero, MASK_SHOT, nil);
+    Dist := PointsDistance(Laser.Origin, QuakeToCge(LaserTrace.EndPos));
     Laser.SetLength(Dist);
-    ToPlayer := (FPlayerPos - Vector3(0, 22, 0)) - Laser.Origin;
-    Along := TVector3.DotProduct(ToPlayer, Laser.Direction);
-    if (Along > 0) and (Along < Dist) and
-       ((ToPlayer - Laser.Direction * Along).Length < 20) then
+    if LaserTrace.Ent is TQuakeMonster then
+      TQuakeMonster(LaserTrace.Ent).TakeDamage(Max(1, Laser.Damage div 10));
+    if LaserTrace.Ent = FPlayer then
     begin
       FHurtTimer := FHurtTimer - SecondsPassed;
       if FHurtTimer <= 0 then
@@ -1558,50 +1552,49 @@ end;
 procedure TQuakeWorld.FireHitscan(const Origin, Dir: TVector3; const Damage: Integer;
   const HSpread, VSpread: Single; const Rail: Boolean);
 var
-  ShotDir, HitPos, Start, Right, Muzzle: TVector3;
-  Hit: TCastleTransform;
-  Dist: Single;
-  M: TQuakeMonster;
-  Mover: TQuakeMover;
+  ShotDir, HitPos, Right, Muzzle, Start, Stop: TVector3;
+  T: TQuakeTrace;
+  Ignore: TObject;
   Pierce: Integer;
 begin
   ShotDir := SpreadDir(Dir, HSpread, VSpread);
-  Start := Origin;
   { Rail trails start at the gun muzzle (right and below the eye), not the eye }
   Right := TVector3.CrossProduct(Dir, Vector3(0, 1, 0));
   if Right.Length > 0.001 then
     Right := Right.Normalize;
   Muzzle := Origin + Dir * 24 + Right * 7 - Vector3(0, 8, 0);
-  { The railgun pierces through monsters }
+  { Quake 2 fire_lead / fire_rail: a point trace for MASK_SHOT; the railgun
+    goes on through monsters (ignoring the one it just hit) }
+  Start := CgeToQuake(Origin);
+  Stop := Start + CgeToQuake(ShotDir) * 8192;
+  Ignore := FPlayer;
   for Pierce := 0 to 4 do
   begin
-    Hit := ShotRayCast(Start, ShotDir, Dist);
-    if (Hit = nil) or (Dist > 8192) then
+    T := WorldTrace(Start, Stop, TVector3.Zero, TVector3.Zero, MASK_SHOT, Ignore);
+    HitPos := QuakeToCge(T.EndPos);
+    if not T.Hit then
     begin
       if Rail then
-        Particles.SpawnRailTrail(Muzzle, Start + ShotDir * 2000);
+        Particles.SpawnRailTrail(Muzzle, HitPos);
       Exit;
     end;
-    HitPos := Start + ShotDir * Dist;
-    M := MonsterByTransform(Hit);
-    if M <> nil then
+    if T.Ent is TQuakeMonster then
     begin
-      M.TakeDamage(Damage);
+      TQuakeMonster(T.Ent).TakeDamage(Damage);
       Particles.SpawnBlood(HitPos, -ShotDir);
       if Rail then
       begin
-        { Temporarily continue the ray behind the monster }
-        Start := HitPos + ShotDir * 40;
+        Start := T.EndPos;
+        Ignore := T.Ent;
         Continue;
       end;
       Exit;
     end;
-
-    Mover := MoverByTransform(Hit);
-    if Mover <> nil then
-      DamageMover(Mover, Damage);
-    if PropByTransform(Hit) <> nil then
-      DamageProp(PropByTransform(Hit), Damage);
+    if T.Ent is TQuakeMover then
+      DamageMover(TQuakeMover(T.Ent), Damage)
+    else
+    if T.Ent is TQuakeProp then
+      DamageProp(TQuakeProp(T.Ent), Damage);
     if Rail then
       Particles.SpawnRailTrail(Muzzle, HitPos)
     else
@@ -1862,8 +1855,6 @@ end;
 procedure TQuakeWorld.UpdatePlayerTrail(const SecondsPassed: Single);
 var
   Origin, ToSpot: TVector3;
-  Hit: TCastleTransform;
-  Dist: Single;
 begin
   PlayerTrail.Now := FTime;
   FTrailTimer := FTrailTimer - SecondsPassed;
@@ -1877,8 +1868,8 @@ begin
     ToSpot := PlayerTrail.LastSpot - Origin;
     if ToSpot.Length < 1 then
       Exit;
-    Hit := FItems.WorldRayCast(Origin, ToSpot.Normalize, Dist);
-    if (Hit = nil) or (Dist >= ToSpot.Length - 1) then
+    if WorldTrace(CgeToQuake(Origin), CgeToQuake(PlayerTrail.LastSpot), TVector3.Zero, TVector3.Zero,
+       MASK_OPAQUE, FPlayer).Fraction >= 1 then
       Exit; { still sees the last spot }
   end;
   PlayerTrail.Add(Origin);
@@ -1906,45 +1897,21 @@ begin
         M.Alert;
 end;
 
-function TQuakeWorld.ShotRayCast(const Origin, Dir: TVector3; out Dist: Single): TCastleTransform;
-var
-  M: TQuakeMonster;
-  Skipped: array of TCastleScene;
-  I: Integer;
-begin
-  Skipped := nil;
-  try
-    repeat
-      Result := FItems.WorldRayCast(Origin, Dir, Dist);
-      M := MonsterByTransform(Result);
-      if (M = nil) or (M.State <> msDuck) or (M.Model = nil) or
-         ((Origin + Dir * Dist).Y <= M.Transform.Translation.Y - 8) or (Length(Skipped) >= 8) then
-        Exit;
-      { Over the ducked monster: look further }
-      WritelnLog('QuakeWorld', 'Shot passes over ducking %s', [M.Transform.Name]);
-      M.Model.Scene.Pickable := False;
-      SetLength(Skipped, Length(Skipped) + 1);
-      Skipped[High(Skipped)] := M.Model.Scene;
-    until False;
-  finally
-    for I := 0 to High(Skipped) do
-      Skipped[I].Pickable := True;
-  end;
-end;
-
 procedure TQuakeWorld.CheckDodge(const Origin, Dir: TVector3; const Speed: Single);
 var
-  Hit: TCastleTransform;
+  T: TQuakeTrace;
   Dist: Single;
   M: TQuakeMonster;
 begin
   if (Speed <= 0) or ((GameSkill = 0) and (Random > 0.25)) then
     Exit;
-  Hit := FItems.WorldRayCast(Origin, Dir, Dist);
-  if (Hit = nil) or (Dist > 8192) then
+  T := WorldTrace(CgeToQuake(Origin), CgeToQuake(Origin + Dir * 8192), TVector3.Zero, TVector3.Zero,
+    MASK_SHOT, FPlayer);
+  if not (T.Ent is TQuakeMonster) then
     Exit;
-  M := MonsterByTransform(Hit);
-  if (M = nil) or not M.IsAlive then
+  M := TQuakeMonster(T.Ent);
+  Dist := PointsDistance(Origin, QuakeToCge(T.EndPos));
+  if not M.IsAlive then
     Exit;
   { infront(monster, player) }
   if TVector3.DotProduct(YawToCgeDir(M.FacingAngle), (FPlayerPos - M.Transform.Translation).Normalize) <= 0.3 then
@@ -2030,14 +1997,12 @@ procedure TQuakeWorld.UpdateProjectiles(const SecondsPassed: Single);
 var
   I: Integer;
   Proj: TQuakeProjectile;
-  OldPos, Dir, NewPos: TVector3;
-  StepLen, Dist: Single;
-  Hit: TCastleTransform;
-  M: TQuakeMonster;
-  Remove: Boolean;
-  PlayerCenter: TVector3;
+  OldPos, Dir, NewPos, HitNormal: TVector3;
+  StepLen: Single;
+  Remove, Damageable: Boolean;
+  T: TQuakeTrace;
+  Shooter: TObject;
 begin
-  PlayerCenter := FPlayerPos - Vector3(0, 18, 0);
   for I := FProjectiles.Count - 1 downto 0 do
   begin
     Proj := FProjectiles[I];
@@ -2064,57 +2029,59 @@ begin
     Dir := Proj.Velocity.Normalize;
     NewPos := OldPos + Dir * StepLen;
 
-    { Monster projectiles hit the player (approximate sphere test) }
-    if not Proj.FromPlayer and (PointsDistance(NewPos, PlayerCenter) < 28) then
+    { Quake 2 MOVETYPE_FLYMISSILE / BOUNCE: a point trace along the step,
+      ignoring the shooter }
+    if Proj.FromPlayer then
+      Shooter := FPlayer
+    else
+      Shooter := Proj.Owner;
+    T := WorldTrace(CgeToQuake(OldPos), CgeToQuake(NewPos), TVector3.Zero, TVector3.Zero, MASK_SHOT, Shooter);
+    if T.Hit and not T.AllSolid then
     begin
-      if Proj.SplashRadius > 0 then
-        Explode(NewPos, Proj.Damage, Proj.SplashRadius, False)
-      else
-      begin
-        DamagePlayer(Proj.Damage, OldPos);
-        Particles.SpawnBlasterImpact(NewPos, -Dir);
-      end;
-      FProjectiles.Delete(I);
-      Continue;
-    end;
-
-    Hit := ShotRayCast(OldPos, Dir, Dist);
-    M := MonsterByTransform(Hit);
-    if (M <> nil) and (M = Proj.Owner) then
-      Hit := nil; { don't hit yourself right after firing }
-    if (Hit <> nil) and (Dist <= StepLen) then
-    begin
-      NewPos := OldPos + Dir * Max(0, Dist - 2);
+      NewPos := QuakeToCge(T.EndPos);
+      HitNormal := QuakeToCge(T.Normal);
+      Damageable := (T.Ent is TQuakeMonster) or (T.Ent is TQuakePlayerMovement);
       if Proj.Kind in [pkGrenade, pkHandGrenade] then
       begin
-        if M <> nil then
+        if Damageable then
         begin
           Explode(NewPos, Proj.SplashDamage * DamageMultiplier, Proj.SplashRadius, Proj.FromPlayer);
           Remove := True;
         end else
         begin
-          { Bounce: floors invert the vertical speed, walls the horizontal }
-          if (Dir.Y < -0.5) then
-            Proj.Velocity := Vector3(Proj.Velocity.X * 0.6, -Proj.Velocity.Y * 0.4, Proj.Velocity.Z * 0.6)
-          else
-            Proj.Velocity := Vector3(-Proj.Velocity.X * 0.5, Proj.Velocity.Y, -Proj.Velocity.Z * 0.5);
-          if Proj.Kind = pkHandGrenade then
-            Sounds.PlayAt(Format('sound/weapons/hgrenb%da.wav', [1 + Random(2)]), Proj.Transform)
-          else
-            Sounds.PlayAt('sound/weapons/grenlb1b.wav', Proj.Transform);
+          { ClipVelocity with overbounce 1.5; stop on floors when slow }
+          Proj.Velocity := Proj.Velocity - HitNormal * (1.5 * TVector3.DotProduct(Proj.Velocity, HitNormal));
+          NewPos := NewPos + HitNormal * 0.5;
+          if (HitNormal.Y > 0.7) and (Proj.Velocity.Y < 60) then
+          begin
+            Proj.Velocity := Proj.Velocity * 0.6;
+            Proj.Velocity.Y := 0;
+          end;
+          if Proj.Velocity.Length > 30 then
+          begin
+            if Proj.Kind = pkHandGrenade then
+              Sounds.PlayAt(Format('sound/weapons/hgrenb%da.wav', [1 + Random(2)]), Proj.Transform)
+            else
+              Sounds.PlayAt('sound/weapons/grenlb1b.wav', Proj.Transform);
+          end;
         end;
       end else
       begin
-        if M <> nil then
+        if T.Ent is TQuakeMonster then
         begin
-          M.TakeDamage(Proj.Damage);
+          TQuakeMonster(T.Ent).TakeDamage(Proj.Damage);
           Particles.SpawnBlood(NewPos, -Dir);
         end else
-        if MoverByTransform(Hit) <> nil then
-          DamageMover(MoverByTransform(Hit), Proj.Damage)
+        if T.Ent is TQuakePlayerMovement then
+        begin
+          if Proj.Kind in [pkBlasterBolt, pkBfg] then
+            DamagePlayer(Proj.Damage, OldPos);
+        end else
+        if T.Ent is TQuakeMover then
+          DamageMover(TQuakeMover(T.Ent), Proj.Damage)
         else
-        if PropByTransform(Hit) <> nil then
-          DamageProp(PropByTransform(Hit), Proj.Damage);
+        if T.Ent is TQuakeProp then
+          DamageProp(TQuakeProp(T.Ent), Proj.Damage);
         case Proj.Kind of
           pkRocket: Explode(NewPos, Proj.SplashDamage * DamageMultiplier, Proj.SplashRadius, Proj.FromPlayer);
           pkBfg:
@@ -2126,7 +2093,7 @@ begin
             end;
           else
             begin
-              Particles.SpawnBlasterImpact(NewPos, -Dir);
+              Particles.SpawnBlasterImpact(NewPos - Dir * 2, -Dir);
               Sounds.PlayAtPoint('sound/weapons/lashit.wav', NewPos);
             end;
         end;
@@ -2981,7 +2948,9 @@ function TQuakeWorld.WorldTrace(const Start, Stop, Mins, Maxs: TVector3; const M
 var
   Mover: TQuakeMover;
   Monster: TQuakeMonster;
-  Lo, Hi, A, B, Org: TVector3;
+  Prop: TQuakeProp;
+  PropContents: Integer;
+  Lo, Hi, A, B, Org, BMin, BMax: TVector3;
   Box: TBox3D;
   T: TQuakeTrace;
 
@@ -3021,19 +2990,58 @@ begin
       if Result.AllSolid then
         Exit;
     end;
-  if (Mask and CONTENTS_MONSTER) = 0 then
+  { Props: barrels are solid boxes; dead soldiers only stop shots }
+  for Prop in FProps do
+  begin
+    if (Prop = Ignore) or Prop.Destroyed or (Prop.Transform = nil) or (not Prop.Transform.Exists) then
+      Continue;
+    if Prop.Kind = pkExplobox then
+      PropContents := CONTENTS_MONSTER
+    else
+    if Prop.Kind = pkDeadSoldier then
+      PropContents := CONTENTS_DEADMONSTER
+    else
+      Continue;
+    if (Mask and PropContents) = 0 then
+      Continue;
+    Box := Prop.Transform.BoundingBox;
+    if Box.IsEmpty then
+      Continue;
+    A := CgeToQuake(Box.Data[0]);
+    B := CgeToQuake(Box.Data[1]);
+    BMin := Vector3(Min(A.X, B.X), Min(A.Y, B.Y), Min(A.Z, B.Z));
+    BMax := Vector3(Max(A.X, B.X), Max(A.Y, B.Y), Max(A.Z, B.Z));
+    if not Overlaps(BMin, BMax) then
+      Continue;
+    T := BoxTraceAgainstBox(Start, Stop, Mins, Maxs, BMin, BMax, PropContents);
+    if T.Hit then
+    begin
+      T.Ent := Prop;
+      CombineTrace(Result, T);
+    end;
+  end;
+  if (Mask and (CONTENTS_MONSTER or CONTENTS_DEADMONSTER)) = 0 then
     Exit;
-  { Live monsters are boxes (corpses don't block, SVF_DEADMONSTER) }
+  { Live monsters are boxes; corpses (SVF_DEADMONSTER) only for shots }
   for Monster in FMonsters do
   begin
-    if (Monster = Ignore) or (not Monster.IsAlive) or Monster.Dormant or (Monster.Transform = nil) or
-       (not Monster.Transform.Exists) then
+    if (Monster = Ignore) or Monster.Dormant or (Monster.Transform = nil) or
+       (not Monster.Transform.Exists) or Monster.Gibbed then
+      Continue;
+    if Monster.IsAlive and ((Mask and CONTENTS_MONSTER) = 0) then
+      Continue;
+    if (not Monster.IsAlive) and ((Mask and CONTENTS_DEADMONSTER) = 0) then
       Continue;
     Org := Monster.Origin;
     if not Overlaps(Org + Monster.BoxMins, Org + Monster.ShotBoxMaxs) then
       Continue;
-    T := BoxTraceAgainstBox(Start, Stop, Mins, Maxs, Org + Monster.BoxMins, Org + Monster.ShotBoxMaxs,
-      CONTENTS_MONSTER);
+    if Monster.IsAlive then
+      T := BoxTraceAgainstBox(Start, Stop, Mins, Maxs, Org + Monster.BoxMins, Org + Monster.ShotBoxMaxs,
+        CONTENTS_MONSTER)
+    else
+      { A corpse lies low: Quake 2 dead monsters get maxs z -8 }
+      T := BoxTraceAgainstBox(Start, Stop, Mins, Maxs, Org + Monster.BoxMins,
+        Vector3(Monster.BoxMaxs.X, Monster.BoxMaxs.Y, Monster.BoxMins.Z + 16), CONTENTS_DEADMONSTER);
     if T.Hit then
     begin
       T.Ent := Monster;
@@ -3043,7 +3051,8 @@ begin
     end;
   end;
   { The player's box (for monsters and their shots) }
-  if (FPlayer <> nil) and (Ignore <> FPlayer) and (not FDead) and (FPlayer.Parent <> nil) then
+  if ((Mask and CONTENTS_MONSTER) <> 0) and (FPlayer <> nil) and (Ignore <> FPlayer) and (not FDead) and
+     (FPlayer.Parent <> nil) then
   begin
     Org := FPlayer.Origin;
     if Overlaps(Org + FPlayer.BoxMins, Org + FPlayer.BoxMaxs) then
