@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace;
 
 var
   Passed, Failed: Integer;
@@ -892,6 +892,76 @@ begin
   end;
 end;
 
+procedure TestTrace;
+const
+  Mins: TVector3 = (X: -16; Y: -16; Z: -24);
+  Maxs: TVector3 = (X: 16; Y: 16; Z: 32);
+var
+  Bsp: TQuakeBsp;
+  Col: TQuakeCollision;
+  Start, Floor: TVector3;
+  T, Down: TQuakeTrace;
+  I, Walls: Integer;
+  Dirs: array[0..3] of TVector3;
+  AllFree: Boolean;
+begin
+  Bsp := TQuakeBsp.Create;
+  try
+    if not Bsp.LoadFromPak('maps/demo1.bsp') then
+    begin
+      Check(False, 'load demo1 for traces');
+      Exit;
+    end;
+    Check(Length(Bsp.Brushes) > 0, 'brushes loaded for collision');
+    Col := TQuakeCollision.Create(Bsp);
+    try
+      { Player start: free, standing on a walkable floor }
+      Start := Bsp.FindEntity('info_player_start').Origin;
+      T := Col.BoxTrace(Start, Start, Mins, Maxs, 0, MASK_PLAYERSOLID);
+      Check(not T.StartSolid, 'player box at the start is free');
+      Down := Col.BoxTrace(Start, Start - Vector3(0, 0, 1000), Mins, Maxs, 0, MASK_PLAYERSOLID);
+      Check((Down.Fraction < 1) and (Down.Normal.Z > 0.7) and not Down.StartSolid, 'trace down hits a walkable floor');
+      Floor := Down.EndPos;
+      Check(not Col.BoxTrace(Floor, Floor, Mins, Maxs, 0, MASK_PLAYERSOLID).StartSolid,
+        'the end of a trace is a free position');
+      Check(Col.BoxTrace(Floor, Floor - Vector3(0, 0, 0.25), Mins, Maxs, 0, MASK_PLAYERSOLID).Fraction < 1,
+        'standing on it: 0.25 units down hits the ground (PM_CatagorizePosition)');
+      { Walls all around within 4096 units, never passed through }
+      Dirs[0] := Vector3(1, 0, 0);
+      Dirs[1] := Vector3(-1, 0, 0);
+      Dirs[2] := Vector3(0, 1, 0);
+      Dirs[3] := Vector3(0, -1, 0);
+      Walls := 0;
+      AllFree := True;
+      for I := 0 to 3 do
+      begin
+        T := Col.BoxTrace(Floor + Vector3(0, 0, 4), Floor + Vector3(0, 0, 4) + Dirs[I] * 4096, Mins, Maxs, 0,
+          MASK_PLAYERSOLID);
+        if (T.Fraction < 1) and (Abs(T.Normal.Z) < 0.7) then
+          Inc(Walls);
+        if Col.BoxTrace(T.EndPos, T.EndPos, Mins, Maxs, 0, MASK_PLAYERSOLID).StartSolid then
+          AllFree := False;
+      end;
+      CheckEquals(4, Walls, 'horizontal traces stop at walls');
+      Check(AllFree, 'traces stop in front of walls (DIST_EPSILON), not inside');
+      { A point trace through the floor stops at it }
+      T := Col.BoxTrace(Start, Start - Vector3(0, 0, 1000), TVector3.Zero, TVector3.Zero, 0, MASK_PLAYERSOLID);
+      Check((T.Fraction < 1) and (T.EndPos.Z < Floor.Z) and (T.EndPos.Z > Floor.Z - 25), 'point trace hits the floor below the box');
+    finally
+      Col.Free;
+    end;
+  finally
+    Bsp.Free;
+  end;
+  { Box against a box (monsters) }
+  T := BoxTraceAgainstBox(Vector3(-100, 0, 0), Vector3(100, 0, 0), Mins, Maxs,
+    Vector3(-16, -16, -24), Vector3(16, 16, 32), CONTENTS_MONSTER);
+  Check((T.Fraction < 1) and SameValue(T.EndPos.X, -32, 0.1) and (T.Normal.X = -1), 'box trace stops at a monster box');
+  T := BoxTraceAgainstBox(Vector3(0, 0, 0), Vector3(0, 0, 0), Mins, Maxs,
+    Vector3(-16, -16, -24), Vector3(16, 16, 32), CONTENTS_MONSTER);
+  Check(T.StartSolid and T.AllSolid, 'box inside a monster box is solid');
+end;
+
 procedure TestGamepad;
 var
   V: TVector2;
@@ -988,6 +1058,7 @@ begin
   TestGamepad;
   TestGun;
   TestMonsterAttacks;
+  TestTrace;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then

@@ -54,6 +54,10 @@ const
   CONTENTS_WATER  = 32;
   CONTENTS_LADDER = $20000000;
   CONTENTS_PLAYERCLIP = $10000;
+  CONTENTS_MONSTERCLIP = $20000;
+  CONTENTS_MONSTER = $2000000;
+  { What blocks the player's box (Quake 2 MASK_PLAYERSOLID) }
+  MASK_PLAYERSOLID = CONTENTS_SOLID or CONTENTS_PLAYERCLIP or CONTENTS_WINDOW or CONTENTS_MONSTER;
   MASK_LIQUID = CONTENTS_LAVA or CONTENTS_SLIME or CONTENTS_WATER;
 
 type
@@ -102,6 +106,20 @@ type
     PortalNum: LongInt;
     OtherArea: LongInt;
   end;
+
+  { Quake 2 dbrush_t: a convex solid, the planes of its sides }
+  TBSPBrush = packed record
+    FirstSide, NumSides, Contents: LongInt;
+  end;
+
+  { Quake 2 dbrushside_t }
+  TBSPBrushSide = packed record
+    PlaneNum: Word;
+    TexInfo: SmallInt;
+  end;
+
+  TBSPBrushArray = array of TBSPBrush;
+  TBSPBrushSideArray = array of TBSPBrushSide;
 
   TBSPEdge = packed record
     V0: Word;
@@ -192,6 +210,10 @@ type
     FNodes: TBSPNodeArray;
     FLeafs: TBSPLeafArray;
     FLeafFaces: array of Word;
+    { Collision brushes (CM_BoxTrace): brushes, their sides, brushes per leaf }
+    FBrushes: TBSPBrushArray;
+    FBrushSides: TBSPBrushSideArray;
+    FLeafBrushes: array of Word;
     { Visibility lump (Quake 2 dvis_t): cluster count, then per cluster the
       offsets of its run-length compressed PVS and PHS rows }
     FVisData: TBytes;
@@ -313,6 +335,13 @@ type
     property FaceExtents: TFaceExtentsArray read FExtents;
     property FaceCount: Integer read GetFaceCount;
     property Models: TBSPModelArray read FModels;
+    { Collision data, for QuakeTrace }
+    property Planes: TBSPPlaneArray read FPlanes;
+    property Nodes: TBSPNodeArray read FNodes;
+    property Leafs: TBSPLeafArray read FLeafs;
+    property Brushes: TBSPBrushArray read FBrushes;
+    property BrushSides: TBSPBrushSideArray read FBrushSides;
+    function LeafBrush(const Index: Integer): Integer;
     property ModelCount: Integer read GetModelCount;
     property LeafCount: Integer read GetLeafCount;
     { Number of visibility clusters (0 when the map has no vis data) }
@@ -701,6 +730,15 @@ begin
 
   LoadTextures;
   ComputeExtents;
+  SetLength(FBrushes, Hdr.Lumps[LUMP_BRUSHES].Length div SizeOf(TBSPBrush));
+  if Length(FBrushes) > 0 then
+    Move((Data + Hdr.Lumps[LUMP_BRUSHES].Offset)^, FBrushes[0], Length(FBrushes) * SizeOf(TBSPBrush));
+  SetLength(FBrushSides, Hdr.Lumps[LUMP_BRUSHSIDES].Length div SizeOf(TBSPBrushSide));
+  if Length(FBrushSides) > 0 then
+    Move((Data + Hdr.Lumps[LUMP_BRUSHSIDES].Offset)^, FBrushSides[0], Length(FBrushSides) * SizeOf(TBSPBrushSide));
+  SetLength(FLeafBrushes, Hdr.Lumps[LUMP_LEAFBRUSHES].Length div SizeOf(Word));
+  if Length(FLeafBrushes) > 0 then
+    Move((Data + Hdr.Lumps[LUMP_LEAFBRUSHES].Offset)^, FLeafBrushes[0], Length(FLeafBrushes) * SizeOf(Word));
   LoadLadderBrushes(Data, @Hdr);
 
   WritelnLog('QuakeBsp', 'Loaded map "%s": %d faces, %d vertices, %d texinfos, %d models, %d entities, %d clusters, %d areas',
@@ -837,46 +875,38 @@ begin
   Result := RecursiveLightPoint(FModels[0].HeadNode, P, P - Vector3(0, 0, 2048), Color) >= 0;
 end;
 
+function TQuakeBsp.LeafBrush(const Index: Integer): Integer;
+begin
+  Result := FLeafBrushes[Index];
+end;
+
 procedure TQuakeBsp.LoadLadderBrushes(const Data: PByte; const Hdr: Pointer);
-type
-  TBSPBrush = packed record
-    FirstSide, NumSides, Contents: LongInt;
-  end;
-  TBSPBrushSide = packed record
-    PlaneNum: Word;
-    TexInfo: SmallInt;
-  end;
 var
-  H: ^TBSPHeader;
-  Brushes: ^TBSPBrush;
-  Sides: ^TBSPBrushSide;
   I, J, Count, SideCount: Integer;
 begin
-  H := Hdr;
-  Count := H^.Lumps[LUMP_BRUSHES].Length div SizeOf(TBSPBrush);
-  SideCount := H^.Lumps[LUMP_BRUSHSIDES].Length div SizeOf(TBSPBrushSide);
-  Brushes := Pointer(Data + H^.Lumps[LUMP_BRUSHES].Offset);
-  Sides := Pointer(Data + H^.Lumps[LUMP_BRUSHSIDES].Offset);
+  { Uses FBrushes / FBrushSides, loaded before }
+  Count := Length(FBrushes);
+  SideCount := Length(FBrushSides);
   SetLength(FLadderBrushes, 0);
   SetLength(FClipBrushes, 0);
   for I := 0 to Count - 1 do
   begin
-    if ((Brushes[I].Contents and CONTENTS_PLAYERCLIP) <> 0) and
-       ((Brushes[I].Contents and CONTENTS_SOLID) = 0) then
+    if ((FBrushes[I].Contents and CONTENTS_PLAYERCLIP) <> 0) and
+       ((FBrushes[I].Contents and CONTENTS_SOLID) = 0) then
     begin
       SetLength(FClipBrushes, Length(FClipBrushes) + 1);
-      SetLength(FClipBrushes[High(FClipBrushes)], Brushes[I].NumSides);
-      for J := 0 to Brushes[I].NumSides - 1 do
-        if Brushes[I].FirstSide + J < SideCount then
-          FClipBrushes[High(FClipBrushes)][J] := Sides[Brushes[I].FirstSide + J].PlaneNum;
+      SetLength(FClipBrushes[High(FClipBrushes)], FBrushes[I].NumSides);
+      for J := 0 to FBrushes[I].NumSides - 1 do
+        if FBrushes[I].FirstSide + J < SideCount then
+          FClipBrushes[High(FClipBrushes)][J] := FBrushSides[FBrushes[I].FirstSide + J].PlaneNum;
     end;
-    if (Brushes[I].Contents and CONTENTS_LADDER) <> 0 then
+    if (FBrushes[I].Contents and CONTENTS_LADDER) <> 0 then
     begin
       SetLength(FLadderBrushes, Length(FLadderBrushes) + 1);
-      SetLength(FLadderBrushes[High(FLadderBrushes)], Brushes[I].NumSides);
-      for J := 0 to Brushes[I].NumSides - 1 do
-        if Brushes[I].FirstSide + J < SideCount then
-          FLadderBrushes[High(FLadderBrushes)][J] := Sides[Brushes[I].FirstSide + J].PlaneNum;
+      SetLength(FLadderBrushes[High(FLadderBrushes)], FBrushes[I].NumSides);
+      for J := 0 to FBrushes[I].NumSides - 1 do
+        if FBrushes[I].FirstSide + J < SideCount then
+          FLadderBrushes[High(FLadderBrushes)][J] := FBrushSides[FBrushes[I].FirstSide + J].PlaneNum;
     end;
   end;
   WritelnLog('QuakeBsp', '%d ladder brushes, %d player-clip brushes (of %d brushes)',

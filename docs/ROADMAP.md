@@ -12,7 +12,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Liquids | Warped water / lava (`SURF_WARP`), contents | Warp shader, non-solid liquid surfaces, swimming, drowning, lava / slime damage, underwater tints | Underwater view wobble. |
 | Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp, skins, shells (quad, invulnerability, power armor) | `EF_POWERSCREEN` model, glow, rotating / bobbing items. |
 | Sprites | SP2 (BFG, explosions) | SP2 loader, BFG ball / explosion sprites | Other sprite users (bubbles, flashes). |
-| Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove as `TQuakePlayerMovement` with the 32 × 32 × 56 player box | Swept box traces with plane clipping (`PM_StepSlideMove`) instead of overlap tests. |
+| Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove as `TQuakePlayerMovement`: the 32 × 32 × 56 box traced against the BSP brushes, movers and monsters (`CM_BoxTrace`, `PM_StepSlideMove`), movers carry and push the player | Blocked movers don't crush or reverse yet (the player is nudged out instead). |
 | Weapons | 10 + hand grenades, frame-timed | 10 + hand grenades on Quake 2's gun frames (`Weapon_Generic`: fire frames, refire, put away / raise, chaingun spin, BFG delay, grenade cook) | — |
 | Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses), skill levels | Sight / chase / attacks on Quake 2's attack frames (demo monsters) / pain / death, patrols, combat points, steering, 19 types tunable in the editor, skill 0–3 | Pathfinding, medic revive, boss behaviour. |
 | Props / effects | Barrels, banners, ships, lasers, splashes, explosion models | All of these used by the demo maps | Gib models with velocities, `misc_viper`, `target_blaster`, `trigger_monsterjump`, `func_killbox`. |
@@ -42,7 +42,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 ### 2. Feel of combat
 - **Frame-accurate attacks**: ~~player weapons~~ — done (`QuakeWeaponFrames`: Quake 2's `Weapon_Generic` / `Weapon_Grenade` frame state machine, so animation, refire, switching and damage line up). ~~Monsters~~ — done for the demo's monsters (`QuakeMonsterAttacks`: soldiers, infantry, gunner, berserk, flyer, parasite, tank play their Quake 2 attack sequences at 10 frames a second and fire on the `mframe_t` fire frames, with machinegun bursts that hold a frame, the gunner's chain refire loop, four-grenade volleys, the tank's three rockets, the parasite's drain, per-shot Quake 2 damage). Still to do: tables for the full game's other monsters (they keep the generic wind-up attack), the soldiers' refire and duck-shoot variants, the tank machinegun.
 - **Monster AI gaps**: ~~ambush, trigger-spawned monsters, Quake 2 sight / hearing rules~~ — done (`FindTarget`: front cone and ranges, `show_hostile`, hearing through the PHS and connected areas, `sight_entity` group wake, TRIGGER_SPAWN monsters stay away until triggered). Dodging done too (`check_dodge`: soldiers, infantry, gunners, medics and iron maidens duck under blaster bolts, rockets and BFG balls). Navigation: monsters that lose the player follow Quake 2's player trail (last sighting, then up to 8 breadcrumbs, `p_trail.c`). Still to do: `trigger_monsterjump` (not in the demo maps); real pathfinding (BSP leaf portals or a walkable grid) only if the trail proves too weak on the full game's maps.
-- **Swept player box** (`PM_StepSlideMove`): trace the 32 × 32 × 56 box against BSP brushes with plane clipping, removing the remaining snag cases on diagonal walls and stairs.
+- ~~Swept player box~~ — done: `QuakeTrace` ports `CM_BoxTrace` over the map's brushes (plus movers in their own space and monster boxes) and the player runs Quake 2's `PM_StepSlideMove`, `PM_CatagorizePosition`, `PM_CheckDuck`, friction, water and ladder moves on it; movers carry riders and push the player (`SV_Push`), monsters don't walk into him. Still to do: movers blocked by the player crushing / reversing (`door_blocked`, `plat_blocked`), monsters moving with the same traces.
 
 ### 3. Full game support (needs the retail PAK)
 - **Medic revive**, **boss behaviour** (supertank, Makron, jorg) and the missing entities (`misc_viper`, `target_blaster`, `func_killbox`, `turret_*`). Test with a local `baseq2` in a nightly-style workflow that is skipped when the PAK isn't available.
@@ -131,7 +131,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Monster dodging (duck under blaster bolts, rockets, BFG balls)
 - [x] Monster pursuit along the player trail (Quake 2 `p_trail.c`)
 - [ ] `trigger_monsterjump`
-- [ ] Swept player box (`PM_StepSlideMove`)
+- [x] Swept player box: box traces against BSP brushes, `PM_StepSlideMove`, movers carry / push the player
 - [x] Savegames include projectiles and delayed events
 - [x] Map compatibility report (`--map-report`, demo report in docs, checked in CI)
 - [ ] Android build with touch controls

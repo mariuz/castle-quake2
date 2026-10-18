@@ -550,6 +550,8 @@ begin
     GoNear(Target);
     if Ignore <> nil then
       Ignore.Exists := True;
+    { The probes above use render meshes; settle the player box in free space }
+    PlayerMovement.SnapToFreeSpace;
   end else
   if Action = 'F' then { Toggle the help computer (F1) }
     Hud.HelpVisible := not Hud.HelpVisible
@@ -611,8 +613,8 @@ begin
           BoolToStr(FWorld.Monsters[J].CanSeePlayer, True),
           PointsDistance(FWorld.Monsters[J].Transform.Translation, PlayerMovement.AimPosition)]);
     WritelnLog('Demo', 'Projectiles: %d, delayed targets: %d', [FWorld.ProjectileCount, FWorld.DelayedCount]);
-    WritelnLog('Demo', 'Monster shots: %d, player health %d armor %d', [FWorld.MonsterShots,
-      FWorld.Stats.Health, FWorld.Stats.Armor]);
+    WritelnLog('Demo', 'Monster shots: %d, player health %d armor %d, player stuck %d', [FWorld.MonsterShots,
+      FWorld.Stats.Health, FWorld.Stats.Armor, PlayerMovement.StuckCount]);
     WritelnLog('Demo', 'Gun: weapon %d state %d frame %d, ammo shells %d bullets %d grenades %d cells %d slugs %d', [
       FWorld.Gun.Slot, Ord(FWorld.Gun.State), FWorld.Gun.Frame, FWorld.Stats.Ammo[atShells],
       FWorld.Stats.Ammo[atBullets], FWorld.Stats.Ammo[atGrenades], FWorld.Stats.Ammo[atCells],
@@ -633,6 +635,7 @@ begin
         Inc(J);
       end;
     MainViewport.Camera.Translation := QuakeToCge(Target);
+    PlayerMovement.SnapToFreeSpace;
   end else
   if Action = 'C' then
     FWorld.SelectWeapon(StrToIntDef(Param, 2))

@@ -10,7 +10,7 @@ uses
   SysUtils, Classes, Math, Generics.Collections, fpjson, jsonparser,
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions,
   QuakePak, QuakeBsp, QuakeGeometry, QuakeMap, QuakeMd2, QuakePlayer, QuakeLight, QuakeSound, QuakeHud, QuakeSettings,
-  QuakeParticles, QuakeEntities, QuakeWeaponFrames, QuakeMonsterAttacks;
+  QuakeParticles, QuakeEntities, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace;
 
 const
   { Quake 2 player: eye 22 above origin, origin 24 above the feet }
@@ -65,6 +65,10 @@ type
     FFireHeld, FPrevFireHeld: Boolean;
     { Monster shots fired (demo log) }
     FMonsterShots: Integer;
+    { Brush collision of the current map (player box traces) }
+    FCollision: TQuakeCollision;
+    { Mover poses of the previous frame, to carry / push the player }
+    FMoverPoses: specialize TDictionary<TQuakeMover, TMatrix4>;
     FLevelExited: Boolean;
     FNextMap: String;
     FSpawnPoint: TVector3;
@@ -109,6 +113,14 @@ type
     procedure FireHitscan(const Origin, Dir: TVector3; const Damage: Integer;
       const HSpread, VSpread: Single; const Rail: Boolean = False);
     procedure ThrowHandGrenade(const Fuse: Single);
+    function MoverTrace(const Mover: TQuakeMover; const Start, Stop, Mins, Maxs: TVector3;
+      const Mask: Integer): TQuakeTrace;
+    { The same with the mover at pose M (its transform matrix) }
+    function MoverTraceAt(const Mover: TQuakeMover; const M: TMatrix4;
+      const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer): TQuakeTrace;
+    { Movers carry the player standing on them and push him when they
+      move into him (Quake 2 SV_Push) }
+    procedure PushPlayerByMovers;
     procedure UpdateGun(const SecondsPassed: Single);
     procedure GunEvent(const Event: TGunEvent);
     function GunAmmo(const Slot: Integer): Integer;
@@ -233,6 +245,8 @@ type
     property Hud: TQuakeHud read FHud write FHud;
     { Contents bits at a CGE position (liquids, exact ladders) }
     function PlayerPointContents(const CgePos: TVector3): Integer;
+    function PlayerTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer): TQuakeTrace;
+    procedure PlayerBeforeMove(Sender: TObject);
     { Player movement (pmove), for falling damage and jump pads; may be nil }
     property Player: TQuakePlayerMovement read FPlayer write SetPlayer;
     property Stats: TQuakePlayerStats read FStats;
@@ -300,6 +314,8 @@ begin
   FPickups := TQuakePickupList.Create(True);
   FMonsters := TQuakeMonsterList.Create(True);
   FSightEntities := specialize TList<TQuakeMonster>.Create;
+  FMoverPoses := specialize TDictionary<TQuakeMover, TMatrix4>.Create;
+  PlayerBlockBox := TBox3D.Empty;
   FGun := TQuakeGun.Create;
   FGun.OnEvent := @GunEvent;
   FGun.OnAmmo := @GunAmmo;
@@ -327,6 +343,8 @@ begin
   FreeAndNil(FWeaponModel);
   FreeAndNil(FWeaponTransform);
   FreeAndNil(FGun);
+  FreeAndNil(FMoverPoses);
+  FreeAndNil(FCollision);
   FPickups.Free;
   FMonsters.Free;
   FSightEntities.Free;
@@ -361,6 +379,8 @@ end;
 
 procedure TQuakeWorld.ClearLevel;
 begin
+  if FMoverPoses <> nil then
+    FMoverPoses.Clear;
   if PlayerTrail <> nil then
     PlayerTrail.Clear;
   FPickups.Clear;
@@ -2867,6 +2887,167 @@ begin
     FPlayer.OnFallDamage := @PlayerFallDamage;
     FPlayer.OnPointContents := @PlayerPointContents;
     FPlayer.OnLandSound := @PlayerLanded;
+    FPlayer.OnTrace := @PlayerTrace;
+    FPlayer.OnBeforeMove := @PlayerBeforeMove;
+  end;
+end;
+
+function TQuakeWorld.MoverTrace(const Mover: TQuakeMover; const Start, Stop, Mins, Maxs: TVector3;
+  const Mask: Integer): TQuakeTrace;
+begin
+  Result := MoverTraceAt(Mover, Mover.Transform.Transform, Start, Stop, Mins, Maxs, Mask);
+end;
+
+function TQuakeWorld.MoverTraceAt(const Mover: TQuakeMover; const M: TMatrix4;
+  const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer): TQuakeTrace;
+var
+  Inv: TMatrix4;
+  LStart, LStop: TVector3;
+begin
+  { Into the brush model's own coordinates (CM_TransformedBoxTrace): the
+    scene is placed relative to the entity origin (BaseOffset) by its
+    transform; a rotated model keeps the box axis-aligned, like Quake 2 }
+  if not M.TryInverse(Inv) then
+    Exit(BoxTraceAgainstBox(Stop, Stop, TVector3.Zero, TVector3.Zero, Vector3(1, 1, 1), Vector3(0, 0, 0), 0));
+  LStart := CgeToQuake(Inv.MultPoint(QuakeToCge(Start)) + Mover.BaseOffset);
+  LStop := CgeToQuake(Inv.MultPoint(QuakeToCge(Stop)) + Mover.BaseOffset);
+  Result := FCollision.BoxTrace(LStart, LStop, Mins, Maxs, FBsp.Models[Mover.ModelIndex].HeadNode, Mask);
+  if Result.Hit then
+  begin
+    Result.Normal := CgeToQuake(M.MultDirection(QuakeToCge(Result.Normal))).Normalize;
+    Result.EndPos := Start + (Stop - Start) * Result.Fraction;
+    Result.Ent := Mover;
+  end else
+    Result.EndPos := Stop;
+end;
+
+{ Keep the nearer of two traces, like SV_ClipMoveToEntities }
+procedure CombineTrace(var Result: TQuakeTrace; const T: TQuakeTrace);
+var
+  WasStartSolid: Boolean;
+begin
+  if T.AllSolid or T.StartSolid or (T.Fraction < Result.Fraction) then
+  begin
+    WasStartSolid := Result.StartSolid;
+    if T.AllSolid or (T.Fraction < Result.Fraction) or not Result.StartSolid then
+      Result := T
+    else
+      Result.Ent := T.Ent;
+    Result.StartSolid := Result.StartSolid or WasStartSolid or T.StartSolid;
+  end;
+end;
+
+function TQuakeWorld.PlayerTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer): TQuakeTrace;
+var
+  Mover: TQuakeMover;
+  Monster: TQuakeMonster;
+  Lo, Hi, A, B: TVector3;
+  Box: TBox3D;
+  T: TQuakeTrace;
+begin
+  if (FCollision = nil) or (FCollision.Bsp <> FBsp) then
+  begin
+    FreeAndNil(FCollision);
+    FCollision := TQuakeCollision.Create(FBsp);
+  end;
+  Result := FCollision.BoxTrace(Start, Stop, Mins, Maxs, 0, Mask);
+  if Result.AllSolid then
+    Exit;
+  { Swept bounds, to skip entities far away }
+  Lo := Vector3(Min(Start.X, Stop.X), Min(Start.Y, Stop.Y), Min(Start.Z, Stop.Z)) + Mins - Vector3(1, 1, 1);
+  Hi := Vector3(Max(Start.X, Stop.X), Max(Start.Y, Stop.Y), Max(Start.Z, Stop.Z)) + Maxs + Vector3(1, 1, 1);
+  if FGeometry <> nil then
+    for Mover in FGeometry.Movers do
+    begin
+      if (not Mover.Transform.Exists) or (Mover.ModelIndex <= 0) or (Mover.ModelIndex >= FBsp.ModelCount) then
+        Continue;
+      Box := Mover.WorldBox;
+      if Box.IsEmpty then
+        Continue;
+      A := CgeToQuake(Box.Data[0]);
+      B := CgeToQuake(Box.Data[1]);
+      if (Min(A.X, B.X) > Hi.X) or (Max(A.X, B.X) < Lo.X) or (Min(A.Y, B.Y) > Hi.Y) or
+         (Max(A.Y, B.Y) < Lo.Y) or (Min(A.Z, B.Z) > Hi.Z) or (Max(A.Z, B.Z) < Lo.Z) then
+        Continue;
+      T := MoverTrace(Mover, Start, Stop, Mins, Maxs, Mask);
+      CombineTrace(Result, T);
+      if Result.AllSolid then
+        Exit;
+    end;
+  { Live monsters are boxes (corpses don't block, SVF_DEADMONSTER) }
+  if (Mask and CONTENTS_MONSTER) <> 0 then
+    for Monster in FMonsters do
+    begin
+      if (not Monster.IsAlive) or Monster.Dormant or (Monster.Transform = nil) or
+         (not Monster.Transform.Exists) then
+        Continue;
+      Box := Monster.Transform.BoundingBox;
+      if Box.IsEmpty then
+        Continue;
+      A := CgeToQuake(Box.Data[0]);
+      B := CgeToQuake(Box.Data[1]);
+      T := BoxTraceAgainstBox(Start, Stop, Mins, Maxs,
+        Vector3(Min(A.X, B.X), Min(A.Y, B.Y), Min(A.Z, B.Z)),
+        Vector3(Max(A.X, B.X), Max(A.Y, B.Y), Max(A.Z, B.Z)), CONTENTS_MONSTER);
+      if T.Hit then
+      begin
+        T.Ent := Monster;
+        CombineTrace(Result, T);
+        if Result.AllSolid then
+          Exit;
+      end;
+    end;
+end;
+
+procedure TQuakeWorld.PlayerBeforeMove(Sender: TObject);
+var
+  Org: TVector3;
+begin
+  if FBsp = nil then
+    Exit;
+  PushPlayerByMovers;
+  { For monster moves: the player's box in CGE space }
+  if FDead then
+    PlayerBlockBox := TBox3D.Empty
+  else
+  begin
+    Org := FPlayer.Origin;
+    PlayerBlockBox := QuakeBoxToCge(Org + FPlayer.BoxMins, Org + FPlayer.BoxMaxs);
+  end;
+end;
+
+procedure TQuakeWorld.PushPlayerByMovers;
+var
+  Mover: TQuakeMover;
+  M, Old, OldInv: TMatrix4;
+  Org, Mins, Maxs, OldCge, NewCge: TVector3;
+  Riding, Inside: Boolean;
+begin
+  if FGeometry = nil then
+    Exit;
+  for Mover in FGeometry.Movers do
+  begin
+    M := Mover.Transform.Transform;
+    if FMoverPoses.TryGetValue(Mover, Old) and not TMatrix4.PerfectlyEquals(M, Old) and
+       Mover.Transform.Exists and (FPlayer <> nil) and Assigned(FPlayer.OnTrace) and (not FDead) and
+       (FPlayer.Parent <> nil) and Old.TryInverse(OldInv) then
+    begin
+      Org := FPlayer.Origin;
+      Mins := FPlayer.BoxMins;
+      Maxs := FPlayer.BoxMaxs;
+      Riding := FPlayer.GroundObject = Mover;
+      { Pushed: the mover moved into him (he was clear of its old pose) }
+      Inside := (not Riding) and MoverTrace(Mover, Org, Org, Mins, Maxs, MASK_PLAYERSOLID).StartSolid and
+        not MoverTraceAt(Mover, Old, Org, Org, Mins, Maxs, MASK_PLAYERSOLID).StartSolid;
+      if Riding or Inside then
+      begin
+        { Move the player like a point fixed to the mover }
+        OldCge := QuakeToCge(Org);
+        NewCge := M.MultPoint(OldInv.MultPoint(OldCge));
+        FPlayer.Push(NewCge - OldCge);
+      end;
+    end;
+    FMoverPoses.AddOrSetValue(Mover, M);
   end;
 end;
 

@@ -530,6 +530,9 @@ var
   PlayerShowHostile: Boolean = False;
   { The player's trail (created and fed by TQuakeWorld) }
   PlayerTrail: TQuakePlayerTrail;
+  { The player's box (CGE space), set by the world each frame: monsters
+    don't walk into it (it is no CGE collider) }
+  PlayerBlockBox: TBox3D;
 
 implementation
 
@@ -1330,6 +1333,7 @@ function TQuakeMonster.TryMove(const Dir: TVector3; const SecondsPassed: Single;
 var
   Probe: TVector3;
   Above: Single;
+  Box: TBox3D;
 begin
   { Don't walk off ledges higher than 64 units (Quake 2 M_CheckBottom-like) }
   if not Def^.Flying then
@@ -1338,6 +1342,12 @@ begin
     if (not Transform.Height(Probe, Above)) or (Above > 24 + 64) then
       Exit(False);
   end;
+  { The player's box blocks monsters like a solid (Quake 2 SV_movestep) }
+  Box := Transform.BoundingBox;
+  if (not PlayerBlockBox.IsEmpty) and (not Box.IsEmpty) and
+     Box.Translate(Dir * Def^.Speed * SpeedScale * SecondsPassed).Collision(PlayerBlockBox) and
+     not Box.Collision(PlayerBlockBox) then
+    Exit(False);
   Result := Transform.Move(Dir * Def^.Speed * SpeedScale * SecondsPassed, False, True);
 end;
 
