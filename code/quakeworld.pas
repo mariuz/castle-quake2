@@ -3086,12 +3086,58 @@ begin
 end;
 
 procedure TQuakeWorld.PushPlayerByMovers;
+const
+  { Quake 2 item boxes, and what blocks items (MASK_SOLID) }
+  ItemMins: TVector3 = (X: -15; Y: -15; Z: -15);
+  ItemMaxs: TVector3 = (X: 15; Y: 15; Z: 15);
+  MASK_SOLID = CONTENTS_SOLID or CONTENTS_WINDOW;
 var
   Mover: TQuakeMover;
   M, Old, OldInv: TMatrix4;
-  Org, Mins, Maxs, OldCge, NewCge: TVector3;
-  Riding, Inside: Boolean;
+  Org, Mins, Maxs, Delta: TVector3;
+  Blocked: Boolean;
   Damage: Integer;
+  Monster: TQuakeMonster;
+  Pickup: TQuakePickup;
+
+  { Quake 2 SV_Push for one entity: it moves with the mover when it rides
+    it (stood on its old pose) or the mover moved into it; it keeps the
+    pushed position if free, else the old one if that is free; else the
+    mover is blocked. True with Delta (CGE) when it should move. }
+  function PushOne(const AOrg, AMins, AMaxs: TVector3; const Mask: Integer; const Ent: TObject;
+    const Riding: Boolean; out ADelta: TVector3; out ABlocked: Boolean): Boolean;
+  var
+    T: TQuakeTrace;
+    Ride, Inside: Boolean;
+    NewQ: TVector3;
+  begin
+    Result := False;
+    ABlocked := False;
+    ADelta := TVector3.Zero;
+    Ride := Riding;
+    if not Ride then
+    begin
+      T := MoverTraceAt(Mover, Old, AOrg, AOrg - Vector3(0, 0, 1), AMins, AMaxs, Mask);
+      Ride := (T.Fraction < 1) and not T.StartSolid;
+    end;
+    Inside := (not Ride) and MoverTrace(Mover, AOrg, AOrg, AMins, AMaxs, Mask).StartSolid and
+      not MoverTraceAt(Mover, Old, AOrg, AOrg, AMins, AMaxs, Mask).StartSolid;
+    if not (Ride or Inside) then
+      Exit;
+    { Like a point fixed to the mover }
+    NewQ := CgeToQuake(M.MultPoint(OldInv.MultPoint(QuakeToCge(AOrg))));
+    { A push longer than 64 units in one frame is the box approximation of
+      a rotated model catching something far away: ignore it }
+    if PointsDistance(NewQ, AOrg) > 64 then
+      Exit;
+    if not WorldTrace(NewQ, NewQ, AMins, AMaxs, Mask, Ent).StartSolid then
+    begin
+      ADelta := QuakeToCge(NewQ) - QuakeToCge(AOrg);
+      Result := True;
+    end else
+      ABlocked := WorldTrace(AOrg, AOrg, AMins, AMaxs, Mask, Ent).StartSolid;
+  end;
+
 begin
   if FGeometry = nil then
     Exit;
@@ -3099,32 +3145,66 @@ begin
   begin
     M := Mover.Transform.Transform;
     if FMoverPoses.TryGetValue(Mover, Old) and not TMatrix4.PerfectlyEquals(M, Old) and
-       Mover.Transform.Exists and (FPlayer <> nil) and Assigned(FPlayer.OnTrace) and (not FDead) and
-       (FPlayer.Parent <> nil) and Old.TryInverse(OldInv) then
+       Mover.Transform.Exists and Old.TryInverse(OldInv) then
     begin
-      Org := FPlayer.Origin;
-      Mins := FPlayer.BoxMins;
-      Maxs := FPlayer.BoxMaxs;
-      Riding := FPlayer.GroundObject = Mover;
-      { Pushed: the mover moved into him (he was clear of its old pose) }
-      Inside := (not Riding) and MoverTrace(Mover, Org, Org, Mins, Maxs, MASK_PLAYERSOLID).StartSolid and
-        not MoverTraceAt(Mover, Old, Org, Org, Mins, Maxs, MASK_PLAYERSOLID).StartSolid;
-      if Riding or Inside then
+      { The player }
+      if (FPlayer <> nil) and Assigned(FPlayer.OnTrace) and (not FDead) and (FPlayer.Parent <> nil) then
       begin
-        { Move the player like a point fixed to the mover }
-        OldCge := QuakeToCge(Org);
-        NewCge := M.MultPoint(OldInv.MultPoint(OldCge));
-        { Quake 2 SV_Push: keep the pushed position if it is free, else the
-          old one if that is free; else the pusher is blocked (hurts him,
-          doors / plats go back) }
-        if not PlayerTrace(CgeToQuake(NewCge), CgeToQuake(NewCge), Mins, Maxs, MASK_PLAYERSOLID).StartSolid then
-          FPlayer.Push(NewCge - OldCge)
+        Org := FPlayer.Origin;
+        Mins := FPlayer.BoxMins;
+        Maxs := FPlayer.BoxMaxs;
+        if PushOne(Org, Mins, Maxs, MASK_PLAYERSOLID, FPlayer, FPlayer.GroundObject = Mover, Delta, Blocked) then
+          FPlayer.Push(Delta)
         else
-        if PlayerTrace(Org, Org, Mins, Maxs, MASK_PLAYERSOLID).StartSolid then
+        if Blocked then
         begin
           Damage := Mover.Blocked;
           if Damage > 0 then
             DamagePlayer(Damage, Mover.Center);
+        end;
+      end;
+      { Continuously spinning brushes only push the player }
+      if Mover.Kind = mkRotating then
+      begin
+        FMoverPoses.AddOrSetValue(Mover, M);
+        Continue;
+      end;
+      { Monsters and corpses (a corpse caught in a door is gibbed) }
+      for Monster in FMonsters do
+      begin
+        if Monster.Dormant or Monster.Gibbed or (Monster.Transform = nil) or (not Monster.Transform.Exists) or
+           Monster.Def^.Flying then
+          Continue;
+        Org := Monster.Origin;
+        Maxs := Monster.BoxMaxs;
+        if not Monster.IsAlive then
+          Maxs.Z := Monster.BoxMins.Z + 16;
+        if PushOne(Org, Monster.BoxMins, Maxs, MASK_MONSTERSOLID, Monster, False, Delta, Blocked) then
+        begin
+          Monster.Transform.Translation := Monster.Transform.Translation + Delta;
+        end
+        else
+        if Blocked then
+        begin
+          Damage := Mover.Blocked;
+          if not Monster.IsAlive then
+            Monster.TakeDamage(1000)
+          else
+          if Damage > 0 then
+            Monster.TakeDamage(Damage);
+        end;
+      end;
+      { Items }
+      for Pickup in FPickups do
+      begin
+        if Pickup.Collected or (Pickup.Transform = nil) or (not Pickup.Transform.Exists) then
+          Continue;
+        Org := CgeToQuake(Pickup.Origin);
+        { Items never block movers: their spawn origins may touch the floor }
+        if PushOne(Org, ItemMins, ItemMaxs, MASK_SOLID, Pickup, False, Delta, Blocked) then
+        begin
+          Pickup.Origin := Pickup.Origin + Delta;
+          Pickup.Transform.Translation := Pickup.Transform.Translation + Delta;
         end;
       end;
     end;

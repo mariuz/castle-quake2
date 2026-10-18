@@ -65,6 +65,8 @@ type
     FTouch: TQuakeTouchControls;
     { Demo script touches: last position of each finger }
     FTouchPos: array[0..4] of TVector2;
+    { Monster placed by MV: always in the V log }
+    FWatchedMonster: Integer;
     function WantMouseLook: Boolean;
     procedure TouchUse(Sender: TObject);
     procedure TouchNextWeapon(Sender: TObject);
@@ -119,6 +121,7 @@ begin
   inherited Create(AOwner);
   DesignUrl := 'castle-data:/gameviewplay.castle-user-interface';
   FCameraMode := cmFirstPerson;
+  FWatchedMonster := -1;
   FDemoCommands := TStringList.Create;
 end;
 
@@ -595,6 +598,20 @@ begin
       FTouchPos[J] := Target2;
     end;
   end else
+  if Action = 'MV' then { Place monster i at Quake coordinates: "MV:i x y z" }
+  begin
+    Vals := Param.Split([' '], TStringSplitOptions.ExcludeEmpty);
+    if Length(Vals) >= 4 then
+    begin
+      J := StrToIntDef(Vals[0], -1);
+      if (J >= 0) and (J < FWorld.Monsters.Count) then
+      begin
+        FWorld.Monsters[J].Transform.Translation := QuakeToCge(Vector3(StrToFloatDef(Vals[1], 0),
+          StrToFloatDef(Vals[2], 0), StrToFloatDef(Vals[3], 0)));
+        FWatchedMonster := J;
+      end;
+    end;
+  end else
   if Action = 'GB' then { Press and release a gamepad button, e.g. "GB:south" }
   begin
     if GamepadButtonFromName(Param, Button) then
@@ -689,10 +706,10 @@ begin
         BoolToStr(FWorld.Props[J].Destroyed, True), BoolToStr(FWorld.Props[J].Flying, True),
         BoolToStr(FWorld.Props[J].Transform.Exists, True)]);
     for J := 0 to FWorld.Monsters.Count - 1 do
-      if FWorld.Monsters[J].IsAlive and (FWorld.Monsters[J].Alerted or
+      if (J = FWatchedMonster) or FWorld.Monsters[J].IsAlive and (FWorld.Monsters[J].Alerted or
          (FWorld.Monsters[J].MoveTarget <> nil) or (FWorld.Monsters[J].GoalEntity <> nil) or
          (FWorld.Monsters[J].CombatTarget <> '')) then
-        WritelnLog('Demo', 'Monster %d %s state %d dist %.0f pos %s alerted %s patrol %s combatpoint %s %s hold %s sees %s cooldown %.1f', [J,
+        WritelnLog('Demo', 'Monster %d %s state %d dist %.0f pos %s alerted %s patrol %s combatpoint %s %s hold %s sees %s cooldown %.1f health %d', [J,
           FWorld.Monsters[J].Def^.ClassName, Ord(FWorld.Monsters[J].State),
           PointsDistance(FWorld.Monsters[J].Transform.Translation, MainViewport.Camera.Translation),
           CgeToQuake(FWorld.Monsters[J].Transform.Translation).ToString,
@@ -700,7 +717,7 @@ begin
           BoolToStr(FWorld.Monsters[J].MoveTarget <> nil, True),
           BoolToStr(FWorld.Monsters[J].GoalEntity <> nil, True), FWorld.Monsters[J].CombatTarget,
           BoolToStr(FWorld.Monsters[J].HoldGround, True), BoolToStr(FWorld.Monsters[J].CanSeePlayer, True),
-          FWorld.Monsters[J].AttackCooldown]);
+          FWorld.Monsters[J].AttackCooldown, FWorld.Monsters[J].Health]);
     P := 0;
     SolidCount := 0;
     Val := 0;

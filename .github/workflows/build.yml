@@ -129,6 +129,9 @@ jobs:
           # Touch controls (--touch, simulated fingers): the move stick walks, FIRE shoots
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --touch --autotest demo1 test_output/touch --demo "O:notarget,W:1.5,K,C:2,W:0.8,TD:0.2 0.3 0,TM:0.2 0.45 0,W:0.8,TU:0,TD:0.88 0.14 2,W:0.6,TU:2,W:0.2,V,S,Q" > test_output/touch.log 2>&1
           ! grep -q "Demo: Player at 128 46.03125 320 " test_output/touch.log && grep -q "ammo shells 99 " test_output/touch.log && ! grep -q Exception test_output/touch.log || { echo "::error::Touch controls did not move / fire"; exit 1; }
+          # Movers push entities: a corpse left under demo1's auto door is gibbed when it closes (SV_Push / door_blocked)
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/doorcorpse --demo "O:notarget,W:1,N:3,W:0.2,X,W:0.6,X,W:0.6,X,W:1.5,G:-1180 1632 -1.97,W:1.5,MV:3 -1112 1632 -23.9,G:-1300 1632 -1.97,W:7,V,Q" > test_output/doorcorpse.log 2>&1
+          grep -E "Demo: Monster 3 " test_output/doorcorpse.log | grep -q "health -10[0-9][0-9]" && ! grep -q Exception test_output/doorcorpse.log || { echo "::error::The door did not crush the corpse"; exit 1; }
           # Map compatibility report of the demo PAK (docs/map-report-demo.md):
           # every entity class of the demo maps must stay handled
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --map-report test_output/map-report.md > test_output/map-report.log 2>&1
