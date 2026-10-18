@@ -14,7 +14,7 @@ uses
   CastleViewport, CastleCameras, CastleTransform, CastleColors, CastleLog,
   CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound,
-  QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad,
+  QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad, QuakeTouch,
   QuakePlayer, QuakeSettings, QuakeMapReport, fpjson, jsonparser, CastleDownload;
 
 type
@@ -61,6 +61,14 @@ type
     FDemoMoveForward, FDemoMoveSide: Single;
     FDemoMoveTime: Single;
     FDemoJump: Boolean;
+    { On-screen touch controls (phones, tablets, --touch), nil otherwise }
+    FTouch: TQuakeTouchControls;
+    { Demo script touches: last position of each finger }
+    FTouchPos: array[0..4] of TVector2;
+    function WantMouseLook: Boolean;
+    procedure TouchUse(Sender: TObject);
+    procedure TouchNextWeapon(Sender: TObject);
+    procedure TouchMenu(Sender: TObject);
     procedure UpdateMovementInput(const SecondsPassed: Single);
     procedure BeginIntermission;
     procedure EndIntermission;
@@ -126,7 +134,7 @@ begin
   WalkNavigation.Gravity := (Mode = cmFirstPerson) and not PlayerMovement.Active;
   PlayerMovement.Noclip := Mode = cmNoclip;
   { Autotests must not depend on where the desktop mouse happens to be }
-  WalkNavigation.MouseLook := FAutoTestMap = '';
+  WalkNavigation.MouseLook := WantMouseLook;
   if Mode = cmNoclip then
   begin
     Menu.CameraModeName := 'Noclip Fly';
@@ -151,9 +159,47 @@ begin
   Settings.ApplyAudio;
 end;
 
+function TViewPlay.WantMouseLook: Boolean;
+begin
+  { Autotests must not depend on the desktop mouse; touch looks by dragging }
+  Result := (FAutoTestMap = '') and (FTouch = nil);
+end;
+
+procedure TViewPlay.TouchUse(Sender: TObject);
+begin
+  if (FWorld <> nil) and not FWorld.Dead then
+    FWorld.ActivateUse(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
+end;
+
+procedure TViewPlay.TouchNextWeapon(Sender: TObject);
+begin
+  if (FWorld <> nil) and not FWorld.Dead then
+    CycleWeapon(1);
+end;
+
+procedure TViewPlay.TouchMenu(Sender: TObject);
+begin
+  Menu.Exists := True;
+  WalkNavigation.MouseLook := False;
+end;
+
 procedure TViewPlay.Start;
 begin
   inherited Start;
+
+  { Touch screens get on-screen controls in front of everything but the
+    menu and console }
+  if TouchControlsWanted then
+  begin
+    FTouch := TQuakeTouchControls.Create(FreeAtStop);
+    FTouch.OnUse := @TouchUse;
+    FTouch.OnNextWeapon := @TouchNextWeapon;
+    FTouch.OnMenu := @TouchMenu;
+    InsertFront(FTouch);
+    Menu.Parent.InsertFront(Menu);
+    Console.Parent.InsertFront(Console);
+  end else
+    FTouch := nil;
 
   { Settings that are not published (so not in the design) }
   WalkNavigation.FallingEffect := False; { Quake doesn't roll the camera when falling }
@@ -220,6 +266,7 @@ procedure TViewPlay.UpdateMovementInput(const SecondsPassed: Single);
 var
   Typing: Boolean;
   Pad: TGamepadInput;
+  Look: TVector2;
 begin
   Typing := Console.IsOpen or Menu.Exists or FIntermission or FWorld.Dead;
   FGamepadFire := False;
@@ -254,6 +301,28 @@ begin
       PlayerMovement.InputCrouch := PlayerMovement.InputCrouch or Pad.Crouch;
       FGamepadFire := Pad.Fire;
     end;
+    { Touch: left stick moves, dragging on the right looks }
+    if FTouch <> nil then
+    begin
+      FTouch.Exists := True;
+      Look := FTouch.TakeLook * FTouch.LookDegreesPerPixel * Settings.MouseSensitivity;
+      PlayerMovement.InputForward := EnsureRange(PlayerMovement.InputForward + FTouch.Stick.Y, -1, 1);
+      PlayerMovement.InputSide := EnsureRange(PlayerMovement.InputSide + FTouch.Stick.X, -1, 1);
+      PlayerMovement.InputYaw := PlayerMovement.InputYaw - Look.X;
+      if Settings.InvertMouse then
+        PlayerMovement.InputPitch := PlayerMovement.InputPitch - Look.Y
+      else
+        PlayerMovement.InputPitch := PlayerMovement.InputPitch + Look.Y;
+      PlayerMovement.InputJump := PlayerMovement.InputJump or FTouch.Held(tbJump);
+      PlayerMovement.InputCrouch := PlayerMovement.InputCrouch or FTouch.Held(tbCrouch);
+      FGamepadFire := FGamepadFire or FTouch.Held(tbFire);
+    end;
+  end else
+  if FTouch <> nil then
+  begin
+    { Hidden under menus, the console, intermission and death }
+    FTouch.Exists := False;
+    FTouch.ResetTouches;
   end;
   { Scripted movement for autotests }
   if FDemoMoveTime > 0 then
@@ -389,6 +458,7 @@ var
   Vals: TStringArray;
   Button: TGameControllerButton;
   PadEvent: TInputPressRelease;
+  Target2: TVector2;
 begin
   if FDemoIndex >= FDemoCommands.Count then
   begin
@@ -498,6 +568,30 @@ begin
         4: VirtualGamepad.LeftTrigger := StrToFloatDef(Vals[J], 0);
         5: VirtualGamepad.RightTrigger := StrToFloatDef(Vals[J], 0);
       end;
+  end else
+  if (Action = 'TD') or (Action = 'TM') or (Action = 'TU') then
+  begin
+    { Touch: "TD:x y finger" down, "TM:x y finger" move (x, y as fractions
+      of the window, from the bottom left), "TU:finger" up }
+    Vals := Param.Split([' '], TStringSplitOptions.ExcludeEmpty);
+    if Action = 'TU' then
+    begin
+      J := StrToIntDef(Param, 0);
+      if (J >= 0) and (J <= High(FTouchPos)) then
+        Container.EventRelease(InputMouseButton(FTouchPos[J], buttonLeft, J, []));
+    end else
+    if Length(Vals) >= 2 then
+    begin
+      J := 0;
+      if Length(Vals) >= 3 then
+        J := EnsureRange(StrToIntDef(Vals[2], 0), 0, High(FTouchPos));
+      Target2 := Vector2(StrToFloatDef(Vals[0], 0) * Container.Width, StrToFloatDef(Vals[1], 0) * Container.Height);
+      if Action = 'TD' then
+        Container.EventPress(InputMouseButton(Target2, buttonLeft, J, []))
+      else
+        Container.EventMotion(InputMotion(FTouchPos[J], Target2, [buttonLeft], J));
+      FTouchPos[J] := Target2;
+    end;
   end else
   if Action = 'GB' then { Press and release a gamepad button, e.g. "GB:south" }
   begin
@@ -877,8 +971,9 @@ begin
   { Hold to fire (left mouse / Ctrl) }
   Firing := FDemoFireHeld;
   if not Console.IsOpen and not Menu.Exists then
-    Firing := Firing or Container.Pressed[Settings.Keys[qaFire]] or (buttonLeft in Container.MousePressed) or
-      FGamepadFire;
+    { With touch controls every touch is a "left button": fire only by FIRE }
+    Firing := Firing or Container.Pressed[Settings.Keys[qaFire]] or
+      ((FTouch = nil) and (buttonLeft in Container.MousePressed)) or FGamepadFire;
   if Firing then
     FWorld.FireWeapon(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
 end;
@@ -912,7 +1007,7 @@ begin
     if MenuEvent.IsKey(keyEscape) then
     begin
       Menu.Exists := False;
-      WalkNavigation.MouseLook := FAutoTestMap = '';
+      WalkNavigation.MouseLook := WantMouseLook;
       Exit(True);
     end;
     Exit(False);
@@ -1126,7 +1221,7 @@ begin
     maNewGame, maWarpMap:
       begin
         Menu.Exists := False;
-        WalkNavigation.MouseLook := FAutoTestMap = '';
+        WalkNavigation.MouseLook := WantMouseLook;
         LoadLevel(Param);
       end;
     maSettingsChanged:

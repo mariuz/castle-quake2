@@ -11,7 +11,7 @@ uses
   SysUtils, Classes,
   CastleWindow, CastleLog, CastleUIControls, CastleApplicationProperties, CastleParameters,
   CastleUtils, CastleFilesUtils, CastleUriUtils,
-  QuakePak, QuakePalette, QuakeSound, QuakeGeometry, QuakeMonsterTypes, QuakeSettings, QuakeGamepad, CastleConfig
+  QuakePak, QuakePalette, QuakeSound, QuakeGeometry, QuakeMonsterTypes, QuakeSettings, QuakeGamepad, QuakeTouch, CastleConfig
   {$region 'Castle Initialization Uses'}
   // The content here may be automatically updated by CGE editor.
   , GameViewMenu
@@ -67,6 +67,8 @@ begin
       { Runs like an autotest: default options, nothing saved }
       AutoTestMap := 'report';
     end;
+    if Parameters[I] = '--touch' then
+      TouchControlsForced := True;
     if (Parameters[I] = '--demo') and (I + 1 <= Parameters.High) then
     begin
       AutoTestDemo := Parameters[I + 1];

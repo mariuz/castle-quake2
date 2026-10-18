@@ -44,6 +44,8 @@ type
     { Change the value of the selected option (-1 / +1); False if it has none }
     function AdjustOption(const Delta: Integer): Boolean;
     procedure SettingsChanged;
+    { Index of the item row at a position (container pixels), -1 if none }
+    function ItemAt(const P: TVector2): Integer;
     function PageTitle: String;
   public
     constructor Create(AOwner: TComponent); override;
@@ -339,9 +341,52 @@ begin
   end;
 end;
 
+function TQuakeMenu.ItemAt(const P: TVector2): Integer;
+var
+  L: TVector2;
+  First, I: Integer;
+  Baseline: Single;
+begin
+  Result := -1;
+  { The rows Render draws: baselines 36 pixels apart from CY + 130 }
+  L := P - RenderRect.LeftBottom;
+  First := EnsureRange(FSelectedIdx - 5, 0, Max(0, FItems.Count - 10));
+  for I := First to Min(FItems.Count - 1, First + 9) do
+  begin
+    Baseline := RenderRect.Height / 2 + 130 - (I - First) * 36;
+    if (L.Y >= Baseline - 10) and (L.Y < Baseline + 26) and
+       (Abs(L.X - RenderRect.Width / 2) < RenderRect.Width * 0.35) then
+      Exit(I);
+  end;
+end;
+
 function TQuakeMenu.Press(const Event: TInputPressRelease): Boolean;
+var
+  Tapped: Integer;
 begin
   Result := False;
+
+  { Mouse / touch: a tap selects a row, a tap on the selected row activates
+    it (or changes its value: right half up, left half down) }
+  if (Event.EventType = itMouseButton) and not FBinding then
+  begin
+    if FSubMenu = smShowcase then
+    begin
+      ExecuteSelection;
+      Exit(True);
+    end;
+    Tapped := ItemAt(Event.Position);
+    if Tapped < 0 then
+      Exit(True);
+    if Tapped <> FSelectedIdx then
+    begin
+      FSelectedIdx := Tapped;
+      Sounds.Play('sound/misc/menu1.wav');
+    end else
+    if not AdjustOption(IfThen(Event.Position.X - RenderRect.Left < RenderRect.Width / 2, -1, 1)) then
+      ExecuteSelection;
+    Exit(True);
+  end;
 
   if FBinding then
   begin

@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch;
 
 var
   Passed, Failed: Integer;
@@ -1011,6 +1011,18 @@ begin
   end;
 end;
 
+procedure TestTouch;
+var
+  V: TVector2;
+begin
+  V := TouchStickVector(Vector2(100, 100), Vector2(100, 150), 100);
+  Check(SameValue(V.Y, 0.5, 1e-5) and SameValue(V.X, 0, 1e-5), 'touch stick: half way up is half forward');
+  V := TouchStickVector(Vector2(100, 100), Vector2(400, 100), 100);
+  Check(SameValue(V.X, 1, 1e-5), 'touch stick: dragged past the radius is full speed');
+  V := TouchStickVector(Vector2(100, 100), Vector2(300, 300), 100);
+  Check(SameValue(V.Length, 1, 1e-5) and SameValue(V.X, V.Y, 1e-5), 'touch stick: diagonal keeps its direction, length 1');
+end;
+
 procedure TestGamepad;
 var
   V: TVector2;
@@ -1105,6 +1117,7 @@ begin
   TestMapReport;
   TestPlayerTrail;
   TestGamepad;
+  TestTouch;
   TestGun;
   TestMonsterAttacks;
   TestTrace;
