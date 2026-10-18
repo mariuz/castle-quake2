@@ -58,7 +58,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 ### 5. Performance and platforms
 - **Measure on real GPUs**: log frame time and draw calls per map (CI only has Mesa software rendering at ~12 FPS); try `RegionSize` 512 vs 1024 for culling vs draw-call count.
 - Merge mover scenes that never move (`func_wall`), cache `LineOfSight` results across monsters, shader-based light styles for big maps.
-- **Mobile**: Android build with CGE touch navigation (two virtual sticks) and the gamepad support above.
+- ~~Mobile~~ — done: `QuakeTouch` on-screen controls (move stick, drag look, FIRE / JUMP / DUCK / USE / WPN / MENU, multi-touch), tap menus, Android APK built by CI in the CGE Docker image (debug-signed). Not yet tried on a real device; next: try it, tune button sizes and look speed, a release signing key, maybe iOS.
 
 ### Out of scope for now
 - **Multiplayer** (deathmatch / coop): needs a client-server split of `TQuakeWorld` and networking; large effort, best as a separate project milestone after single player is complete.
@@ -135,4 +135,4 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - [x] Swept player box: box traces against BSP brushes, `PM_StepSlideMove`, movers carry / push the player
 - [x] Savegames include projectiles and delayed events
 - [x] Map compatibility report (`--map-report`, demo report in docs, checked in CI)
-- [ ] Android build with touch controls
+- [x] Android build with touch controls (APK from CI; untested on hardware)

@@ -78,6 +78,7 @@ The project follows the structure of CGE's own templates (`3d_fps_game`) and the
 | **F8** (debug build) | CGE inspector: hierarchy and live properties |
 | **Escape** | Menu: *Single Player* (choose Easy / Medium / Hard / Nightmare), *Map Warp*, *Options* (camera, mouse sensitivity, invert mouse, view bob, field of view, sound and music volume, *Controls* to rebind keys) |
 
+| **Touch** (phones, tablets; `--touch` on desktop) | Left thumb anywhere on the left 40 % of the screen: move stick; drag on the right: look; buttons FIRE, JUMP, DUCK, USE, WPN (next weapon), MENU; in menus tap a row to select it, tap it again to activate it (or change its value: left half down, right half up); the Android back button is Escape |
 | **Gamepad** | Left stick move, right stick look, right trigger fire, A jump, B / left trigger crouch, X use, Y hand grenades, bumpers / D-pad up-down weapons, Menu menu, View help computer; in menus D-pad / left stick, A select, B back |
 
 The movement, jump, crouch, use, fire, grenade and help keys above are the defaults; rebind them in *Options → Controls*. Options are saved with CGE's `UserConfig` and restored on the next start.
@@ -95,6 +96,10 @@ $env:PATH = "C:\castle-engine\bin;C:\castle-engine\tools\contrib\fpc\bin;" + $en
 castle-engine compile --mode=release
 .\castle-quake2.exe
 ```
+
+### Android
+
+`castle-engine package --target=android --mode=release` builds an APK for arm and aarch64 with the demo PAK inside (CGE reads it from the APK assets). CI builds it in the CGE Docker image (artifact `castle-quake2-android`, attached to releases); without `AndroidSigningProperties.txt` it is signed with a debug key, fine for sideloading (`adb install castle-quake2-*.apk`). Touch controls appear automatically on touch devices. The APK is built by CI but not yet tried on a device.
 
 ### Game data
 
@@ -125,7 +130,7 @@ CI also runs the `--autotest` demo scripts on Linux (xvfb + Mesa), uploads their
 .\castle-quake2.exe --autotest demo1 shot --demo "W:1,S,K,C:9,N:3,X,W:0.2,S,Q"
 ```
 
-Demo script actions (comma separated): `W:sec` wait, `S` screenshot, `X` fire, `H` toggle hold-fire, `U` use, `C:slot` weapon, `K` give all, `Y` god, `A:deg` yaw, `T:deg` turn, `P:deg` pitch, `M:units` move, `N:i` / `I:i` / `D:i` / `R:i` stand near monster / item / brush entity / prop number i, `F` toggle the help computer, `G:x y z` go to Quake coordinates, `GO:forward side seconds` hold movement keys, `J` jump, `E:targetname` fire targets, `O:command` run a console command (e.g. `O:kill`), `V` log mover, prop and laser states, `L:map` load map, `B:key` press a key (`B:escape`, `B:down`, `B:enter`... to drive the menu), `GP:lx ly rx ry lt rt` hold a virtual gamepad's sticks and triggers (`GP:` releases), `GB:button` press a gamepad button (`south`, `east`, `west`, `north`, `lb`, `rb`, `up`, `down`, `left`, `right`, `menu`, `view`), `Q` quit. Autotests ignore the saved options and don't save them.
+Demo script actions (comma separated): `W:sec` wait, `S` screenshot, `X` fire, `H` toggle hold-fire, `U` use, `C:slot` weapon, `K` give all, `Y` god, `A:deg` yaw, `T:deg` turn, `P:deg` pitch, `M:units` move, `N:i` / `I:i` / `D:i` / `R:i` stand near monster / item / brush entity / prop number i, `F` toggle the help computer, `G:x y z` go to Quake coordinates, `GO:forward side seconds` hold movement keys, `J` jump, `E:targetname` fire targets, `O:command` run a console command (e.g. `O:kill`), `V` log mover, prop and laser states, `L:map` load map, `B:key` press a key (`B:escape`, `B:down`, `B:enter`... to drive the menu), `GP:lx ly rx ry lt rt` hold a virtual gamepad's sticks and triggers (`GP:` releases), `GB:button` press a gamepad button (`south`, `east`, `west`, `north`, `lb`, `rb`, `up`, `down`, `left`, `right`, `menu`, `view`), `TD:x y finger` / `TM:x y finger` / `TU:finger` touch down / move / up (x, y as fractions of the window from the bottom left; with `--touch` this drives the touch controls), `Q` quit. Autotests ignore the saved options and don't save them.
 
 ---
 
