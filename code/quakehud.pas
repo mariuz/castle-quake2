@@ -54,6 +54,7 @@ type
     FIntermission: Boolean;
     FLevelName, FHelpPrimary, FHelpSecondary: String;
     procedure RenderHelpComputer;
+    procedure RenderHelpComputerScaled;
     function Pic(const AName: String): TDrawableImage;
     function DrawNumber(const X, Y: Single; const Value, Digits: Integer;
       const Alt: Boolean; const Scale: Single): Boolean;
@@ -91,7 +92,7 @@ type
 implementation
 
 uses
-  CastleComponentSerialize;
+  CastleComponentSerialize, QuakeSettings;
 
 const
   { Quake 2 pics were drawn for 320x240; scale them up on the 1600x900 UI }
@@ -245,9 +246,28 @@ begin
   if Stats.InvulnTime > 0 then
     S := S + Format('   INVULNERABLE %d', [Ceil(Stats.InvulnTime)]);
   FStatsLabel.Caption := S;
+  { Larger text on phones (Options -> Interface Size); labels add UIScale }
+  if FMessageLabel.FontSize <> 28 * InterfaceScale then
+  begin
+    FMessageLabel.FontSize := 28 * InterfaceScale;
+    FMessageLabel.Anchor(vpTop, -120 * InterfaceScale);
+    FStatsLabel.FontSize := 20 * InterfaceScale;
+  end;
 end;
 
 procedure TQuakeHud.RenderHelpComputer;
+begin
+  { Text grows with the picture on large screens }
+  UIFont.PushProperties;
+  try
+    UIFont.Size := UIFont.EffectiveSize * UIScale;
+    RenderHelpComputerScaled;
+  finally
+    UIFont.PopProperties;
+  end;
+end;
+
+procedure TQuakeHud.RenderHelpComputerScaled;
 const
   Green: TVector4 = (X: 0.35; Y: 1.0; Z: 0.35; W: 1.0);
 var
@@ -422,11 +442,21 @@ begin
   { Pickup notification }
   if FPickupTimer > 0 then
   begin
-    X := W - 260 * UIScale;
-    Img := Pic(FPickupIcon);
-    if Img <> nil then
-      Img.Draw(FloatRectangle(X - 24 * Sc - 8, Y + 34 * Sc, 24 * Sc, 24 * Sc));
-    UIFont.Print(X, Y + 34 * Sc + 20 * UIScale, Vector4(1, 1, 1, 1), FPickupText);
+    UIFont.PushProperties;
+    try
+      UIFont.Size := UIFont.EffectiveSize * UIScale * InterfaceScale;
+      { Bottom right, or centered on touch screens (the buttons are there) }
+      if TouchInterface then
+        X := W / 2 - UIFont.TextWidth(FPickupText) / 2 + 12 * Sc
+      else
+        X := W - 260 * UIScale;
+      Img := Pic(FPickupIcon);
+      if Img <> nil then
+        Img.Draw(FloatRectangle(X - 24 * Sc - 8, Y + 34 * Sc, 24 * Sc, 24 * Sc));
+      UIFont.Print(X, Y + 34 * Sc + 20 * UIScale, Vector4(1, 1, 1, 1), FPickupText);
+    finally
+      UIFont.PopProperties;
+    end;
   end;
 
   { Crosshair }

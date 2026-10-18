@@ -29,6 +29,7 @@ type
     function ButtonCircle(const B: TTouchButton; out Middle: TVector2): Single;
     function ButtonAt(const P: TVector2; out B: TTouchButton): Boolean;
     function LocalPos(const P: TVector2): TVector2;
+    procedure RenderControls;
   public
     { Look speed: degrees per pixel dragged (times the mouse sensitivity) }
     LookDegreesPerPixel: Single;
@@ -251,13 +252,25 @@ begin
 end;
 
 procedure TQuakeTouchControls.Render;
+begin
+  inherited Render;
+  UIFont.PushProperties;
+  try
+    { Labels sized to the buttons (a fraction of the screen height) }
+    UIFont.Size := RenderRect.Height * 0.026;
+    RenderControls;
+  finally
+    UIFont.PopProperties;
+  end;
+end;
+
+procedure TQuakeTouchControls.RenderControls;
 var
   B: TTouchButton;
   C, Knob: TVector2;
   R: Single;
   Col: TCastleColor;
 begin
-  inherited Render;
   { Move stick: base where the thumb went down, knob under it }
   if FMoveFinger >= 0 then
   begin

@@ -27,6 +27,9 @@ type
     FieldOfView: Integer;
     { Percent }
     SoundVolume, MusicVolume: Integer;
+    { Size of the menu, console and HUD text: 0 auto (larger on touch
+      screens), 1..4 small, normal, large, huge (InterfaceSizeNames) }
+    InterfaceSize: Integer;
     Keys: array[TQuakeAction] of TKey;
     { Save to UserConfig (off in autotests: they use the defaults and must
       not change the user's settings) }
@@ -47,6 +50,11 @@ type
   end;
 
 const
+  InterfaceSizeNames: array[0..4] of String = ('Auto', 'Small', 'Normal', 'Large', 'Huge');
+  InterfaceSizeScales: array[1..4] of Single = (0.8, 1.0, 1.4, 1.75);
+  { Auto on touch screens: phones are small, rows must be big enough to tap }
+  TouchInterfaceScale = 1.75;
+
   SkillNames: array[0..3] of String = ('Easy', 'Medium', 'Hard', 'Nightmare');
   ActionNames: array[TQuakeAction] of String = ('Move Forward', 'Move Back',
     'Strafe Left', 'Strafe Right', 'Jump', 'Crouch', 'Use', 'Fire',
@@ -64,6 +72,14 @@ var
   { Skill of the game being played (Quake 2's latched "skill" cvar): set by
     a new game, the "skill" console command and loading a savegame }
   GameSkill: Integer = 1;
+  { Touch screen (or --touch): set at startup, Auto interface size is larger }
+  TouchInterface: Boolean;
+
+{ Extra scale of the menu, console and HUD text over CGE's UIScale, from
+  Settings.InterfaceSize (and TouchInterface for Auto) }
+function InterfaceScale: Single;
+{ Same for a given size setting (pure, for the tests) }
+function InterfaceScaleFor(const Size: Integer; const Touch: Boolean): Single;
 
 { Spawnflag that removes an entity on a skill (hard and nightmare share one) }
 function SkillSpawnFlag(const ASkill: Integer): Integer;
@@ -75,6 +91,25 @@ implementation
 
 uses
   Math, CastleConfig, CastleSoundEngine;
+
+function InterfaceScaleFor(const Size: Integer; const Touch: Boolean): Single;
+begin
+  if (Size >= Low(InterfaceSizeScales)) and (Size <= High(InterfaceSizeScales)) then
+    Result := InterfaceSizeScales[Size]
+  else
+  if Touch then
+    Result := TouchInterfaceScale
+  else
+    Result := 1;
+end;
+
+function InterfaceScale: Single;
+begin
+  if Settings = nil then
+    Result := InterfaceScaleFor(0, TouchInterface)
+  else
+    Result := InterfaceScaleFor(Settings.InterfaceSize, TouchInterface);
+end;
 
 function SkillSpawnFlag(const ASkill: Integer): Integer;
 begin
@@ -113,6 +148,7 @@ begin
   FieldOfView := 90;
   SoundVolume := 100;
   MusicVolume := 70;
+  InterfaceSize := 0;
   ResetKeys;
 end;
 
@@ -139,6 +175,7 @@ begin
   FieldOfView := EnsureRange(C.GetValue('quake2/fov', 90), 60, 130);
   SoundVolume := EnsureRange(C.GetValue('quake2/sound_volume', 100), 0, 100);
   MusicVolume := EnsureRange(C.GetValue('quake2/music_volume', 70), 0, 100);
+  InterfaceSize := EnsureRange(C.GetValue('quake2/interface_size', 0), 0, High(InterfaceSizeNames));
   for A := Low(TQuakeAction) to High(TQuakeAction) do
     Keys[A] := StrToKey(C.GetValue('quake2/keys/' + IntToStr(Ord(A)),
       KeyToStr(DefaultKeys[A])), DefaultKeys[A]);
@@ -163,6 +200,7 @@ begin
   C.SetDeleteValue('quake2/fov', FieldOfView, 90);
   C.SetDeleteValue('quake2/sound_volume', SoundVolume, 100);
   C.SetDeleteValue('quake2/music_volume', MusicVolume, 70);
+  C.SetDeleteValue('quake2/interface_size', InterfaceSize, 0);
   for A := Low(TQuakeAction) to High(TQuakeAction) do
     C.SetDeleteValue('quake2/keys/' + IntToStr(Ord(A)), KeyToStr(Keys[A]), KeyToStr(DefaultKeys[A]));
   if Config = nil then

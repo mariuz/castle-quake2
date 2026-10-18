@@ -20,7 +20,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Audio | 3D sounds, entity channels, merged loop sounds, CD music | Quake 2 attenuation (incl. `ATTN_STATIC`), `CHAN_*` channels, point sounds that outlive entities, loop mixer (one voice per sound, PVS-checked, `SOUND_LOOPATTENUATE`), 32 sources, OGG tracks, named sounds editable in the editor | Stereo panning curve (OpenAL's, not Quake 2's), `s_volume` style master limiter. |
 | Input / options | Key bindings, mouse sensitivity, joystick, skill | Options menu (sensitivity, invert, FOV, volumes), key rebinding, skill selection, saved in `UserConfig`, gamepad (sticks, triggers, menus), touch controls (stick, drag look, buttons, tap menus) | Gamepad button rebinding; gamepad and touch not yet tried on real hardware. |
 | Multiplayer | Deathmatch / coop over UDP | Single player only | Out of scope for now (see below). |
-| Tooling | Console, `+map`, demos | Console, autotest scripts (keys, gamepad, touch), `record` to turn play into a script, screenshot comparison in CI, 173 unit checks, map compatibility report, CGE editor components and designs, F8 inspector, Windows / Linux / Android / WebAssembly builds | Editor property editors. |
+| Tooling | Console, `+map`, demos | Console, autotest scripts (keys, gamepad, touch), `record` to turn play into a script, screenshot comparison in CI, 176 unit checks, map compatibility report, CGE editor components and designs, F8 inspector, Windows / Linux / Android / WebAssembly builds | Editor property editors. |
 
 ## Done so far
 
@@ -30,14 +30,14 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - **Performance**: PVS + areaportal culling of the world and of entities (`novis` to compare), batched particles.
 - **Editor**: views from designs, `TQuakeMap` building levels in the editor with skybox and entity markers, behaviors with published state, monster types (`data/monsters.castle-transform`) and named sounds (`data/sounds.castle-component`).
 - **Reach**: options menu with key rebinding, skill levels, gamepad, touch controls, Android APK and WebAssembly builds.
-- **Engineering**: CI on Windows / Linux / Android / Web, autotests under Mesa (keyboard, virtual gamepad and simulated touch), screenshot references, culling check (vis vs `novis`), map compatibility report, recorded replays, 173 unit checks.
+- **Engineering**: CI on Windows / Linux / Android / Web, autotests under Mesa (keyboard, virtual gamepad and simulated touch), screenshot references, culling check (vis vs `novis`), map compatibility report, recorded replays, 176 unit checks.
 - **Release**: v0.3.0, the first tagged release, with Windows / Linux / Android packages ([changelog](CHANGELOG.md)).
 
 ## Next: suggested improvements (Phase 6, prioritised)
 
 Phase 5 is complete and v0.3.0 is released. What would help most now, roughly in order of value for effort:
 
-1. **Try it on real hardware** (small effort, removes the biggest unknowns). Gamepad, Android touch and GPU performance were only tested headless. Install the APK on a phone, play with a controller, and run on a real GPU with `fps` on. Expected follow-ups: touch button sizes and look speed, **menu and HUD scaling on phone screens** (the menu lays out rows in fixed pixels, so on a 2400 × 1080 phone it is small; switch to CGE UI scaling or scale by screen height), an `AndroidSigningProperties.txt` release key and a proper launcher icon.
+1. **Try it on real hardware** (small effort, removes the biggest unknowns). Gamepad, Android touch and GPU performance were only tested headless. Install the APK on a phone, play with a controller, and run on a real GPU with `fps` on. Expected follow-ups: touch button sizes and look speed, ~~menu and HUD scaling on phone screens~~ (done: *Options → Interface Size*, Auto = 1.75× on touch screens, on top of CGE's UI scaling; the menu shows as many rows as fit and taps whole rows), an `AndroidSigningProperties.txt` release key and a proper launcher icon.
 2. ~~**Monsters and shots on the BSP traces**~~ — done (monsters move with `SV_movestep` / `M_CheckBottom`, shots / projectiles / sight / lasers trace `MASK_SHOT` / `MASK_OPAQUE`). The player now collides with the real brushes, but monsters still move with CGE mesh collisions and the `PlayerBlockBox` workaround, and hitscan / projectiles / line of sight use `WorldRayCast` against render meshes. Porting `SV_movestep` / `M_CheckBottom` (step up 18, don't walk off ledges) and using `TQuakeCollision` for shots and sight would make monsters respect player-clip / monster-clip brushes, ride and be pushed by movers, and make sight checks much cheaper.
 3. ~~**Movers push everything**~~ — done (monsters, corpses and items ride and get pushed; blocked monsters take the mover's damage, corpses are gibbed). Plats and doors only carry / push the player; monsters, items and corpses on a moving plat stay behind. Once monsters use traces, extend `PushPlayerByMovers` to all entities (`SV_Push` iterates every entity).
 4. ~~**Record playthroughs as test scripts**~~ — done (`record <name>` / `stop`, `IN:` lines on the script clock with drift correction, `--demo @file`). A `record` console command that writes the player's inputs as an autotest demo script (`GO` / `T` / `P` / `X` with timings) would turn any bug repro into a regression test, and is a cheap stand-in for Quake 2's demo files.
@@ -153,7 +153,8 @@ Phase 5 is complete and v0.3.0 is released. What would help most now, roughly in
 - [x] Android build with touch controls (APK from CI; untested on hardware)
 
 ### Phase 6 – Hardware, consistency, full game (next)
-- [ ] Try Android touch, a gamepad and a real GPU; tune touch controls, scale the menu / HUD for phone screens
+- [ ] Try Android touch, a gamepad and a real GPU; tune touch controls
+- [x] Menu, console and HUD text sized for phone screens (*Interface Size* option, larger on touch screens; checked with 2400 × 1080 screenshots)
 - [ ] Release signing key and launcher icon for Android
 - [x] Monster movement on the BSP traces (`SV_movestep`, `M_CheckBottom`, Quake 2 monster boxes, `M_droptofloor`)
 - [x] Hitscan, projectiles (grenades bounce off the hit plane), monster sight, lasers and the player trail on the BSP traces; barrels solid again

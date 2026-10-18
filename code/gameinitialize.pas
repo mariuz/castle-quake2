@@ -109,6 +109,9 @@ begin
   Pak.RegisterProtocol;
   Palette.RegisterProtocol;
 
+  { Touch screens get a larger interface (Options -> Interface Size: Auto) }
+  TouchInterface := TouchControlsWanted;
+
   { Quake 2 data: bundled demo PAK first, then a full install (overrides it),
     then PAKs given explicitly on the command line. }
   LoadedAny := False;

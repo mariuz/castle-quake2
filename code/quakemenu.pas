@@ -18,9 +18,13 @@ type
   TMenuPage = (smMain, smSkill, smMaps, smOptions, smControls, smShowcase);
 
   { Rows of the Options page }
-  TOptionItem = (oiCamera, oiSensitivity, oiInvert, oiViewBob, oiFieldOfView, oiSoundVolume,
-    oiMusicVolume, oiControls, oiBack);
+  TOptionItem = (oiCamera, oiSensitivity, oiInvert, oiViewBob, oiFieldOfView, oiInterfaceSize,
+    oiSoundVolume, oiMusicVolume, oiControls, oiBack);
 
+const
+  PageNames: array[TMenuPage] of String = ('Main', 'Skill', 'Maps', 'Options', 'Controls', 'Showcase');
+
+type
   TOnMenuActionEvent = procedure(const Action: TMenuAction; const Param: String) of object;
 
   { Quake Title and Main Menu }
@@ -47,7 +51,12 @@ type
     { Index of the item row at a position (container pixels), -1 if none }
     function ItemAt(const P: TVector2): Integer;
     function PageTitle: String;
+    { Rows layout shared by Render and ItemAt: baseline of the first shown
+      row, row height, first shown item and the number of shown rows }
+    procedure RowLayout(out StartY, RowH: Single; out First, Count: Integer);
   public
+    { Size of everything: CGE's UIScale times InterfaceScale }
+    function MenuScale: Single;
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
 
@@ -65,7 +74,7 @@ function FirstMapName: String;
 implementation
 
 uses
-  CastleComponentSerialize;
+  CastleComponentSerialize, CastleLog;
 
 function FirstMapName: String;
 var
@@ -146,6 +155,7 @@ begin
         FItems.Add('Invert Mouse: [' + OnOff(Settings.InvertMouse) + ']');
         FItems.Add('View Bob: [' + OnOff(Settings.ViewBob) + ']');
         FItems.Add(Format('Field of View: [%d]', [Settings.FieldOfView]));
+        FItems.Add('Interface Size: [' + InterfaceSizeNames[Settings.InterfaceSize] + ']');
         FItems.Add(Format('Sound Volume: [%d%%]', [Settings.SoundVolume]));
         FItems.Add(Format('Music Volume: [%d%%]', [Settings.MusicVolume]));
         FItems.Add('Controls...');
@@ -173,6 +183,7 @@ begin
   FSubMenu := Page;
   FBinding := False;
   RebuildMenuItems;
+  WritelnLog('Menu', 'Page %s', [PageNames[Page]]);
   { Start on the current skill }
   if FSubMenu = smSkill then
     FSelectedIdx := Settings.Skill;
@@ -200,6 +211,8 @@ begin
       Settings.ViewBob := not Settings.ViewBob;
     oiFieldOfView:
       Settings.FieldOfView := EnsureRange(Settings.FieldOfView + 5 * Delta, 70, 120);
+    oiInterfaceSize:
+      Settings.InterfaceSize := EnsureRange(Settings.InterfaceSize + Delta, 0, High(InterfaceSizeNames));
     oiSoundVolume:
       Settings.SoundVolume := EnsureRange(Settings.SoundVolume + 10 * Delta, 0, 100);
     oiMusicVolume:
@@ -341,21 +354,39 @@ begin
   end;
 end;
 
+function TQuakeMenu.MenuScale: Single;
+begin
+  Result := UIScale * InterfaceScale;
+end;
+
+procedure TQuakeMenu.RowLayout(out StartY, RowH: Single; out First, Count: Integer);
+var
+  S: Single;
+begin
+  S := MenuScale;
+  RowH := 36 * S;
+  StartY := RenderRect.Height / 2 + 130 * S;
+  { As many rows as fit above the hint line (at most 10), around the selection }
+  Count := EnsureRange(Floor((StartY - 80 * S) / RowH) + 1, 3, 10);
+  First := EnsureRange(FSelectedIdx - Count div 2, 0, Max(0, FItems.Count - Count));
+  Count := Min(Count, FItems.Count - First);
+end;
+
 function TQuakeMenu.ItemAt(const P: TVector2): Integer;
 var
   L: TVector2;
-  First, I: Integer;
-  Baseline: Single;
+  First, Count, I: Integer;
+  StartY, RowH, Baseline: Single;
 begin
   Result := -1;
-  { The rows Render draws: baselines 36 pixels apart from CY + 130 }
   L := P - RenderRect.LeftBottom;
-  First := EnsureRange(FSelectedIdx - 5, 0, Max(0, FItems.Count - 10));
-  for I := First to Min(FItems.Count - 1, First + 9) do
+  RowLayout(StartY, RowH, First, Count);
+  for I := First to First + Count - 1 do
   begin
-    Baseline := RenderRect.Height / 2 + 130 - (I - First) * 36;
-    if (L.Y >= Baseline - 10) and (L.Y < Baseline + 26) and
-       (Abs(L.X - RenderRect.Width / 2) < RenderRect.Width * 0.35) then
+    { The whole row height around the text's baseline }
+    Baseline := StartY - (I - First) * RowH;
+    if (L.Y >= Baseline - RowH * 0.3) and (L.Y < Baseline + RowH * 0.7) and
+       (Abs(L.X - RenderRect.Width / 2) < RenderRect.Width * 0.45) then
       Exit(I);
   end;
 end;
@@ -448,72 +479,116 @@ begin
 end;
 
 procedure TQuakeMenu.Render;
+const
+  ShowcaseLines: array[0..10] of String = (
+    '- Full 3D X3D Scene Graphs (TIndexedTriangleSetNode, TShapeNode)',
+    '- Baked RGB Lightmaps via MultiTexture (2x overbright) + LightPoint Model Shading',
+    '- Skybox from env/*.pcx|tga via TCastleBackground',
+    '- Quake 2 MD2 Model Loading with Interpolated Frame Animation',
+    '- Positional 3D Spatial Audio via OpenAL (TCastleSoundSource)',
+    '- Custom URL Protocols ("quakepak:", "quaketex:") with Streaming Cache',
+    '- First/Third Person & Free-Fly Navigation (TCastleWalkNavigation)',
+    '- Brush Movers (doors, rotating doors, plats, buttons, trains) via TCastleTransform',
+    '- Billboard Particles (rail trails, blaster sparks, explosions, BFG)',
+    '- Quake 2 Box Traces Against BSP Brushes for Movement, Shots and Sight',
+    '- Touch Controls, Gamepads and UI Scaling for Phones');
 var
-  CX, CY, StartY: Single;
-  I, First: Integer;
+  CX, CY, S, StartY, RowH, BlockLeft, MaxW, BaseSize: Single;
+  I, First, Count: Integer;
   Col: TVector4;
+  Hint: String;
+
+  procedure Centered(const Y: Single; const Color: TVector4; const Text: String);
+  begin
+    UIFont.Print(CX - UIFont.TextWidth(Text) / 2, Y, Color, Text);
+  end;
+
 begin
   inherited Render;
 
+  S := MenuScale;
   CX := RenderRect.Width / 2;
   CY := RenderRect.Height / 2;
 
   { Dark vignette backdrop }
   DrawRectangle(RenderRect, Vector4(0.04, 0.04, 0.05, 0.88));
 
-  { Quake Title }
-  UIFont.Print(CX - 130, CY + 220, Vector4(1.0, 0.45, 0.1, 1.0), 'CASTLE QUAKE II');
-  UIFont.Print(CX - 165, CY + 195, Vector4(0.8, 0.8, 0.8, 0.8), 'Castle Game Engine Quake 2 Showcase');
+  UIFont.PushProperties;
+  try
+    BaseSize := UIFont.EffectiveSize * S;
+    UIFont.Size := BaseSize;
 
-  if FSubMenu = smShowcase then
-  begin
-    UIFont.Print(CX - 280, CY + 140, Vector4(1.0, 0.8, 0.2, 1.0), 'Engine Features Used:');
-    UIFont.Print(CX - 280, CY + 110, Vector4(0.9, 0.9, 0.9, 1.0), '- Full 3D X3D Scene Graphs (TIndexedTriangleSetNode, TShapeNode)');
-    UIFont.Print(CX - 280, CY + 85,  Vector4(0.9, 0.9, 0.9, 1.0), '- Baked RGB Lightmaps via MultiTexture (2x overbright) + LightPoint Model Shading');
-    UIFont.Print(CX - 280, CY + 60,  Vector4(0.9, 0.9, 0.9, 1.0), '- Skybox from env/*.pcx|tga via TCastleBackground');
-    UIFont.Print(CX - 280, CY + 35,  Vector4(0.9, 0.9, 0.9, 1.0), '- Quake 2 MD2 Model Loading with Interpolated Frame Animation');
-    UIFont.Print(CX - 280, CY + 10,  Vector4(0.9, 0.9, 0.9, 1.0), '- Positional 3D Spatial Audio via OpenAL (TCastleSoundSource)');
-    UIFont.Print(CX - 280, CY - 15,  Vector4(0.9, 0.9, 0.9, 1.0), '- Custom URL Protocols ("quakepak:", "quaketex:") with Streaming Cache');
-    UIFont.Print(CX - 280, CY - 40,  Vector4(0.9, 0.9, 0.9, 1.0), '- First/Third Person & Free-Fly Navigation (TCastleWalkNavigation)');
-    UIFont.Print(CX - 280, CY - 65,  Vector4(0.9, 0.9, 0.9, 1.0), '- Brush Movers (doors, rotating doors, plats, buttons, trains) via TCastleTransform');
-    UIFont.Print(CX - 280, CY - 90,  Vector4(0.9, 0.9, 0.9, 1.0), '- Billboard Particles (rail trails, blaster sparks, explosions, BFG)');
-    UIFont.Print(CX - 280, CY - 115, Vector4(0.9, 0.9, 0.9, 1.0), '- Quake 2 Box Traces Against BSP Brushes for Movement, Shots and Sight');
+    { Quake Title }
+    Centered(CY + 220 * S, Vector4(1.0, 0.45, 0.1, 1.0), 'CASTLE QUAKE II');
+    Centered(CY + 195 * S, Vector4(0.8, 0.8, 0.8, 0.8), 'Castle Game Engine Quake 2 Showcase');
 
-    UIFont.Print(CX - 80, CY - 160, Vector4(1.0, 0.5, 0.1, 1.0), '[ Press Enter / Esc to Return ]');
-    Exit;
-  end;
+    if FSubMenu = smShowcase then
+    begin
+      Centered(CY + 150 * S, Vector4(1.0, 0.8, 0.2, 1.0), 'Engine Features Used:');
+      { One left-aligned block, centered, shrunk to fit narrow screens }
+      MaxW := 0;
+      for I := 0 to High(ShowcaseLines) do
+        MaxW := Max(MaxW, UIFont.TextWidth(ShowcaseLines[I]));
+      if MaxW > RenderRect.Width * 0.94 then
+      begin
+        UIFont.Size := UIFont.Size * RenderRect.Width * 0.94 / MaxW;
+        MaxW := RenderRect.Width * 0.94;
+      end;
+      BlockLeft := CX - MaxW / 2;
+      for I := 0 to High(ShowcaseLines) do
+        UIFont.Print(BlockLeft, CY + (115 - I * 25) * S, Vector4(0.9, 0.9, 0.9, 1.0), ShowcaseLines[I]);
+      UIFont.Size := BaseSize;
+      if TouchInterface then
+        Centered(CY - 175 * S, Vector4(1.0, 0.5, 0.1, 1.0), '[ Tap to Return ]')
+      else
+        Centered(CY - 175 * S, Vector4(1.0, 0.5, 0.1, 1.0), '[ Press Enter / Esc to Return ]');
+      Exit;
+    end;
 
-  if PageTitle <> '' then
-    UIFont.Print(CX - UIFont.TextWidth(PageTitle) / 2, CY + 165, Vector4(1.0, 0.65, 0.2, 1.0), PageTitle);
+    if PageTitle <> '' then
+      Centered(CY + 165 * S, Vector4(1.0, 0.65, 0.2, 1.0), PageTitle);
 
-  StartY := CY + 130;
-  { Show a window of at most 10 items around the selection }
-  First := EnsureRange(FSelectedIdx - 5, 0, Max(0, FItems.Count - 10));
-  for I := First to Min(FItems.Count - 1, First + 9) do
-  begin
-    if I = FSelectedIdx then
+    RowLayout(StartY, RowH, First, Count);
+    for I := First to First + Count - 1 do
+      if I = FSelectedIdx then
+      begin
+        Col := Vector4(1.0, 0.85, 0.15, 1.0);
+        { Cursor indicator }
+        Centered(StartY - (I - First) * RowH, Col, '> ' + FItems[I] + ' <');
+      end else
+      begin
+        Col := Vector4(0.75, 0.75, 0.75, 0.9);
+        Centered(StartY - (I - First) * RowH, Col, FItems[I]);
+      end;
+    { More rows above / below }
+    if First > 0 then
+      Centered(StartY + RowH * 0.75, Vector4(0.6, 0.6, 0.6, 0.7), '...');
+    if First + Count < FItems.Count then
+      Centered(StartY - Count * RowH + RowH * 0.3, Vector4(0.6, 0.6, 0.6, 0.7), '...');
+
+    { Bottom help hint }
+    Col := Vector4(0.6, 0.6, 0.6, 0.7);
+    if FBinding then
     begin
       Col := Vector4(1.0, 0.85, 0.15, 1.0);
-      { Cursor indicator }
-      UIFont.Print(CX - 150, StartY - (I - First) * 36, Col, '> ' + FItems[I] + ' <');
+      Hint := 'Press a key for ' + ActionNames[FBindingAction] + ' (Esc cancels)';
     end else
-    begin
-      Col := Vector4(0.75, 0.75, 0.75, 0.9);
-      UIFont.Print(CX - 130, StartY - (I - First) * 36, Col, FItems[I]);
-    end;
+    if TouchInterface and (FSubMenu = smOptions) then
+      Hint := 'Tap: Select, Tap Again: Change (Left / Right Half: Down / Up)'
+    else
+    if TouchInterface then
+      Hint := 'Tap: Select, Tap Again: Enter, Back Button: Back'
+    else
+    if FSubMenu = smOptions then
+      Hint := 'Arrows: Navigate, Left / Right: Change, Enter: Select, Esc: Back'
+    else
+      Hint := 'Use Arrow Keys to Navigate, Enter to Select, Esc to Back';
+    if UIFont.TextWidth(Hint) > RenderRect.Width * 0.94 then
+      UIFont.Size := UIFont.Size * RenderRect.Width * 0.94 / UIFont.TextWidth(Hint);
+    Centered(40 * S, Col, Hint);
+  finally
+    UIFont.PopProperties;
   end;
-
-  { Bottom help hint }
-  if FBinding then
-    UIFont.Print(CX - 200, 40, Vector4(1.0, 0.85, 0.15, 1.0),
-      'Press a key for ' + ActionNames[FBindingAction] + ' (Esc cancels)')
-  else
-  if FSubMenu = smOptions then
-    UIFont.Print(CX - 200, 40, Vector4(0.6, 0.6, 0.6, 0.7),
-      'Arrows: Navigate, Left / Right: Change, Enter: Select, Esc: Back')
-  else
-    UIFont.Print(CX - 160, 40, Vector4(0.6, 0.6, 0.6, 0.7),
-      'Use Arrow Keys to Navigate, Enter to Select, Esc to Back');
 end;
 
 initialization

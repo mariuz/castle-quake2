@@ -524,6 +524,7 @@ begin
     S.ViewBob := False;
     S.FieldOfView := 110;
     S.MusicVolume := 30;
+    S.InterfaceSize := 3;
     Path := GetTempDir + 'castle_quake2_test_settings.xml';
     Config := TCastleConfig.Create(nil);
     try
@@ -539,6 +540,11 @@ begin
       'settings survive save / load');
     Check((S.Keys[qaForward] = keyA) and (S.Keys[qaMoveLeft] = keyW) and (S.Keys[qaFire] = keyCtrl),
       'key bindings survive save / load');
+    Check(S.InterfaceSize = 3, 'interface size survives save / load');
+    Check(SameValue(InterfaceScaleFor(0, False), 1) and SameValue(InterfaceScaleFor(0, True), TouchInterfaceScale),
+      'auto interface size: normal on desktop, larger on touch screens');
+    Check(SameValue(InterfaceScaleFor(2, True), 1) and (InterfaceScaleFor(4, False) > InterfaceScaleFor(3, False)) and
+      (InterfaceScaleFor(1, False) < 1), 'chosen interface sizes ignore the device');
   finally
     S.Free;
   end;

@@ -44,7 +44,7 @@ type
 implementation
 
 uses
-  CastleComponentSerialize;
+  CastleComponentSerialize, QuakeSettings;
 
 constructor TQuakeConsole.Create(AOwner: TComponent);
 begin
@@ -191,10 +191,11 @@ var
   H, W: Single;
   BgRect, LineRect: TFloatRectangle;
   I, MaxDisplay, StartIdx: Integer;
-  LineY: Single;
+  LineY, S, LineH: Single;
 begin
   if not FIsOpen then
     Exit;
+  S := UIScale * InterfaceScale;
 
   inherited Render;
 
@@ -209,20 +210,27 @@ begin
   LineRect := FloatRectangle(0, RenderRect.Height - H, W, 3);
   DrawRectangle(LineRect, Vector4(0.8, 0.4, 0.1, 1.0));
 
-  { Render lines }
-  MaxDisplay := Trunc((H - 40) / 18);
-  StartIdx := Max(0, FLines.Count - MaxDisplay);
-  LineY := RenderRect.Height - 30;
+  UIFont.PushProperties;
+  try
+    UIFont.Size := UIFont.EffectiveSize * S;
+    { Render lines }
+    LineH := UIFont.Height * 1.3;
+    MaxDisplay := Trunc((H - 40 * S) / LineH);
+    StartIdx := Max(0, FLines.Count - MaxDisplay);
+    LineY := RenderRect.Height - 30 * S;
 
-  for I := StartIdx to FLines.Count - 1 do
-  begin
-    UIFont.Print(16, LineY, Vector4(0.9, 0.85, 0.75, 1.0), FLines[I]);
-    LineY := LineY - 18;
+    for I := StartIdx to FLines.Count - 1 do
+    begin
+      UIFont.Print(16 * S, LineY, Vector4(0.9, 0.85, 0.75, 1.0), FLines[I]);
+      LineY := LineY - LineH;
+    end;
+
+    { Prompt }
+    UIFont.Print(16 * S, RenderRect.Height - H + 10 * S, Vector4(1.0, 0.5, 0.1, 1.0),
+      '] ' + FInputText + '_');
+  finally
+    UIFont.PopProperties;
   end;
-
-  { Prompt }
-  UIFont.Print(16, RenderRect.Height - H + 10, Vector4(1.0, 0.5, 0.1, 1.0),
-    '] ' + FInputText + '_');
 end;
 
 initialization
