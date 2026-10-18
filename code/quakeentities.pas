@@ -10,7 +10,7 @@ uses
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions, CastleUtils,
   CastleSoundEngine, CastleBehaviors, CastleColors, CastleRenderOptions,
   QuakePak, QuakeBsp, QuakeMd2, QuakeLight, QuakeSound, QuakeHud, QuakeParticles, QuakeSprite, QuakeSettings,
-  QuakeMonsterAttacks;
+  QuakeMonsterAttacks, QuakeTrace;
 
 type
   TItemCategory = (icWeapon, icAmmo, icHealth, icArmor, icPowerup, icKey);
@@ -91,6 +91,9 @@ type
   TPowerArmorType = (paNone, paScreen, paShield);
 
   TQuakeMonster = class;
+
+  TEntityTraceFunc = function(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer;
+    const Ignore: TObject): TQuakeTrace of object;
   TMonsterAttackEvent = procedure(const Monster: TQuakeMonster) of object;
 
   { Quake 2 p_trail.c: up to 8 spots the player passed, a new one each time
@@ -136,6 +139,8 @@ type
     { trigger_monsterjump: flying through the air with this velocity (CGE) }
     FJumping: Boolean;
     FJumpVel: TVector3;
+    { Placed on the floor with traces (Quake 2 M_droptofloor) }
+    FDropped: Boolean;
     FIdleTimer: Single;
     FLostSightTime: Single;
     { Losing the player (Quake 2 AI_PURSUIT_LAST_SEEN): go where he was
@@ -158,6 +163,15 @@ type
     function StartAttackSeq(const Dist: Single): Boolean;
     procedure AttackSeqFire(const ShotIndex: Integer);
     procedure UpdateJump(const SecondsPassed: Single);
+    function MTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer = MASK_MONSTERSOLID): TQuakeTrace;
+    procedure SetOrigin(const Q: TVector3);
+    function OnGroundTrace: Boolean;
+    { Quake 2 SV_movestep / M_CheckBottom: Move in Quake units }
+    function StepMove(const Move: TVector3): Boolean;
+    function CheckBottom(const Pos: TVector3): Boolean;
+    procedure DropToFloor;
+    { Nothing opaque between two CGE points (Quake 2 visible()) }
+    function SightClear(const FromPos, ToPos: TVector3): Boolean;
     { Move along Dir (with wall sliding) unless it walks off a ledge }
     function TryMove(const Dir: TVector3; const SecondsPassed: Single;
       const SpeedScale: Single = 1): Boolean;
@@ -216,11 +230,17 @@ type
     AttackDamage: Integer;
     AttackBullets: Integer;
     AttackReach: Single;
+    { Quake 2 bounding box around the origin (Quake coordinates) }
+    BoxMins, BoxMaxs: TVector3;
     { Called when the monster finds the player (Quake 2 FoundTarget, which
       makes it level.sight_entity for others to notice) }
     OnFoundTarget: TMonsterAttackEvent;
     OnPickTarget: TPickTargetEvent;
     OnUseTargets: TUseTargetsEvent;
+    { Origin in Quake coordinates }
+    function Origin: TVector3;
+    { The box shots and players collide with (shorter while ducking) }
+    function ShotBoxMaxs: TVector3;
     constructor CreateMonster(const AParent: TCastleTransform; const ADef: PQuakeMonsterDef;
       const AEntity: TQuakeEntity; const Pos: TVector3; const Yaw: Single);
     destructor Destroy; override;
@@ -539,10 +559,63 @@ var
   { The player's trail (created and fed by TQuakeWorld) }
   PlayerTrail: TQuakePlayerTrail;
   { The player's box (CGE space), set by the world each frame: monsters
-    don't walk into it (it is no CGE collider) }
+    don't walk into it (only used without EntityTrace) }
   PlayerBlockBox: TBox3D;
+  { Box traces through the world for entities (map brushes, movers,
+    monster boxes, the player's box; Quake coordinates), skipping Ignore.
+    Set by TQuakeWorld; without it monsters use CGE collisions. }
+  EntityTrace: TEntityTraceFunc;
+
+{ Quake 2 bounding box of a monster class (mins / maxs around its origin),
+  moved so the bottom is at -24 like every monster's origin here }
+procedure MonsterBoxSize(const MonsterClass: String; out Mins, Maxs: TVector3);
 
 implementation
+
+procedure MonsterBoxSize(const MonsterClass: String; out Mins, Maxs: TVector3);
+var
+  Height: Single;
+begin
+  { Quake 2 m_*.c SP_monster_* mins / maxs }
+  Mins := Vector3(-16, -16, -24);
+  Maxs := Vector3(16, 16, 32);
+  if (MonsterClass = 'monster_gladiator') then
+  begin
+    Mins := Vector3(-32, -32, -24); Maxs := Vector3(32, 32, 64);
+  end else
+  if (MonsterClass = 'monster_tank') or (MonsterClass = 'monster_tank_commander') then
+  begin
+    Mins := Vector3(-32, -32, -16); Maxs := Vector3(32, 32, 72);
+  end else
+  if MonsterClass = 'monster_parasite' then
+    Maxs.Z := 24
+  else
+  if (MonsterClass = 'monster_medic') or (MonsterClass = 'monster_floater') or
+     (MonsterClass = 'monster_hover') then
+  begin
+    Mins := Vector3(-24, -24, -24); Maxs := Vector3(24, 24, 32);
+  end else
+  if MonsterClass = 'monster_mutant' then
+  begin
+    Mins := Vector3(-32, -32, -24); Maxs := Vector3(32, 32, 48);
+  end else
+  if MonsterClass = 'monster_chick' then
+  begin
+    Mins := Vector3(-16, -16, 0); Maxs := Vector3(16, 16, 56);
+  end else
+  if MonsterClass = 'monster_flipper' then
+  begin
+    Mins := Vector3(-16, -16, 0); Maxs := Vector3(16, 16, 32);
+  end else
+  if MonsterClass = 'monster_supertank' then
+  begin
+    Mins := Vector3(-64, -64, 0); Maxs := Vector3(64, 64, 112);
+  end;
+  { Our monster origins are 24 above the feet }
+  Height := Maxs.Z - Mins.Z;
+  Mins.Z := -24;
+  Maxs.Z := -24 + Height;
+end;
 
 function FindItemDef(const AClassName: String): PQuakeItemDef;
 var
@@ -705,6 +778,7 @@ begin
   FAttack := TMonsterAttack.Create;
   FAttack.OnFire := @AttackSeqFire;
   FAttackSeqs := MonsterAttackSeqs(Def^.ClassName);
+  MonsterBoxSize(Def^.ClassName, BoxMins, BoxMaxs);
   { Quake 2 base game: only the brain has power armor (a power screen) }
   if Def^.ClassName = 'monster_brain' then
   begin
@@ -800,7 +874,142 @@ end;
 
 function TQuakeMonster.HasLineOfSight(const Target: TVector3): Boolean;
 begin
-  Result := Transform.LineOfSight(EyePos, Target);
+  Result := SightClear(EyePos, Target);
+end;
+
+function TQuakeMonster.SightClear(const FromPos, ToPos: TVector3): Boolean;
+begin
+  if Assigned(EntityTrace) then
+    Result := EntityTrace(CgeToQuake(FromPos), CgeToQuake(ToPos), TVector3.Zero, TVector3.Zero,
+      MASK_OPAQUE, Self).Fraction >= 1
+  else
+    Result := Transform.LineOfSight(FromPos, ToPos);
+end;
+
+function TQuakeMonster.Origin: TVector3;
+begin
+  Result := CgeToQuake(Transform.Translation);
+end;
+
+function TQuakeMonster.ShotBoxMaxs: TVector3;
+begin
+  Result := BoxMaxs;
+  { Quake 2 monster duck: maxs[2] -= 32 }
+  if State = msDuck then
+    Result.Z := Max(BoxMins.Z + 16, Result.Z - 32);
+end;
+
+procedure TQuakeMonster.SetOrigin(const Q: TVector3);
+begin
+  Transform.Translation := QuakeToCge(Q);
+end;
+
+function TQuakeMonster.MTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer): TQuakeTrace;
+begin
+  Result := EntityTrace(Start, Stop, Mins, Maxs, Mask, Self);
+end;
+
+function TQuakeMonster.OnGroundTrace: Boolean;
+var
+  T: TQuakeTrace;
+begin
+  T := MTrace(Origin, Origin - Vector3(0, 0, 1), BoxMins, BoxMaxs);
+  Result := (T.Fraction < 1) or T.StartSolid;
+end;
+
+function TQuakeMonster.CheckBottom(const Pos: TVector3): Boolean;
+const
+  StepSize = 18;
+var
+  Lo, Hi, Start: TVector3;
+  T: TQuakeTrace;
+  Mid, Bottom: Single;
+  X, Y: Integer;
+begin
+  { M_CheckBottom: the middle and every corner of the box bottom must have
+    ground no more than a step below, so monsters don't walk off ledges }
+  Lo := Pos + BoxMins;
+  Hi := Pos + BoxMaxs;
+  Start := Vector3((Lo.X + Hi.X) / 2, (Lo.Y + Hi.Y) / 2, Lo.Z);
+  T := MTrace(Start, Start - Vector3(0, 0, 2 * StepSize), TVector3.Zero, TVector3.Zero);
+  if T.Fraction >= 1 then
+    Exit(False);
+  Mid := T.EndPos.Z;
+  Bottom := Mid;
+  for X := 0 to 1 do
+    for Y := 0 to 1 do
+    begin
+      Start := Vector3(IfThen(X = 0, Lo.X, Hi.X), IfThen(Y = 0, Lo.Y, Hi.Y), Lo.Z);
+      T := MTrace(Start, Start - Vector3(0, 0, 2 * StepSize), TVector3.Zero, TVector3.Zero);
+      if (T.Fraction < 1) and (T.EndPos.Z > Bottom) then
+        Bottom := T.EndPos.Z;
+      if (T.Fraction >= 1) or (Mid - T.EndPos.Z > StepSize) then
+        Exit(False);
+    end;
+  Result := True;
+end;
+
+function TQuakeMonster.StepMove(const Move: TVector3): Boolean;
+const
+  StepSize = 18;
+var
+  Org, NewOrg, EndPos: TVector3;
+  T: TQuakeTrace;
+begin
+  Org := Origin;
+  if Def^.Flying then
+  begin
+    { Flyers: the whole move must be free }
+    T := MTrace(Org, Org + Move, BoxMins, BoxMaxs);
+    if T.AllSolid or T.StartSolid or (T.Fraction < 1) then
+      Exit(False);
+    SetOrigin(T.EndPos);
+    Exit(True);
+  end;
+  { SV_movestep: from a step above the wished position, push down two steps }
+  NewOrg := Org + Move;
+  NewOrg.Z := NewOrg.Z + StepSize;
+  EndPos := NewOrg - Vector3(0, 0, StepSize * 2);
+  T := MTrace(NewOrg, EndPos, BoxMins, BoxMaxs);
+  if T.AllSolid then
+    Exit(False);
+  if T.StartSolid then
+  begin
+    NewOrg.Z := NewOrg.Z - StepSize;
+    T := MTrace(NewOrg, EndPos, BoxMins, BoxMaxs);
+    if T.AllSolid or T.StartSolid then
+      Exit(False);
+  end;
+  { Nothing below: it would walk off a ledge }
+  if T.Fraction >= 1 then
+    Exit(False);
+  if not CheckBottom(T.EndPos) then
+    Exit(False);
+  SetOrigin(T.EndPos);
+  Result := True;
+end;
+
+procedure TQuakeMonster.DropToFloor;
+var
+  Org: TVector3;
+  T: TQuakeTrace;
+  I: Integer;
+begin
+  { M_droptofloor: up a bit out of the floor (monster boxes differ from the
+    spawn origin's), then down onto it }
+  FDropped := True;
+  if Def^.Flying then
+    Exit;
+  Org := Origin + Vector3(0, 0, 1);
+  I := 0;
+  while MTrace(Org, Org, BoxMins, BoxMaxs).StartSolid and (I < 32) do
+  begin
+    Org.Z := Org.Z + 1;
+    Inc(I);
+  end;
+  T := MTrace(Org, Org - Vector3(0, 0, 256), BoxMins, BoxMaxs);
+  if not T.AllSolid then
+    SetOrigin(T.EndPos);
 end;
 
 destructor TQuakeMonster.Destroy;
@@ -1088,9 +1297,26 @@ procedure TQuakeMonster.StickToFloor(const SecondsPassed: Single);
 var
   Above: Single;
   P: TVector3;
+  T: TQuakeTrace;
 begin
   if Def^.Flying then
     Exit;
+  if Assigned(EntityTrace) then
+  begin
+    { MOVETYPE_STEP: fall under gravity 800 until a trace finds the floor }
+    if OnGroundTrace then
+      FFallSpeed := 0
+    else
+    begin
+      FFallSpeed := Min(FFallSpeed + 800 * SecondsPassed, 1000);
+      T := MTrace(Origin, Origin - Vector3(0, 0, FFallSpeed * SecondsPassed), BoxMins, BoxMaxs);
+      if not T.AllSolid then
+        SetOrigin(T.EndPos);
+      if T.Fraction < 1 then
+        FFallSpeed := 0;
+    end;
+    Exit;
+  end;
   { Monster origin is 24 units above its feet (Quake 2 mins.z = -24) }
   P := Transform.Translation;
   if Transform.Height(P, Above) then
@@ -1133,6 +1359,9 @@ begin
       Model.SetShell(TVector3.Zero);
   end;
 
+  if (not FDropped) and Assigned(EntityTrace) and IsAlive then
+    DropToFloor;
+
   if FJumping and IsAlive then
   begin
     UpdateJump(SecondsPassed);
@@ -1174,7 +1403,7 @@ begin
   if FSightTimer <= 0 then
   begin
     FSightTimer := 0.2;
-    CanSeePlayer := (Dist < 2000) and Transform.LineOfSight(EyePos, PlayerPos);
+    CanSeePlayer := (Dist < 2000) and SightClear(EyePos, PlayerPos);
     { Alerted but lost the player for a while: search sound, once per loss }
     if CanSeePlayer then
     begin
@@ -1310,7 +1539,8 @@ begin
   if FJumping then
     Exit;
   { On the ground (origin 24 above the feet): take off }
-  if Transform.Height(Transform.Translation, Above) and (Above <= 26) then
+  if (Assigned(EntityTrace) and OnGroundTrace) or
+     ((not Assigned(EntityTrace)) and Transform.Height(Transform.Translation, Above) and (Above <= 26)) then
   begin
     FJumpVel.Y := UpSpeed;
     FJumping := True;
@@ -1323,8 +1553,27 @@ procedure TQuakeMonster.UpdateJump(const SecondsPassed: Single);
 var
   Above: Single;
   P: TVector3;
+  T: TQuakeTrace;
 begin
   { Ballistic flight (MOVETYPE_STEP with no ground): gravity 800 }
+  if Assigned(EntityTrace) then
+  begin
+    T := MTrace(Origin, Origin + CgeToQuake(FJumpVel * SecondsPassed), BoxMins, BoxMaxs);
+    if not T.AllSolid then
+      SetOrigin(T.EndPos);
+    FJumpVel.Y := FJumpVel.Y - 800 * SecondsPassed;
+    if (T.Fraction < 1) and (T.Normal.Z < 0.7) then
+    begin
+      { Hit a wall or ceiling: lose the speed into it }
+      FJumpVel := FJumpVel - QuakeToCge(T.Normal) * TVector3.DotProduct(FJumpVel, QuakeToCge(T.Normal));
+    end;
+    if (FJumpVel.Y <= 0) and OnGroundTrace then
+    begin
+      FJumping := False;
+      FJumpVel := TVector3.Zero;
+    end;
+    Exit;
+  end;
   Transform.Move(FJumpVel * SecondsPassed, False, True);
   FJumpVel.Y := FJumpVel.Y - 800 * SecondsPassed;
   P := Transform.Translation;
@@ -1387,6 +1636,8 @@ var
   Above: Single;
   Box: TBox3D;
 begin
+  if Assigned(EntityTrace) then
+    Exit(StepMove(CgeToQuake(Dir * Def^.Speed * SpeedScale * SecondsPassed) - CgeToQuake(TVector3.Zero)));
   { Don't walk off ledges higher than 64 units (Quake 2 M_CheckBottom-like) }
   if not Def^.Flying then
   begin

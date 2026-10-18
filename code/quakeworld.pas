@@ -248,6 +248,10 @@ type
     { Contents bits at a CGE position (liquids, exact ladders) }
     function PlayerPointContents(const CgePos: TVector3): Integer;
     function PlayerTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer): TQuakeTrace;
+    { Everything solid for Mask: map brushes, movers, live monster boxes and
+      the player's box, skipping Ignore (Quake 2 SV_Trace) }
+    function WorldTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer;
+      const Ignore: TObject): TQuakeTrace;
     procedure PlayerBeforeMove(Sender: TObject);
     { Player movement (pmove), for falling damage and jump pads; may be nil }
     property Player: TQuakePlayerMovement read FPlayer write SetPlayer;
@@ -318,6 +322,7 @@ begin
   FSightEntities := specialize TList<TQuakeMonster>.Create;
   FMoverPoses := specialize TDictionary<TQuakeMover, TMatrix4>.Create;
   PlayerBlockBox := TBox3D.Empty;
+  EntityTrace := @WorldTrace;
   FGun := TQuakeGun.Create;
   FGun.OnEvent := @GunEvent;
   FGun.OnAmmo := @GunAmmo;
@@ -346,6 +351,7 @@ begin
   FreeAndNil(FWeaponTransform);
   FreeAndNil(FGun);
   FreeAndNil(FMoverPoses);
+  EntityTrace := nil;
   FreeAndNil(FCollision);
   FPickups.Free;
   FMonsters.Free;
@@ -2966,12 +2972,25 @@ begin
 end;
 
 function TQuakeWorld.PlayerTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer): TQuakeTrace;
+begin
+  Result := WorldTrace(Start, Stop, Mins, Maxs, Mask, FPlayer);
+end;
+
+function TQuakeWorld.WorldTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer;
+  const Ignore: TObject): TQuakeTrace;
 var
   Mover: TQuakeMover;
   Monster: TQuakeMonster;
-  Lo, Hi, A, B: TVector3;
+  Lo, Hi, A, B, Org: TVector3;
   Box: TBox3D;
   T: TQuakeTrace;
+
+  function Overlaps(const BMins, BMaxs: TVector3): Boolean;
+  begin
+    Result := not ((BMins.X > Hi.X) or (BMaxs.X < Lo.X) or (BMins.Y > Hi.Y) or
+      (BMaxs.Y < Lo.Y) or (BMins.Z > Hi.Z) or (BMaxs.Z < Lo.Z));
+  end;
+
 begin
   if (FCollision = nil) or (FCollision.Bsp <> FBsp) then
   begin
@@ -2994,37 +3013,50 @@ begin
         Continue;
       A := CgeToQuake(Box.Data[0]);
       B := CgeToQuake(Box.Data[1]);
-      if (Min(A.X, B.X) > Hi.X) or (Max(A.X, B.X) < Lo.X) or (Min(A.Y, B.Y) > Hi.Y) or
-         (Max(A.Y, B.Y) < Lo.Y) or (Min(A.Z, B.Z) > Hi.Z) or (Max(A.Z, B.Z) < Lo.Z) then
+      if not Overlaps(Vector3(Min(A.X, B.X), Min(A.Y, B.Y), Min(A.Z, B.Z)),
+        Vector3(Max(A.X, B.X), Max(A.Y, B.Y), Max(A.Z, B.Z))) then
         Continue;
       T := MoverTrace(Mover, Start, Stop, Mins, Maxs, Mask);
       CombineTrace(Result, T);
       if Result.AllSolid then
         Exit;
     end;
+  if (Mask and CONTENTS_MONSTER) = 0 then
+    Exit;
   { Live monsters are boxes (corpses don't block, SVF_DEADMONSTER) }
-  if (Mask and CONTENTS_MONSTER) <> 0 then
-    for Monster in FMonsters do
+  for Monster in FMonsters do
+  begin
+    if (Monster = Ignore) or (not Monster.IsAlive) or Monster.Dormant or (Monster.Transform = nil) or
+       (not Monster.Transform.Exists) then
+      Continue;
+    Org := Monster.Origin;
+    if not Overlaps(Org + Monster.BoxMins, Org + Monster.ShotBoxMaxs) then
+      Continue;
+    T := BoxTraceAgainstBox(Start, Stop, Mins, Maxs, Org + Monster.BoxMins, Org + Monster.ShotBoxMaxs,
+      CONTENTS_MONSTER);
+    if T.Hit then
     begin
-      if (not Monster.IsAlive) or Monster.Dormant or (Monster.Transform = nil) or
-         (not Monster.Transform.Exists) then
-        Continue;
-      Box := Monster.Transform.BoundingBox;
-      if Box.IsEmpty then
-        Continue;
-      A := CgeToQuake(Box.Data[0]);
-      B := CgeToQuake(Box.Data[1]);
-      T := BoxTraceAgainstBox(Start, Stop, Mins, Maxs,
-        Vector3(Min(A.X, B.X), Min(A.Y, B.Y), Min(A.Z, B.Z)),
-        Vector3(Max(A.X, B.X), Max(A.Y, B.Y), Max(A.Z, B.Z)), CONTENTS_MONSTER);
+      T.Ent := Monster;
+      CombineTrace(Result, T);
+      if Result.AllSolid then
+        Exit;
+    end;
+  end;
+  { The player's box (for monsters and their shots) }
+  if (FPlayer <> nil) and (Ignore <> FPlayer) and (not FDead) and (FPlayer.Parent <> nil) then
+  begin
+    Org := FPlayer.Origin;
+    if Overlaps(Org + FPlayer.BoxMins, Org + FPlayer.BoxMaxs) then
+    begin
+      T := BoxTraceAgainstBox(Start, Stop, Mins, Maxs, Org + FPlayer.BoxMins, Org + FPlayer.BoxMaxs,
+        CONTENTS_MONSTER);
       if T.Hit then
       begin
-        T.Ent := Monster;
+        T.Ent := FPlayer;
         CombineTrace(Result, T);
-        if Result.AllSolid then
-          Exit;
       end;
     end;
+  end;
 end;
 
 procedure TQuakeWorld.PlayerBeforeMove(Sender: TObject);

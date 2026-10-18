@@ -455,10 +455,12 @@ var
   Dir, Target: TVector3;
   Ignore: TCastleTransform;
   Key, K: TKey;
+  SolidCount: Integer;
   Vals: TStringArray;
   Button: TGameControllerButton;
   PadEvent: TInputPressRelease;
   Target2: TVector2;
+  Target2Q: TVector3;
 begin
   if FDemoIndex >= FDemoCommands.Count then
   begin
@@ -613,6 +615,14 @@ begin
     Val := StrToFloatDef(Param, 50.0);
     Dir := MainViewport.Camera.Direction;
     Dir.Y := 0;
+    if (Dir.Length > 0) and Assigned(EntityTrace) then
+    begin
+      { Swept like the player's box: stops at walls instead of passing them }
+      Target := PlayerMovement.Origin;
+      Target2Q := EntityTrace(Target, Target + CgeToQuake(Dir.Normalize * Val), PlayerMovement.BoxMins,
+        PlayerMovement.BoxMaxs, MASK_PLAYERSOLID, PlayerMovement).EndPos;
+      PlayerMovement.Push(QuakeToCge(Target2Q) - QuakeToCge(Target));
+    end else
     if Dir.Length > 0 then
       MainViewport.Camera.Translation := MainViewport.Camera.Translation + Dir.Normalize * Val;
   end else
@@ -692,6 +702,7 @@ begin
           BoolToStr(FWorld.Monsters[J].HoldGround, True), BoolToStr(FWorld.Monsters[J].CanSeePlayer, True),
           FWorld.Monsters[J].AttackCooldown]);
     P := 0;
+    SolidCount := 0;
     Val := 0;
     for J := 0 to FWorld.Monsters.Count - 1 do
       if FWorld.Monsters[J].IsAlive and not FWorld.Monsters[J].Dormant then
@@ -699,8 +710,12 @@ begin
         Val := Val + 1;
         if FWorld.Monsters[J].Alerted then
           Inc(P);
+        if Assigned(EntityTrace) and EntityTrace(FWorld.Monsters[J].Origin, FWorld.Monsters[J].Origin,
+           FWorld.Monsters[J].BoxMins, FWorld.Monsters[J].BoxMaxs, MASK_MONSTERSOLID,
+           FWorld.Monsters[J]).StartSolid then
+          Inc(SolidCount);
       end;
-    WritelnLog('Demo', 'Monsters: %d alerted of %d alive', [P, Round(Val)]);
+    WritelnLog('Demo', 'Monsters: %d alerted of %d alive, %d in solid', [P, Round(Val), SolidCount]);
     for J := 0 to FWorld.Monsters.Count - 1 do
       if FWorld.Monsters[J].Alerted and FWorld.Monsters[J].IsAlive then
         WritelnLog('Demo', 'Hunting monster %d sees player %s dist %.0f', [J,
