@@ -66,7 +66,7 @@ uses
 
 const
   { Spawned, used by targets, drawn or used as markers by the game code }
-  SupportedClasses: array[0..54] of String = (
+  SupportedClasses: array[0..55] of String = (
     { func_group: brushes the map compiler merged into the world }
     'func_group', 'worldspawn', 'info_player_start', 'info_player_deathmatch', 'info_player_coop',
     'info_player_intermission', 'info_null', 'info_notnull', 'misc_teleporter',
@@ -75,7 +75,7 @@ const
     'target_earthquake', 'target_explosion', 'target_goal', 'target_help', 'target_laser',
     'target_lightramp', 'target_secret', 'target_speaker', 'target_splash',
     'trigger_always', 'trigger_counter', 'trigger_hurt', 'trigger_key', 'trigger_multiple',
-    'trigger_once', 'trigger_push', 'trigger_relay',
+    'trigger_once', 'trigger_push', 'trigger_relay', 'trigger_monsterjump',
     'func_areaportal', 'func_button', 'func_door', 'func_door_rotating', 'func_door_secret',
     'func_explosive', 'func_plat', 'func_rotating', 'func_timer', 'func_train', 'func_water',
     'misc_banner', 'misc_deadsoldier', 'misc_explobox', 'misc_gib_head',

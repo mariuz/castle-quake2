@@ -122,6 +122,8 @@ type
       move into him (Quake 2 SV_Push) }
     procedure PushPlayerByMovers;
     procedure UpdateGun(const SecondsPassed: Single);
+    { Triggers that act on monsters (trigger_monsterjump) }
+    procedure CheckMonsterTriggers;
     procedure GunEvent(const Event: TGunEvent);
     function GunAmmo(const Slot: Integer): Integer;
     { Fire the current weapon (the gun reached a fire frame) }
@@ -1446,6 +1448,31 @@ begin
   end;
 end;
 
+procedure TQuakeWorld.CheckMonsterTriggers;
+var
+  Trig: TQuakeTrigger;
+  Monster: TQuakeMonster;
+  Dir: TVector3;
+  Speed, Height: Single;
+begin
+  for Trig in FTriggers do
+  begin
+    if (not Trig.Enabled) or (Trig.Entity.ClassName <> 'trigger_monsterjump') then
+      Continue;
+    { SP_trigger_monsterjump: speed 200, height 200; movedir is horizontal }
+    Speed := Trig.Entity.GetFloat('speed', 200);
+    Height := Trig.Entity.GetFloat('height', 200);
+    Dir := EntityMoveDir(Trig.Entity);
+    Dir.Y := 0;
+    if not Dir.IsZero then
+      Dir := Dir.Normalize;
+    for Monster in FMonsters do
+      if Monster.IsAlive and (not Monster.Dormant) and (not Monster.Def^.Flying) and
+         Trig.Box.Collision(Monster.Transform.BoundingBox) then
+        Monster.MonsterJump(Dir * Speed, Height);
+  end;
+end;
+
 procedure TQuakeWorld.CheckMovers;
 var
   Mover: TQuakeMover;
@@ -2297,6 +2324,7 @@ begin
   ProcessSightEntities;
   FGeometry.ScenePlayerClip.Collides := True;
 
+  CheckMonsterTriggers;
   UpdateTimersAndLasers(SecondsPassed);
   UpdateLiquids(SecondsPassed);
   UpdateGun(SecondsPassed);
@@ -3022,6 +3050,7 @@ var
   M, Old, OldInv: TMatrix4;
   Org, Mins, Maxs, OldCge, NewCge: TVector3;
   Riding, Inside: Boolean;
+  Damage: Integer;
 begin
   if FGeometry = nil then
     Exit;
@@ -3044,7 +3073,18 @@ begin
         { Move the player like a point fixed to the mover }
         OldCge := QuakeToCge(Org);
         NewCge := M.MultPoint(OldInv.MultPoint(OldCge));
-        FPlayer.Push(NewCge - OldCge);
+        { Quake 2 SV_Push: keep the pushed position if it is free, else the
+          old one if that is free; else the pusher is blocked (hurts him,
+          doors / plats go back) }
+        if not PlayerTrace(CgeToQuake(NewCge), CgeToQuake(NewCge), Mins, Maxs, MASK_PLAYERSOLID).StartSolid then
+          FPlayer.Push(NewCge - OldCge)
+        else
+        if PlayerTrace(Org, Org, Mins, Maxs, MASK_PLAYERSOLID).StartSolid then
+        begin
+          Damage := Mover.Blocked;
+          if Damage > 0 then
+            DamagePlayer(Damage, Mover.Center);
+        end;
       end;
     end;
     FMoverPoses.AddOrSetValue(Mover, M);

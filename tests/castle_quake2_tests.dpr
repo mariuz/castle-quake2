@@ -962,6 +962,55 @@ begin
   Check(T.StartSolid and T.AllSolid, 'box inside a monster box is solid');
 end;
 
+procedure TestMonsterJump;
+var
+  Root: TCastleRootTransform;
+  Floor: TCastleBox;
+  Ent: TQuakeEntity;
+  M: TQuakeMonster;
+  I: Integer;
+  MaxY, StartX: Single;
+  Landed: Boolean;
+begin
+  { trigger_monsterjump: a soldier on a floor thrown with 200 forward and
+    200 up flies about 100 units (0.5 s of flight under gravity 800) }
+  Root := TCastleRootTransform.Create(nil);
+  Ent := TQuakeEntity.Create;
+  try
+    Floor := TCastleBox.Create(Root);
+    Floor.Size := Vector3(4000, 2, 4000);
+    Floor.Translation := Vector3(0, -1, 0);
+    Root.Add(Floor);
+    Ent.SetField('classname', 'monster_soldier');
+    M := TQuakeMonster.CreateMonster(Root, FindMonsterDef('monster_soldier'), Ent, Vector3(0, 24, 0), 0);
+    try
+      StartX := M.Transform.Translation.X;
+      M.MonsterJump(Vector3(200, 0, 0), 200);
+      Check(M.Jumping, 'monster on the ground takes off');
+      MaxY := 0;
+      Landed := False;
+      for I := 1 to 100 do
+      begin
+        M.UpdateAI(0.01, Vector3(10000, 0, 0));
+        MaxY := Max(MaxY, M.Transform.Translation.Y);
+        if not M.Jumping then
+        begin
+          Landed := True;
+          Break;
+        end;
+      end;
+      Check(Landed and SameValue(M.Transform.Translation.Y, 24, 1), 'monster lands back on the floor');
+      Check(SameValue(MaxY, 24 + 25, 3), 'jump peaks 25 units up (200^2 / 1600)');
+      Check(SameValue(M.Transform.Translation.X - StartX, 100, 8), 'jump carries it ~100 units forward');
+    finally
+      M.Free;
+    end;
+  finally
+    Ent.Free;
+    Root.Free;
+  end;
+end;
+
 procedure TestGamepad;
 var
   V: TVector2;
@@ -1059,6 +1108,7 @@ begin
   TestGun;
   TestMonsterAttacks;
   TestTrace;
+  TestMonsterJump;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then

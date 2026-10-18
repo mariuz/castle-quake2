@@ -133,6 +133,9 @@ type
     FAttackSeqs: TMonsterAttackSeqs;
     FAttack: TMonsterAttack;
     FAttackFirst: Integer;
+    { trigger_monsterjump: flying through the air with this velocity (CGE) }
+    FJumping: Boolean;
+    FJumpVel: TVector3;
     FIdleTimer: Single;
     FLostSightTime: Single;
     { Losing the player (Quake 2 AI_PURSUIT_LAST_SEEN): go where he was
@@ -154,6 +157,7 @@ type
       monster has none (generic attack) }
     function StartAttackSeq(const Dist: Single): Boolean;
     procedure AttackSeqFire(const ShotIndex: Integer);
+    procedure UpdateJump(const SecondsPassed: Single);
     { Move along Dir (with wall sliding) unless it walks off a ledge }
     function TryMove(const Dir: TVector3; const SecondsPassed: Single;
       const SpeedScale: Single = 1): Boolean;
@@ -244,6 +248,10 @@ type
       monsterinfo.dodge, from check_dodge): soldiers, infantry, gunners,
       medics and iron maidens duck a quarter of the time, so it may fly over }
     procedure Dodge(const Eta: Single);
+    { Touching a trigger_monsterjump: horizontal velocity always, the
+      upward speed when on the ground (Quake 2 trigger_monsterjump_touch) }
+    procedure MonsterJump(const HorizVel: TVector3; const UpSpeed: Single);
+    property Jumping: Boolean read FJumping;
     { Has a dodge (duck) reaction }
     function CanDodge: Boolean;
     { Owns the scene: used to map ray hits back to monsters }
@@ -1125,6 +1133,12 @@ begin
       Model.SetShell(TVector3.Zero);
   end;
 
+  if FJumping and IsAlive then
+  begin
+    UpdateJump(SecondsPassed);
+    Exit;
+  end;
+
   StateTimer := StateTimer + SecondsPassed;
   case State of
     msDead:
@@ -1283,6 +1297,44 @@ begin
       Steer(MoveVec.Normalize, SecondsPassed);
   end;
   StickToFloor(SecondsPassed);
+end;
+
+procedure TQuakeMonster.MonsterJump(const HorizVel: TVector3; const UpSpeed: Single);
+var
+  Above: Single;
+begin
+  if Def^.Flying or Dormant or not IsAlive then
+    Exit;
+  FJumpVel.X := HorizVel.X;
+  FJumpVel.Z := HorizVel.Z;
+  if FJumping then
+    Exit;
+  { On the ground (origin 24 above the feet): take off }
+  if Transform.Height(Transform.Translation, Above) and (Above <= 26) then
+  begin
+    FJumpVel.Y := UpSpeed;
+    FJumping := True;
+    if State = msAttack then
+      SetState(msChase);
+  end;
+end;
+
+procedure TQuakeMonster.UpdateJump(const SecondsPassed: Single);
+var
+  Above: Single;
+  P: TVector3;
+begin
+  { Ballistic flight (MOVETYPE_STEP with no ground): gravity 800 }
+  Transform.Move(FJumpVel * SecondsPassed, False, True);
+  FJumpVel.Y := FJumpVel.Y - 800 * SecondsPassed;
+  P := Transform.Translation;
+  if (FJumpVel.Y <= 0) and Transform.Height(P, Above) and (Above <= 25) then
+  begin
+    P.Y := P.Y + (24 - Above);
+    Transform.Translation := P;
+    FJumping := False;
+    FJumpVel := TVector3.Zero;
+  end;
 end;
 
 function TQuakeMonster.StartAttackSeq(const Dist: Single): Boolean;

@@ -168,6 +168,8 @@ type
     TrainCorner: TQuakeEntity;
     TrainFrom, TrainTo: TVector3;
     TrainRunning: Boolean;
+    { Time of the last Blocked call (damage once a frame of 0.1 s) }
+    BlockedTime: Single;
     constructor CreateMover(const AGeometry: TQuakeGeometry; const AEntity: TQuakeEntity;
       const AModelIndex: Integer);
     destructor Destroy; override;
@@ -182,6 +184,11 @@ type
     function Use: Boolean;
     { For plats: player stepped on it. }
     procedure PlayerOnTop;
+    { Something (the player) is in the way and can't be pushed: returns the
+      damage to deal (Quake 2 door_blocked, plat_blocked, train_blocked,
+      rotating_blocked) and makes doors / plats go back the other way, at
+      most every 0.1 s }
+    function Blocked: Integer;
     { Re-apply Transform from State / Progress / SpinAngle (after loading a save) }
     procedure ApplyPose;
     procedure UpdateMoveSound(const Moving: Boolean);
@@ -337,6 +344,8 @@ const
 
   DOOR_START_OPEN = 1;
   DOOR_REVERSE    = 2;
+  DOOR_CRUSHER    = 4;
+  TRAIN_BLOCK_STOPS = 4;
   DOOR_X_AXIS     = 64;
   DOOR_Y_AXIS     = 128;
   ROTATING_START_ON = 1;
@@ -1012,6 +1021,48 @@ begin
   end;
 end;
 
+function TQuakeMover.Blocked: Integer;
+var
+  Dmg: Integer;
+begin
+  Result := 0;
+  if BlockedTime > 0 then
+    Exit;
+  BlockedTime := 0.1;
+  case Kind of
+    mkDoor, mkDoorRotating:
+      begin
+        Result := Entity.GetInt('dmg', 2);
+        { Crushers keep going; others go back (if they ever return) }
+        if ((Entity.SpawnFlags and DOOR_CRUSHER) = 0) and (WaitTime >= 0) then
+          case State of
+            msToStart: State := msToEnd;
+            msToEnd: State := msToStart;
+            else ;
+          end;
+      end;
+    mkPlat:
+      begin
+        Result := Entity.GetInt('dmg', 2);
+        case State of
+          msToStart: State := msToEnd;
+          msToEnd: State := msToStart;
+          else ;
+        end;
+      end;
+    mkTrain:
+      begin
+        Dmg := Entity.GetInt('dmg', 100);
+        if (Entity.SpawnFlags and TRAIN_BLOCK_STOPS) <> 0 then
+          Dmg := 0;
+        Result := Dmg;
+      end;
+    mkRotating:
+      Result := Entity.GetInt('dmg', 0);
+    else ;
+  end;
+end;
+
 procedure TQuakeMover.PlayerOnTop;
 begin
   if (Kind = mkPlat) and (State = msAtStart) and (TargetName = '') then
@@ -1064,6 +1115,7 @@ procedure TQuakeMover.Update(const SecondsPassed: Single);
 var
   Step: Single;
 begin
+  BlockedTime := Max(0, BlockedTime - SecondsPassed);
   case Kind of
     mkStatic:
       ;

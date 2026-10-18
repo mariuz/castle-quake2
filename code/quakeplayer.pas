@@ -690,7 +690,7 @@ begin
       FOrg := FOrg + Vector3(0, 0, R);
       Exit(True);
     end;
-    for DZ := 1 downto -1 do
+    for DZ := 1 downto 0 do
       for DX := -1 to 1 do
         for DY := -1 to 1 do
           if (DX <> 0) or (DY <> 0) or (DZ <> 0) then
@@ -720,8 +720,9 @@ end;
 procedure TQuakePlayerMovement.PMUnstick;
 const
   Dists: array[0..5] of Single = (1, 2, 4, 8, 16, 24);
-  Dirs: array[0..5] of TVector3 = ((X: 0; Y: 0; Z: 1), (X: 1; Y: 0; Z: 0), (X: -1; Y: 0; Z: 0),
-    (X: 0; Y: 1; Z: 0), (X: 0; Y: -1; Z: 0), (X: 0; Y: 0; Z: -1));
+  { Never down: below a floor is the void outside the map }
+  Dirs: array[0..4] of TVector3 = ((X: 0; Y: 0; Z: 1), (X: 1; Y: 0; Z: 0), (X: -1; Y: 0; Z: 0),
+    (X: 0; Y: 1; Z: 0), (X: 0; Y: -1; Z: 0));
 var
   D, I: Integer;
 begin
