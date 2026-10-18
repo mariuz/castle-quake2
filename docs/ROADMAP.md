@@ -14,13 +14,13 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Sprites | SP2 (BFG, explosions) | SP2 loader, BFG ball / explosion sprites | Other sprite users (bubbles, flashes). |
 | Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove as `TQuakePlayerMovement`: the 32 × 32 × 56 box traced against the BSP brushes, movers and monsters (`CM_BoxTrace`, `PM_StepSlideMove`), movers carry and push the player | — |
 | Weapons | 10 + hand grenades, frame-timed | 10 + hand grenades on Quake 2's gun frames (`Weapon_Generic`: fire frames, refire, put away / raise, chaingun spin, BFG delay, grenade cook) | — |
-| Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses), skill levels | Quake 2 perception (`FindTarget`, PHS hearing, group wake, ambush, trigger spawn), player trail pursuit, dodging, attacks on Quake 2's attack frames (demo monsters), `trigger_monsterjump`, patrols, combat points, 19 types tunable in the editor, skill 0–3 | Monster movement still uses CGE collisions (not the BSP traces); attack tables for the full game's monsters; medic revive, bosses. |
+| Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses), skill levels | Quake 2 perception (`FindTarget`, PHS hearing, group wake, ambush, trigger spawn), player trail pursuit, dodging, attacks on Quake 2's attack frames (demo monsters), `trigger_monsterjump`, patrols, combat points, 19 types tunable in the editor, skill 0–3 | Attack tables for the full game's monsters; medic revive, bosses. |
 | Props / effects | Barrels, banners, ships, lasers, splashes, explosion models | All of these used by the demo maps | Gib models with velocities, `misc_viper`, `target_blaster`, `func_killbox`. |
 | Level flow | Units, cross-level triggers, help computer, intermission, savegames | All of these (JSON savegames, including projectiles in flight and pending delayed events) | — |
 | Audio | 3D sounds, entity channels, merged loop sounds, CD music | Quake 2 attenuation (incl. `ATTN_STATIC`), `CHAN_*` channels, point sounds that outlive entities, loop mixer (one voice per sound, PVS-checked, `SOUND_LOOPATTENUATE`), 32 sources, OGG tracks, named sounds editable in the editor | Stereo panning curve (OpenAL's, not Quake 2's), `s_volume` style master limiter. |
 | Input / options | Key bindings, mouse sensitivity, joystick, skill | Options menu (sensitivity, invert, FOV, volumes), key rebinding, skill selection, saved in `UserConfig`, gamepad (sticks, triggers, menus), touch controls (stick, drag look, buttons, tap menus) | Gamepad button rebinding; gamepad and touch not yet tried on real hardware. |
 | Multiplayer | Deathmatch / coop over UDP | Single player only | Out of scope for now (see below). |
-| Tooling | Console, `+map`, demos | Console, autotest scripts (keys, gamepad, touch) and screenshot comparison in CI, 158 unit checks, map compatibility report, CGE editor components and designs, F8 inspector, Windows / Linux / Android / WebAssembly builds | Editor property editors, demo recording. |
+| Tooling | Console, `+map`, demos | Console, autotest scripts (keys, gamepad, touch), `record` to turn play into a script, screenshot comparison in CI, 173 unit checks, map compatibility report, CGE editor components and designs, F8 inspector, Windows / Linux / Android / WebAssembly builds | Editor property editors. |
 
 ## Done so far
 
@@ -30,18 +30,19 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - **Performance**: PVS + areaportal culling of the world and of entities (`novis` to compare), batched particles.
 - **Editor**: views from designs, `TQuakeMap` building levels in the editor with skybox and entity markers, behaviors with published state, monster types (`data/monsters.castle-transform`) and named sounds (`data/sounds.castle-component`).
 - **Reach**: options menu with key rebinding, skill levels, gamepad, touch controls, Android APK and WebAssembly builds.
-- **Engineering**: CI on Windows / Linux / Android / Web, autotests under Mesa (keyboard, virtual gamepad and simulated touch), screenshot references, culling check (vis vs `novis`), map compatibility report, 158 unit checks.
+- **Engineering**: CI on Windows / Linux / Android / Web, autotests under Mesa (keyboard, virtual gamepad and simulated touch), screenshot references, culling check (vis vs `novis`), map compatibility report, recorded replays, 173 unit checks.
+- **Release**: v0.3.0, the first tagged release, with Windows / Linux / Android packages ([changelog](CHANGELOG.md)).
 
 ## Next: suggested improvements (Phase 6, prioritised)
 
-Phase 5 is complete. What would help most now, roughly in order of value for effort:
+Phase 5 is complete and v0.3.0 is released. What would help most now, roughly in order of value for effort:
 
 1. **Try it on real hardware** (small effort, removes the biggest unknowns). Gamepad, Android touch and GPU performance were only tested headless. Install the APK on a phone, play with a controller, and run on a real GPU with `fps` on. Expected follow-ups: touch button sizes and look speed, **menu and HUD scaling on phone screens** (the menu lays out rows in fixed pixels, so on a 2400 × 1080 phone it is small; switch to CGE UI scaling or scale by screen height), an `AndroidSigningProperties.txt` release key and a proper launcher icon.
 2. ~~**Monsters and shots on the BSP traces**~~ — done (monsters move with `SV_movestep` / `M_CheckBottom`, shots / projectiles / sight / lasers trace `MASK_SHOT` / `MASK_OPAQUE`). The player now collides with the real brushes, but monsters still move with CGE mesh collisions and the `PlayerBlockBox` workaround, and hitscan / projectiles / line of sight use `WorldRayCast` against render meshes. Porting `SV_movestep` / `M_CheckBottom` (step up 18, don't walk off ledges) and using `TQuakeCollision` for shots and sight would make monsters respect player-clip / monster-clip brushes, ride and be pushed by movers, and make sight checks much cheaper.
 3. ~~**Movers push everything**~~ — done (monsters, corpses and items ride and get pushed; blocked monsters take the mover's damage, corpses are gibbed). Plats and doors only carry / push the player; monsters, items and corpses on a moving plat stay behind. Once monsters use traces, extend `PushPlayerByMovers` to all entities (`SV_Push` iterates every entity).
-4. **Record playthroughs as test scripts** (small). A `record` console command that writes the player's inputs as an autotest demo script (`GO` / `T` / `P` / `X` with timings) would turn any bug repro into a regression test, and is a cheap stand-in for Quake 2's demo files.
+4. ~~**Record playthroughs as test scripts**~~ — done (`record <name>` / `stop`, `IN:` lines on the script clock with drift correction, `--demo @file`). A `record` console command that writes the player's inputs as an autotest demo script (`GO` / `T` / `P` / `X` with timings) would turn any bug repro into a regression test, and is a cheap stand-in for Quake 2's demo files.
 5. **Full game monsters** (medium–large, needs the retail PAK). Attack tables (`QuakeMonsterAttacks`) for gladiator, chick, mutant, brain, floater, hover, flipper, medic and the bosses; medic revive; supertank / Makron / jorg behaviour; `misc_viper`, `target_blaster`, `func_killbox`, `turret_*`. Run `--map-report` on a retail `baseq2` to order the work; a nightly workflow can test against a private PAK.
-6. **Release v0.3.0** (small). Tag a release so the Windows, Linux, Android and Web packages are published together, with a short changelog of Phase 5.
+6. ~~**Release v0.3.0**~~ — done. Tag a release so the Windows, Linux, Android and Web packages are published together, with a short changelog of Phase 5.
 7. **Editor**: property editors (map dropdown, reload verb), selectable entities with their key / value pairs (needs the Lazarus-built editor).
 8. **Audio polish**: Quake 2's stereo panning curve and a master limiter, so many loud sounds at once don't clip.
 
@@ -157,6 +158,6 @@ Phase 5 is complete. What would help most now, roughly in order of value for eff
 - [x] Monster movement on the BSP traces (`SV_movestep`, `M_CheckBottom`, Quake 2 monster boxes, `M_droptofloor`)
 - [x] Hitscan, projectiles (grenades bounce off the hit plane), monster sight, lasers and the player trail on the BSP traces; barrels solid again
 - [x] Movers push monsters, items and corpses (`SV_Push` for all entities; corpses caught in doors are gibbed)
-- [ ] `record` console command: write the player's inputs as an autotest script
+- [x] `record` console command: write the player's inputs as an autotest script (`--demo @file` replays it; CI checks a replay)
 - [ ] Attack tables for the full game's monsters, medic revive, bosses (retail PAK)
-- [ ] Tagged release v0.3.0 with Windows, Linux, Android and Web packages
+- [x] Tagged release v0.3.0 with Windows, Linux, Android and Web packages (notes from `docs/CHANGELOG.md`)

@@ -15,7 +15,7 @@ uses
   CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound,
   QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad, QuakeTouch,
-  QuakePlayer, QuakeSettings, QuakeMapReport, fpjson, jsonparser, CastleDownload;
+  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, fpjson, jsonparser, CastleDownload, CastleUriUtils;
 
 type
   TCameraMode = (cmFirstPerson, cmNoclip);
@@ -67,6 +67,28 @@ type
     FTouchPos: array[0..4] of TVector2;
     { Monster placed by MV: always in the V log }
     FWatchedMonster: Integer;
+    { Script clock for IN commands: seconds since the script (or its last L) started }
+    FDemoClock: Single;
+    { Held by the last IN command }
+    FDemoInFire, FDemoInJump, FDemoInCrouch: Boolean;
+    { IN positions: correct the drift (SY:0 turns it off); largest drift seen }
+    FDemoNoSync: Boolean;
+    FDemoMaxDrift: Single;
+    { "record" console command: the playthrough being recorded, nil otherwise }
+    FRecorder: TQuakeRecorder;
+    FRecordClock: Single;
+    FRecordName: String;
+    procedure StartRecording(const AName: String);
+    procedure StopRecording;
+    { Note an instant action in the recording, at the current time }
+    procedure RecordCommand(const Cmd: String);
+    procedure SampleRecording(const Firing: Boolean);
+    { Player actions that a recording keeps }
+    procedure DoSelectWeapon(const Slot: Integer);
+    procedure DoUse;
+    procedure DoToggleHelp;
+    { Look along Quake yaw / pitch (pitch positive looks down), keeping the velocity }
+    procedure SetLook(const YawDeg, PitchDeg: Single);
     function WantMouseLook: Boolean;
     procedure TouchUse(Sender: TObject);
     procedure TouchNextWeapon(Sender: TObject);
@@ -127,6 +149,7 @@ end;
 
 destructor TViewPlay.Destroy;
 begin
+  FreeAndNil(FRecorder);
   FDemoCommands.Free;
   inherited Destroy;
 end;
@@ -171,7 +194,7 @@ end;
 procedure TViewPlay.TouchUse(Sender: TObject);
 begin
   if (FWorld <> nil) and not FWorld.Dead then
-    FWorld.ActivateUse(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
+    DoUse;
 end;
 
 procedure TViewPlay.TouchNextWeapon(Sender: TObject);
@@ -251,6 +274,8 @@ end;
 
 procedure TViewPlay.Stop;
 begin
+  if FRecorder <> nil then
+    StopRecording;
   Sounds.StopMusic;
   Particles.Camera := nil;
   Particles.SetParent(nil);
@@ -339,6 +364,10 @@ begin
     PlayerMovement.InputJump := True;
     FDemoJump := False;
   end;
+  if FDemoInJump then
+    PlayerMovement.InputJump := True;
+  if FDemoInCrouch then
+    PlayerMovement.InputCrouch := True;
   PlayerMovement.Suspended := FWorld.Dead or FIntermission;
 end;
 
@@ -445,7 +474,9 @@ begin
   FDemoCommands.Clear;
   FDemoIndex := 0;
   FDemoTimer := 0;
-  for Cmd in Script.Split([',']) do
+  FDemoClock := 0;
+  { Commas, or one command per line (recorded scripts) }
+  for Cmd in Script.Split([',', #10, #13]) do
     if Trim(Cmd) <> '' then
       FDemoCommands.Add(Trim(Cmd));
 end;
@@ -464,6 +495,8 @@ var
   PadEvent: TInputPressRelease;
   Target2: TVector2;
   Target2Q: TVector3;
+  Input: TDemoInput;
+  NextInput: TDemoInput;
 begin
   if FDemoIndex >= FDemoCommands.Count then
   begin
@@ -488,8 +521,62 @@ begin
   end;
   { Actions that move or turn the camera work on the view without bob / kicks }
   if (Action = 'T') or (Action = 'A') or (Action = 'P') or (Action = 'M') or (Action = 'N') or
-     (Action = 'I') or (Action = 'D') or (Action = 'R') or (Action = 'G') then
+     (Action = 'I') or (Action = 'D') or (Action = 'R') or (Action = 'G') or (Action = 'IN') then
     PlayerMovement.ClearViewEffects;
+
+  if Action = 'IN' then { Recorded view and inputs: "IN:time yaw pitch forward side buttons" }
+  begin
+    if not ParseDemoInput(Param, Input) then
+    begin
+      WritelnWarning('Demo', 'Bad IN command "%s"', [Cmd]);
+      Inc(FDemoIndex);
+      Exit;
+    end;
+    if FDemoClock < Input.Time then
+      Exit;
+    { Behind (slow frames): skip to the last IN that is due }
+    while (FDemoIndex + 1 < FDemoCommands.Count) and
+      (UpperCase(Copy(FDemoCommands[FDemoIndex + 1], 1, 3)) = 'IN:') and
+      ParseDemoInput(Copy(FDemoCommands[FDemoIndex + 1], 4, MaxInt), NextInput) and
+      (NextInput.Time <= FDemoClock) do
+    begin
+      { Taps (a jump, a shot) shorter than this frame still happen once }
+      if (Input.Buttons and InButtonJump) <> 0 then
+        FDemoJump := True;
+      if (Input.Buttons and InButtonFire) <> 0 then
+        FWorld.FireWeapon(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
+      Input := NextInput;
+      Inc(FDemoIndex);
+    end;
+    SetLook(Input.Yaw, Input.Pitch);
+    if Input.HasOrigin then
+    begin
+      Val := PointsDistance(Input.Origin, CgeToQuake(MainViewport.Camera.Translation));
+      FDemoMaxDrift := Max(FDemoMaxDrift, Val);
+      if Val > 16 then
+        WritelnLog('Demo', 'Replay drift %.1f units at %.2f s', [Val, Input.Time]);
+      { Frame timing differs from the recording: put the player back on its
+        path (a few units are normal, more is a different outcome) }
+      if (Val > 2) and not FDemoNoSync then
+      begin
+        Dir := MainViewport.Camera.Translation;
+        MainViewport.Camera.Translation := QuakeToCge(Input.Origin);
+        { Not into a wall (when the map changed since the recording) }
+        if Assigned(EntityTrace) and EntityTrace(PlayerMovement.Origin, PlayerMovement.Origin,
+           PlayerMovement.BoxMins, PlayerMovement.BoxMaxs, MASK_PLAYERSOLID, PlayerMovement).StartSolid then
+          MainViewport.Camera.Translation := Dir;
+      end;
+    end;
+    FDemoMoveForward := Input.Forward;
+    FDemoMoveSide := Input.Side;
+    { Held until the next IN }
+    FDemoMoveTime := Iff((Input.Forward <> 0) or (Input.Side <> 0), 1e6, 0);
+    FDemoInFire := (Input.Buttons and InButtonFire) <> 0;
+    FDemoInJump := (Input.Buttons and InButtonJump) <> 0;
+    FDemoInCrouch := (Input.Buttons and InButtonCrouch) <> 0;
+    Inc(FDemoIndex);
+    Exit;
+  end;
 
   if Action = 'W' then { Wait }
   begin
@@ -506,13 +593,16 @@ begin
     CaptureScreenshot(FAutoTestPrefix)
   else
   if Action = 'X' then
-    FWorld.FireWeapon(PlayerMovement.AimPosition, PlayerMovement.AimDirection)
+  begin
+    RecordCommand('X');
+    FWorld.FireWeapon(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
+  end
   else
   if Action = 'H' then { Hold / release fire }
     FDemoFireHeld := not FDemoFireHeld
   else
   if Action = 'U' then
-    FWorld.ActivateUse(PlayerMovement.AimPosition, PlayerMovement.AimDirection)
+    DoUse
   else
   if Action = 'A' then { Absolute yaw (Quake degrees) }
     PlaceCamera(MainViewport.Camera.Translation, StrToFloatDef(Param, 0))
@@ -624,6 +714,9 @@ begin
     end else
       WritelnWarning('Demo', 'Unknown gamepad button "%s"', [Param]);
   end else
+  if Action = 'SY' then { Correct the drift of recorded IN positions: SY:1 (default) / SY:0 }
+    FDemoNoSync := Param = '0'
+  else
   if Action = 'J' then { Jump }
     FDemoJump := True
   else
@@ -675,7 +768,7 @@ begin
     PlayerMovement.SnapToFreeSpace;
   end else
   if Action = 'F' then { Toggle the help computer (F1) }
-    Hud.HelpVisible := not Hud.HelpVisible
+    DoToggleHelp
   else
   if Action = 'O' then { Run a console command, e.g. "O:kill" or "O:map demo2" }
   begin
@@ -741,6 +834,7 @@ begin
     WritelnLog('Demo', 'Projectiles: %d, delayed targets: %d', [FWorld.ProjectileCount, FWorld.DelayedCount]);
     WritelnLog('Demo', 'Monster shots: %d, player health %d armor %d, player stuck %d', [FWorld.MonsterShots,
       FWorld.Stats.Health, FWorld.Stats.Armor, PlayerMovement.StuckCount]);
+    WritelnLog('Demo', 'Replay drift: max %.1f units', [FDemoMaxDrift]);
     WritelnLog('Demo', 'Gun: weapon %d state %d frame %d, ammo shells %d bullets %d grenades %d cells %d slugs %d', [
       FWorld.Gun.Slot, Ord(FWorld.Gun.State), FWorld.Gun.Frame, FWorld.Stats.Ammo[atShells],
       FWorld.Stats.Ammo[atBullets], FWorld.Stats.Ammo[atGrenades], FWorld.Stats.Ammo[atCells],
@@ -764,7 +858,7 @@ begin
     PlayerMovement.SnapToFreeSpace;
   end else
   if Action = 'C' then
-    FWorld.SelectWeapon(StrToIntDef(Param, 2))
+    DoSelectWeapon(StrToIntDef(Param, 2))
   else
   if Action = 'K' then
     FWorld.CheatGiveAll
@@ -772,8 +866,11 @@ begin
   if Action = 'Y' then
     FWorld.CheatGodMode
   else
-  if Action = 'L' then { Load map }
-    LoadLevel(Param)
+  if Action = 'L' then { Load map; IN times count from here }
+  begin
+    LoadLevel(Param);
+    FDemoClock := 0;
+  end
   else
   if Action = 'Q' then
   begin
@@ -950,10 +1047,138 @@ begin
     Slot := ((Slot - 1 + Delta + WeaponSlots) mod WeaponSlots) + 1;
     if (FWorld.Stats.WeaponMask and (1 shl Slot)) <> 0 then
     begin
-      FWorld.SelectWeapon(Slot);
+      DoSelectWeapon(Slot);
       Exit;
     end;
   end;
+end;
+
+procedure TViewPlay.DoSelectWeapon(const Slot: Integer);
+begin
+  RecordCommand('C:' + IntToStr(Slot));
+  FWorld.SelectWeapon(Slot);
+end;
+
+procedure TViewPlay.DoUse;
+begin
+  RecordCommand('U');
+  FWorld.ActivateUse(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
+end;
+
+procedure TViewPlay.DoToggleHelp;
+begin
+  RecordCommand('F');
+  Hud.HelpVisible := not Hud.HelpVisible;
+  Sounds.Play('sound/misc/pc_up.wav');
+end;
+
+procedure TViewPlay.SetLook(const YawDeg, PitchDeg: Single);
+var
+  Dir: TVector3;
+begin
+  PlayerMovement.ClearViewEffects;
+  Dir := YawToCgeDir(YawDeg) * Cos(DegToRad(PitchDeg)) + Vector3(0, -Sin(DegToRad(PitchDeg)), 0);
+  MainViewport.Camera.SetWorldView(MainViewport.Camera.Translation, Dir.Normalize, Vector3(0, 1, 0));
+end;
+
+function RecordingUrl(const AName: String): String;
+begin
+  Result := 'castle-config:/recordings/' + LowerCase(AName) + '.txt';
+end;
+
+procedure TViewPlay.StartRecording(const AName: String);
+begin
+  if FRecorder <> nil then
+    StopRecording;
+  { Start like the autotest that replays it: a new unit, a new player }
+  FWorld.ResetStats;
+  LoadLevel('*' + FMapName);
+  if FWorld.Bsp = nil then
+    Exit;
+  FRecorder := TQuakeRecorder.Create(FMapName);
+  FRecordClock := 0;
+  FRecordName := AName;
+  { Autotests start on skill 1 }
+  if GameSkill <> 1 then
+  begin
+    FRecorder.AddCommand('O:skill ' + IntToStr(GameSkill));
+    FRecorder.AddCommand('L:' + FMapName);
+  end;
+  if NoTarget then
+    FRecorder.AddCommand('O:notarget');
+  Console.Print('Recording "' + AName + '" on ' + FMapName + ', "stop" to save');
+  Hud.ShowMessage('Recording ' + AName, 2);
+  WritelnLog('Record', 'Recording "%s" on %s', [AName, FMapName]);
+end;
+
+procedure TViewPlay.StopRecording;
+var
+  Url, FileName, Line: String;
+  Stream: TStream;
+  Text: String;
+  Recorder: TQuakeRecorder;
+begin
+  Recorder := FRecorder;
+  FRecorder := nil;
+  try
+    Recorder.Finish(FRecordClock);
+    Text := Recorder.Lines.Text;
+    Url := RecordingUrl(FRecordName);
+    try
+      Stream := UrlSaveStream(Url);
+      try
+        if Text <> '' then
+          Stream.WriteBuffer(Text[1], Length(Text));
+      finally
+        Stream.Free;
+      end;
+      FileName := UriToFilenameSafe(Url);
+      if FileName = '' then
+        FileName := Url;
+      Line := Format('castle-quake2 --autotest %s %s --demo @%s', [Recorder.MapName, FRecordName, FileName]);
+      Console.Print(Format('Saved %d commands (%.1f s) to %s', [Recorder.Lines.Count, FRecordClock, FileName]));
+      Console.Print('Replay: ' + Line);
+      Hud.ShowMessage('Recording saved: ' + FRecordName, 2);
+      WritelnLog('Record', 'Saved %d commands (%.1f s) to "%s". Replay: %s',
+        [Recorder.Lines.Count, FRecordClock, FileName, Line]);
+    except
+      on E: Exception do
+        Console.Print('Saving the recording failed: ' + E.Message);
+    end;
+  finally
+    Recorder.Free;
+  end;
+end;
+
+procedure TViewPlay.RecordCommand(const Cmd: String);
+begin
+  if FRecorder = nil then
+    Exit;
+  { An IN with the inputs held so far times the command }
+  FRecorder.AddTimedCommand(FRecordClock, Cmd);
+end;
+
+procedure TViewPlay.SampleRecording(const Firing: Boolean);
+var
+  Input: TDemoInput;
+  Dir: TVector3;
+begin
+  Dir := PlayerMovement.AimDirection;
+  Input.Time := FRecordClock;
+  Input.Yaw := RadToDeg(ArcTan2(-Dir.Z, Dir.X));
+  Input.Pitch := -RadToDeg(ArcSin(EnsureRange(Dir.Y / Max(Dir.Length, 1e-6), -1, 1)));
+  Input.Forward := PlayerMovement.InputForward;
+  Input.Side := PlayerMovement.InputSide;
+  Input.HasOrigin := True;
+  Input.Origin := CgeToQuake(PlayerMovement.AimPosition);
+  Input.Buttons := 0;
+  if Firing then
+    Input.Buttons := Input.Buttons or InButtonFire;
+  if PlayerMovement.InputJump then
+    Input.Buttons := Input.Buttons or InButtonJump;
+  if PlayerMovement.InputCrouch then
+    Input.Buttons := Input.Buttons or InButtonCrouch;
+  FRecorder.Sample(Input);
 end;
 
 procedure TViewPlay.Update(const SecondsPassed: Single; var HandleInput: Boolean);
@@ -963,7 +1188,12 @@ begin
   inherited Update(SecondsPassed, HandleInput);
 
   if FDemoCommands.Count > 0 then
+  begin
+    FDemoClock := FDemoClock + SecondsPassed;
     RunDemoStep(SecondsPassed);
+  end;
+  if FRecorder <> nil then
+    FRecordClock := FRecordClock + SecondsPassed;
 
   if FWorld = nil then
     Exit;
@@ -1001,13 +1231,15 @@ begin
     BeginIntermission;
 
   { Hold to fire (left mouse / Ctrl) }
-  Firing := FDemoFireHeld;
+  Firing := FDemoFireHeld or FDemoInFire;
   if not Console.IsOpen and not Menu.Exists then
     { With touch controls every touch is a "left button": fire only by FIRE }
     Firing := Firing or Container.Pressed[Settings.Keys[qaFire]] or
       ((FTouch = nil) and (buttonLeft in Container.MousePressed)) or FGamepadFire;
   if Firing then
     FWorld.FireWeapon(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
+  if FRecorder <> nil then
+    SampleRecording(Firing);
 end;
 
 function TViewPlay.Press(const Event: TInputPressRelease): Boolean;
@@ -1022,7 +1254,10 @@ begin
   if FIntermission then
   begin
     if FIntermissionTime > 1 then
+    begin
+      RecordCommand('B:enter');
       EndIntermission;
+    end;
     Exit(True);
   end;
 
@@ -1066,13 +1301,9 @@ begin
       Exit(True);
     end;
     case Event.Controller.Button of
-      gbWest: FWorld.ActivateUse(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
-      gbNorth: FWorld.SelectWeapon(11); { hand grenades }
-      gbView:
-        begin
-          Hud.HelpVisible := not Hud.HelpVisible;
-          Sounds.Play('sound/misc/pc_up.wav');
-        end;
+      gbWest: DoUse;
+      gbNorth: DoSelectWeapon(11); { hand grenades }
+      gbView: DoToggleHelp;
       else Exit(False);
     end;
     Exit(True);
@@ -1080,19 +1311,19 @@ begin
 
   if Event.IsKey(Settings.Keys[qaUse]) then
   begin
-    FWorld.ActivateUse(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
+    DoUse;
     Exit(True);
   end;
 
   for Slot := 1 to 10 do
     if Event.IsKey(WeaponKeys[Slot]) then
     begin
-      FWorld.SelectWeapon(Slot);
+      DoSelectWeapon(Slot);
       Exit(True);
     end;
   if Event.IsKey(Settings.Keys[qaGrenade]) then
   begin
-    FWorld.SelectWeapon(11); { hand grenades }
+    DoSelectWeapon(11); { hand grenades }
     Exit(True);
   end;
 
@@ -1108,8 +1339,7 @@ begin
   if Event.IsKey(Settings.Keys[qaHelp]) then
   begin
     { Quake 2 help computer }
-    Hud.HelpVisible := not Hud.HelpVisible;
-    Sounds.Play('sound/misc/pc_up.wav');
+    DoToggleHelp;
     Exit(True);
   end;
 
@@ -1138,6 +1368,25 @@ var
   Maps: TStringList;
   P: Integer;
 begin
+  { A recording replays the console commands typed while recording }
+  if (FRecorder <> nil) and (Cmd <> 'record') and (Cmd <> 'stop') and (Cmd <> 'quit') and
+     (Cmd <> 'exit') and (Cmd <> 'help') and (Cmd <> 'fps') and (Cmd <> 'maps') then
+    RecordCommand('O:' + Trim(Cmd + ' ' + Args));
+
+  if Cmd = 'record' then
+  begin
+    if Args <> '' then
+      StartRecording(Args)
+    else
+      Console.Print('Usage: record <name>  (restarts the map; "stop" saves the script)');
+  end else
+  if Cmd = 'stop' then
+  begin
+    if FRecorder <> nil then
+      StopRecording
+    else
+      Console.Print('Not recording');
+  end else
   if (Cmd = 'map') or (Cmd = 'gamemap') then
   begin
     if Args <> '' then
@@ -1241,6 +1490,8 @@ begin
     Console.Print('  save [name]  - Save the game (F6 = quick save)');
     Console.Print('  load [name]  - Load a saved game (F9 = quick load)');
     Console.Print('  lightstyle n p - Set light style n to pattern p (a = dark .. z = bright)');
+    Console.Print('  record <name> - Restart the map and record an autotest script');
+    Console.Print('  stop         - Stop recording and save the script');
     Console.Print('  kill         - Suicide');
     Console.Print('  quit         - Exit game');
   end else

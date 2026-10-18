@@ -96,7 +96,6 @@ type
     procedure SetPlayer(const Value: TQuakePlayerMovement);
     procedure PlayerFallDamage(const Damage: Integer);
     procedure PlayerLanded(Sender: TObject);
-    procedure ResetStats;
     procedure ChooseSpawnPoint(const SpawnName: String);
     procedure SpawnEntities(const SpawnName: String);
     function ModelBox(const AModel: String; out Box: TBox3D): Boolean;
@@ -207,6 +206,9 @@ type
 
     { Select weapon slot (1..WeaponSlots) }
     procedure SelectWeapon(const Slot: Integer);
+
+    { Health 100 and the blaster, like a new game (cheats off) }
+    procedure ResetStats;
 
     { Press / open what the player is looking at }
     procedure ActivateUse(const Origin, Dir: TVector3);

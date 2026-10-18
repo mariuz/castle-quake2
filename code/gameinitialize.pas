@@ -72,6 +72,9 @@ begin
     if (Parameters[I] = '--demo') and (I + 1 <= Parameters.High) then
     begin
       AutoTestDemo := Parameters[I + 1];
+      { "@file": a script file, e.g. one written by the record command }
+      if (AutoTestDemo <> '') and (AutoTestDemo[1] = '@') then
+        AutoTestDemo := FileToString(Copy(AutoTestDemo, 2, MaxInt));
       Inc(I);
     end else
     if ((Parameters[I] = '-warp') or (Parameters[I] = '--warp') or (Parameters[I] = '-map') or
@@ -175,7 +178,7 @@ end;
 initialization
   CmdPaks := TStringList.Create;
   ApplicationProperties.ApplicationName := 'castle-quake2';
-  ApplicationProperties.Version := '0.2.0';
+  ApplicationProperties.Version := '0.3.0';
   LogFileName := 'castle-quake2.log';
   InitializeLog;
   Application.OnInitialize := @ApplicationInitialize;

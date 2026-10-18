@@ -5,6 +5,7 @@ A port of **Quake 2** to the **Castle Game Engine** (Object Pascal / Free Pascal
 ![demo1 start](docs/screenshot-demo1.png)
 
 - 🌐 **[Play in the browser (WebAssembly)](https://mariuz.github.io/castle-quake2/)**
+- 📦 **[Download for Windows, Linux and Android](https://github.com/mariuz/castle-quake2/releases)** (latest: v0.3.0, see the [changelog](docs/CHANGELOG.md))
 - 📖 **[Architecture & Engine Mapping](docs/ARCHITECTURE.md)**
 - 🗺️ **[Quake 2 Comparison & Roadmap](docs/ROADMAP.md)**
 
@@ -74,7 +75,7 @@ The project follows the structure of CGE's own templates (`3d_fps_game`) and the
 | **F1** | Help computer (objectives, kills / goals / secrets) |
 | **F6 / F9** | Quick save / quick load |
 | **F12** | Screenshot |
-| **~** | Console (`map`, `maps`, `save`, `load`, `god`, `give all`, `give quad`, `give invulnerability`, `noclip`, `notarget`, `kill`, `fps`, `markers`, `novis`, `skill`, `lightstyle`, `quit`, `help`) |
+| **~** | Console (`map`, `maps`, `save`, `load`, `god`, `give all`, `give quad`, `give invulnerability`, `noclip`, `notarget`, `kill`, `fps`, `markers`, `novis`, `skill`, `lightstyle`, `record <name>` / `stop`, `quit`, `help`) |
 | **F8** (debug build) | CGE inspector: hierarchy and live properties |
 | **Escape** | Menu: *Single Player* (choose Easy / Medium / Hard / Nightmare), *Map Warp*, *Options* (camera, mouse sensitivity, invert mouse, view bob, field of view, sound and music volume, *Controls* to rebind keys) |
 
@@ -130,7 +131,15 @@ CI also runs the `--autotest` demo scripts on Linux (xvfb + Mesa), uploads their
 .\castle-quake2.exe --autotest demo1 shot --demo "W:1,S,K,C:9,N:3,X,W:0.2,S,Q"
 ```
 
-Demo script actions (comma separated): `W:sec` wait, `S` screenshot, `X` fire, `H` toggle hold-fire, `U` use, `C:slot` weapon, `K` give all, `Y` god, `A:deg` yaw, `T:deg` turn, `P:deg` pitch, `M:units` move, `N:i` / `I:i` / `D:i` / `R:i` stand near monster / item / brush entity / prop number i, `F` toggle the help computer, `G:x y z` go to Quake coordinates, `GO:forward side seconds` hold movement keys, `J` jump, `E:targetname` fire targets, `O:command` run a console command (e.g. `O:kill`), `V` log mover, prop and laser states, `L:map` load map, `B:key` press a key (`B:escape`, `B:down`, `B:enter`... to drive the menu), `GP:lx ly rx ry lt rt` hold a virtual gamepad's sticks and triggers (`GP:` releases), `GB:button` press a gamepad button (`south`, `east`, `west`, `north`, `lb`, `rb`, `up`, `down`, `left`, `right`, `menu`, `view`), `MV:i x y z` place monster i (Quake coordinates), `TD:x y finger` / `TM:x y finger` / `TU:finger` touch down / move / up (x, y as fractions of the window from the bottom left; with `--touch` this drives the touch controls), `Q` quit. Autotests ignore the saved options and don't save them.
+Demo script actions (comma separated): `W:sec` wait, `S` screenshot, `X` fire, `H` toggle hold-fire, `U` use, `C:slot` weapon, `K` give all, `Y` god, `A:deg` yaw, `T:deg` turn, `P:deg` pitch, `M:units` move, `N:i` / `I:i` / `D:i` / `R:i` stand near monster / item / brush entity / prop number i, `F` toggle the help computer, `G:x y z` go to Quake coordinates, `GO:forward side seconds` hold movement keys, `J` jump, `E:targetname` fire targets, `O:command` run a console command (e.g. `O:kill`), `V` log mover, prop and laser states, `L:map` load map, `B:key` press a key (`B:escape`, `B:down`, `B:enter`... to drive the menu), `GP:lx ly rx ry lt rt` hold a virtual gamepad's sticks and triggers (`GP:` releases), `GB:button` press a gamepad button (`south`, `east`, `west`, `north`, `lb`, `rb`, `up`, `down`, `left`, `right`, `menu`, `view`), `MV:i x y z` place monster i (Quake coordinates), `IN:time yaw pitch forward side buttons [x y z]` recorded view and inputs (see below), `SY:0` don't correct a replay's drift, `TD:x y finger` / `TM:x y finger` / `TU:finger` touch down / move / up (x, y as fractions of the window from the bottom left; with `--touch` this drives the touch controls), `Q` quit. Autotests ignore the saved options and don't save them.
+
+**Recording a playthrough as a test.** `record <name>` in the console restarts the map with a new player and records what you do; `stop` saves it as a demo script in the user config directory (`recordings/<name>.txt`, e.g. `~/.config/castle-quake2/recordings/` on Linux) and prints the command that replays it:
+
+```powershell
+castle-quake2 --autotest demo1 bug --demo @C:\Users\me\AppData\Local\castle-quake2\recordings\bug.txt
+```
+
+The script holds one `IN:` line per change of the view or the held keys, timed on the script clock (so a slower machine doesn't fall behind), plus weapon switches, use, the help computer and console commands. Each `IN` also has the player's position: the replay logs how far it drifted (`Replay drift` in the `V` log) and puts the player back when it is more than 2 units off, so frame-rate differences don't add up (`SY:0` turns that off, to reproduce a movement bug exactly). Monsters can still act differently, as their random choices depend on the frames. Add `S` (screenshot) or `V` (state log) lines anywhere to turn the recording into a regression test.
 
 ---
 

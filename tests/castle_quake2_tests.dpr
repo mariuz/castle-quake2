@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord;
 
 var
   Passed, Failed: Integer;
@@ -1023,6 +1023,64 @@ begin
   Check(SameValue(V.Length, 1, 1e-5) and SameValue(V.X, V.Y, 1e-5), 'touch stick: diagonal keeps its direction, length 1');
 end;
 
+function DemoIn(const T, Yaw, Fwd: Single; const Buttons: Integer): TDemoInput;
+begin
+  Result := Default(TDemoInput);
+  Result.Time := T;
+  Result.Yaw := Yaw;
+  Result.Forward := Fwd;
+  Result.Buttons := Buttons;
+  Result.HasOrigin := True;
+  Result.Origin := Vector3(T * 100, 0, 24);
+end;
+
+procedure TestRecord;
+var
+  R: TQuakeRecorder;
+  I: TDemoInput;
+begin
+  CheckEquals(10, Round(AngleDiff(175, -175)), 'angle difference wraps around');
+  Check(ParseDemoInput('1.50 90.0 -10.0 1.00 -0.50 3 10.25 -20.00 24.03', I), 'IN parses');
+  Check(SameValue(I.Time, 1.5) and SameValue(I.Pitch, -10) and SameValue(I.Side, -0.5) and
+    (I.Buttons = 3) and I.HasOrigin and SameValue(I.Origin.Z, 24.03, 1e-4), 'IN fields');
+  Check(ParseDemoInput('2 0 0 0 0 0', I) and not I.HasOrigin, 'IN without a position');
+  Check(not ParseDemoInput('2 0 0', I), 'short IN is rejected');
+  I := DemoIn(1.5, 90, 1, InButtonFire);
+  I.Pitch := -10;
+  Check(ParseDemoInput(Copy(FormatDemoInput(I), 4, MaxInt), I) and SameValue(I.Yaw, 90) and
+    SameValue(I.Origin.X, 150, 1e-3), 'IN round trip');
+
+  R := TQuakeRecorder.Create('demo1');
+  try
+    R.Sample(DemoIn(0, 0, 0, 0));
+    R.Sample(DemoIn(0.02, 0.1, 0, 0)); { tiny turn: nothing }
+    R.Sample(DemoIn(0.04, 0.1, 1, 0)); { forward pressed: right away }
+    R.Sample(DemoIn(0.3, 0.1, 1, 0)); { held, moving < KeyInterval: nothing }
+    R.Sample(DemoIn(0.6, 0.1, 1, 0)); { position keyframe }
+    R.Sample(DemoIn(0.62, 30, 1, 0)); { turn, but within ViewInterval }
+    R.Sample(DemoIn(0.66, 30, 1, 0)); { turn }
+    R.Sample(DemoIn(1.0, 30, 1, InButtonJump));
+    R.Sample(DemoIn(1.02, 30, 1, 0)); { jump kept 0.1 s }
+    R.Sample(DemoIn(1.1, 30, 1, 0));
+    R.AddTimedCommand(1.2, 'C:3');
+    R.Finish(1.5);
+    CheckEquals(10, R.Lines.Count, 'recorded lines');
+    Check(Copy(R.Lines[1], 1, 8) = 'IN:0.04 ', 'input change recorded at once');
+    Check(Copy(R.Lines[2], 1, 8) = 'IN:0.60 ', 'position keyframe while moving');
+    Check(Copy(R.Lines[3], 1, 8) = 'IN:0.66 ', 'view change after the view interval');
+    Check(ParseDemoInput(Copy(R.Lines[5], 4, MaxInt), I) and SameValue(I.Time, 1.1, 1e-4) and (I.Buttons = 0),
+      'jump released after 0.1 s');
+    Check(ParseDemoInput(Copy(R.Lines[6], 4, MaxInt), I) and SameValue(I.Time, 1.2, 1e-4) and not I.HasOrigin and
+      SameValue(I.Forward, 1), 'timed command waits, holding the inputs, without a stale position');
+    Check(R.Lines[7] = 'C:3', 'timed command');
+    Check(ParseDemoInput(Copy(R.Lines[8], 4, MaxInt), I) and SameValue(I.Forward, 0) and SameValue(I.Time, 1.5),
+      'finish releases the inputs');
+    Check(R.Lines[9] = 'V', 'finish logs the state');
+  finally
+    R.Free;
+  end;
+end;
+
 procedure TestGamepad;
 var
   V: TVector2;
@@ -1118,6 +1176,7 @@ begin
   TestPlayerTrail;
   TestGamepad;
   TestTouch;
+  TestRecord;
   TestGun;
   TestMonsterAttacks;
   TestTrace;

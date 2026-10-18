@@ -132,6 +132,17 @@ jobs:
           # Movers push entities: a corpse left under demo1's auto door is gibbed when it closes (SV_Push / door_blocked)
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/doorcorpse --demo "O:notarget,W:1,N:3,W:0.2,X,W:0.6,X,W:0.6,X,W:1.5,G:-1180 1632 -1.97,W:1.5,MV:3 -1112 1632 -23.9,G:-1300 1632 -1.97,W:7,V,Q" > test_output/doorcorpse.log 2>&1
           grep -E "Demo: Monster 3 " test_output/doorcorpse.log | grep -q "health -10[0-9][0-9]" && ! grep -q Exception test_output/doorcorpse.log || { echo "::error::The door did not crush the corpse"; exit 1; }
+          # record console command: a scripted run records itself, the saved script
+          # replays to the same place (within 8 units)
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/record --demo "O:notarget,W:1,O:record ci,W:0.5,GO:1 0 1.5,W:0.4,T:45,W:1.2,J,W:0.3,GO:0 1 0.8,P:10,W:1,C:1,W:0.3,X,W:0.5,O:stop,V,Q" > test_output/record.log 2>&1
+          rec_file=$(grep -o "demo @[^ ]*" test_output/record.log | head -1 | cut -c7-)
+          test -s "$rec_file" || { echo "::error::record did not save a script"; exit 1; }
+          cp "$rec_file" test_output/record-ci.txt
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/replay --demo "@$rec_file" > test_output/replay.log 2>&1
+          grep "Replay drift" test_output/replay.log
+          pos() { grep -o "Demo: Player at [-0-9.e]* [-0-9.e]* [-0-9.e]*" "$1" | tail -1 | cut -d' ' -f4-6; }
+          echo "recorded $(pos test_output/record.log), replayed $(pos test_output/replay.log)"
+          echo "$(pos test_output/record.log) $(pos test_output/replay.log)" | awk '{ d = sqrt(($1-$4)^2 + ($2-$5)^2 + ($3-$6)^2); print "distance " d; exit !(d < 8) }' && ! grep -q Exception test_output/replay.log || { echo "::error::The replay of a recording ended elsewhere"; exit 1; }
           # Map compatibility report of the demo PAK (docs/map-report-demo.md):
           # every entity class of the demo maps must stay handled
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --map-report test_output/map-report.md > test_output/map-report.log 2>&1
@@ -186,15 +197,24 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
           path: packages
       - name: List packages
         run: ls -l packages
+      - name: Release notes from docs/CHANGELOG.md
+        run: |
+          # The section of this tag ("## v0.3.0 ..." up to the next "## ")
+          awk -v tag="${GITHUB_REF_NAME}" '/^## / { on = index($0, "## " tag) == 1; next } on' docs/CHANGELOG.md > release-notes.md
+          test -s release-notes.md || echo "See [docs/CHANGELOG.md](docs/CHANGELOG.md)." > release-notes.md
+          cat release-notes.md
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          name: Castle Quake 2 ${{ github.ref_name }}
+          body_path: release-notes.md
           files: |
             packages/*.zip
             packages/*.tar.gz
