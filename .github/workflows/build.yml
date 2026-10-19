@@ -184,6 +184,12 @@ jobs:
           for k in 1 2 3 4 5 6 7; do
             (cd tests && ./castle-quake2-tests --compare "../test_output/compare/pvs_novis_$k.png" "../test_output/compare/pvs_vis_$k.png" "../test_output/compare/pvs_diff_$k.png" 2) || status=1
           done
+          # Sky rotation (worldspawn skyrotate, here set with the sky command):
+          # two shots of the sky one second apart must differ
+          timeout 300 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/compare/sky --demo "O:notarget,W:1,O:noclip,G:-1248 16 300,A:90,P:40,O:novis,O:sky unit1_ 90 0 0 1,W:0.5,S,W:1,S,Q" > test_output/compare/sky.log 2>&1
+          if (cd tests && ./castle-quake2-tests --compare "../test_output/compare/sky_1.png" "../test_output/compare/sky_2.png" "../test_output/compare/sky_diff.png"); then
+            echo "::error::The sky did not rotate"; status=1
+          fi
           cp -r tests/reference test_output/compare/reference
           if [ "$status" -ne 0 ]; then
             echo "::error::Screenshots differ from tests/reference (see test_output/compare/*_diff.png in the artifact)"

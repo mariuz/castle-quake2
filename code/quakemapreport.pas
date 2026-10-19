@@ -66,7 +66,7 @@ uses
 
 const
   { Spawned, used by targets, drawn or used as markers by the game code }
-  SupportedClasses: array[0..66] of String = (
+  SupportedClasses: array[0..67] of String = (
     { func_group: brushes the map compiler merged into the world }
     'func_group', 'worldspawn', 'info_player_start', 'info_player_deathmatch', 'info_player_coop',
     'info_player_intermission', 'info_null', 'info_notnull', 'misc_teleporter',
@@ -83,6 +83,8 @@ const
     'misc_viper', 'misc_bigviper', 'misc_viper_bomb', 'misc_blackhole', 'misc_eastertank',
     'misc_easterchick', 'misc_easterchick2', 'target_blaster', 'target_spawner',
     'func_killbox', 'trigger_gravity',
+    { a brush whose CURRENT contents move the player (PM_AddCurrents) }
+    'func_conveyor',
     { monsters with the generic AI that is all they need }
     'monster_soldier_light', 'monster_soldier', 'monster_soldier_ss', 'monster_infantry',
     'monster_gunner');

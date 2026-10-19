@@ -39,6 +39,8 @@ type
     FOnPointContents: TPointContentsEvent;
     FWaterLevel: Integer;
     FWaterType: Integer;
+    { Full contents at the feet (with current bits) and of the ground brush }
+    FWaterContents, FGroundContents: Integer;
     FWaterSpeed, FWaterFriction, FWaterSink: Single;
     FOnLandSound: TNotifyEvent;
     FOnLadder: Boolean;
@@ -201,10 +203,16 @@ type
     property ViewBob: Boolean read FViewBob write FViewBob default True;
   end;
 
+{ PM_AddCurrents (Quake coordinates): the velocity water currents (contents
+  where the player is, 400, halved when wading on the ground) and conveyor
+  belts (contents of the ground brush, 100) add to the wished velocity }
+function PMCurrentVelocity(const WaterContents, WaterLevel: Integer; const OnGround: Boolean;
+  const GroundContents: Integer): TVector3;
+
 implementation
 
 uses
-  CastleComponentSerialize, CastleUtils, CastleStringUtils;
+  CastleComponentSerialize, CastleUtils, CastleStringUtils, QuakeBsp;
 
 constructor TQuakePlayerMovement.Create(AOwner: TComponent);
 begin
@@ -424,6 +432,7 @@ begin
   { PM_CatagorizePosition: sample at the feet, waist and eyes }
   FWaterLevel := 0;
   FWaterType := 0;
+  FWaterContents := 0;
   if not Assigned(FOnPointContents) then
     Exit;
   Feet := Pos - Vector3(0, EyeHeight - 1, 0);
@@ -878,6 +887,7 @@ begin
   { PM_CatagorizePosition: on ground if a 0.25 unit trace down hits a
     walkable plane (normal z >= 0.7) }
   Point := FOrg - Vector3(0, 0, 0.25);
+  FGroundContents := 0;
   if FVel.Z > 180 then
   begin
     FOnGround := False;
@@ -892,6 +902,7 @@ begin
     end else
     begin
       FGroundObject := T.Ent;
+      FGroundContents := T.Contents;
       if not FOnGround then
       begin
         { Just hit the ground: a hard landing stops jumps for a moment }
@@ -919,6 +930,7 @@ begin
   if (C and PM_MASK_LIQUID) <> 0 then
   begin
     FWaterType := C and PM_MASK_LIQUID;
+    FWaterContents := C;
     FWaterLevel := 1;
     Point.Z := FOrg.Z + PMMins.Z + Sample2;
     if (FOnPointContents(CV(Point)) and PM_MASK_LIQUID) <> 0 then
@@ -929,6 +941,34 @@ begin
         FWaterLevel := 3;
     end;
   end;
+end;
+
+function CurrentDirection(const Contents: Integer): TVector3;
+begin
+  Result := TVector3.Zero;
+  if (Contents and CONTENTS_CURRENT_0) <> 0 then Result.X := Result.X + 1;
+  if (Contents and CONTENTS_CURRENT_90) <> 0 then Result.Y := Result.Y + 1;
+  if (Contents and CONTENTS_CURRENT_180) <> 0 then Result.X := Result.X - 1;
+  if (Contents and CONTENTS_CURRENT_270) <> 0 then Result.Y := Result.Y - 1;
+  if (Contents and CONTENTS_CURRENT_UP) <> 0 then Result.Z := Result.Z + 1;
+  if (Contents and CONTENTS_CURRENT_DOWN) <> 0 then Result.Z := Result.Z - 1;
+end;
+
+function PMCurrentVelocity(const WaterContents, WaterLevel: Integer; const OnGround: Boolean;
+  const GroundContents: Integer): TVector3;
+var
+  S: Single;
+begin
+  Result := TVector3.Zero;
+  if (WaterLevel > 0) and ((WaterContents and MASK_CURRENT) <> 0) then
+  begin
+    S := 400; { pm_waterspeed }
+    if (WaterLevel = 1) and OnGround then
+      S := S / 2;
+    Result := Result + CurrentDirection(WaterContents) * S;
+  end;
+  if OnGround then
+    Result := Result + CurrentDirection(GroundContents) * 100;
 end;
 
 procedure TQuakePlayerMovement.PMCheckDuck;
@@ -1072,6 +1112,7 @@ begin
     else
     if InputCrouch then
       WishVel.Z := WishVel.Z - 200;
+    WishVel := WishVel + PMCurrentVelocity(FWaterContents, FWaterLevel, FOnGround, FGroundContents);
     WishSpeed := WishVel.Length;
     if WishSpeed > MaxSpeed then
       WishSpeed := MaxSpeed;
@@ -1101,6 +1142,7 @@ begin
       WishVel.X := EnsureRange(WishVel.X, -25, 25);
       WishVel.Y := EnsureRange(WishVel.Y, -25, 25);
     end;
+    WishVel := WishVel + PMCurrentVelocity(FWaterContents, FWaterLevel, FOnGround, FGroundContents);
     WishSpeed := WishVel.Length;
     if WishSpeed > 0.001 then
       WishDir := WishVel / WishSpeed

@@ -29,6 +29,9 @@ type
     FPreview: TCastleTransform;
     FPreviewModels: specialize TObjectList<TQuakeMd2Instance>;
     FBackground: TCastleBackground;
+    FSkyOverride: String;
+    FSkyRotate: Single;
+    FSkyAxis: TVector3;
     procedure SetBackground(const Value: TCastleBackground);
     procedure SetPakUrl(const Value: String);
     procedure SetMapName(const Value: String);
@@ -60,6 +63,15 @@ type
     { Show the map's skybox (worldspawn "sky", env/<sky>rt.pcx ...) on
       Background. Done automatically whenever the map is (re)built. }
     procedure ApplySky;
+
+    { The "sky" console command: another sky, rotating Rotate degrees a
+      second around Axis (Quake coordinates), until the next map }
+    procedure SetSky(const AName: String; const Rotate: Single; const Axis: TVector3);
+    { Turn the skybox for the time (seconds) of the level: worldspawn
+      "skyrotate" degrees a second around "skyaxis" (R_SetSky) }
+    procedure UpdateSkyRotation(const Time: Single);
+    property SkyRotate: Single read FSkyRotate;
+    property SkyAxis: TVector3 read FSkyAxis;
 
     { Loaded map data, nil when no map is loaded. }
     property Bsp: TQuakeBsp read FBsp;
@@ -299,6 +311,12 @@ var
 begin
   if FBackground = nil then
     Exit;
+  { worldspawn skyrotate / skyaxis (unless the sky command set them) }
+  if (FSkyOverride = '') and (FBsp <> nil) and (FBsp.FindEntity('worldspawn') <> nil) then
+  begin
+    FSkyRotate := FBsp.FindEntity('worldspawn').GetFloat('skyrotate', 0);
+    FSkyAxis := FBsp.FindEntity('worldspawn').GetVector('skyaxis', TVector3.Zero);
+  end;
   Sky := GetSkyName;
   FBackground.SkyTopColor := Vector3(0.05, 0.05, 0.08);
   FBackground.SkyEquatorColor := Vector3(0.1, 0.1, 0.12);
@@ -326,6 +344,8 @@ end;
 function TQuakeMap.LoadMap(const AMapName: String): Boolean;
 begin
   FMapName := AMapName;
+  { The sky command lasts until the next map }
+  FSkyOverride := '';
   Rebuild;
   Result := FBsp <> nil;
 end;
@@ -436,8 +456,38 @@ begin
     BuildPreview; { clears it when nothing is previewed }
 end;
 
+procedure TQuakeMap.SetSky(const AName: String; const Rotate: Single; const Axis: TVector3);
+begin
+  FSkyOverride := AName;
+  ApplySky;
+  FSkyRotate := Rotate;
+  FSkyAxis := Axis;
+end;
+
+procedure TQuakeMap.UpdateSkyRotation(const Time: Single);
+var
+  Axis: TVector3;
+begin
+  if FBackground = nil then
+    Exit;
+  if (FSkyRotate = 0) then
+  begin
+    FBackground.Rotation := Vector4(0, 1, 0, 0);
+    Exit;
+  end;
+  { Quake -> CGE axes keep the handedness, so the angle keeps its sign.
+    A map without "skyaxis" turns around the vertical. }
+  Axis := QuakeToCge(FSkyAxis);
+  if Axis.IsZero then
+    Axis := Vector3(0, 1, 0);
+  FBackground.Rotation := Vector4(Axis.Normalize, DegToRad(FMod(Time * FSkyRotate, 360)));
+end;
+
 function TQuakeMap.GetSkyName: String;
 begin
+  if FSkyOverride <> '' then
+    Result := FSkyOverride
+  else
   if FGeometry <> nil then
     Result := FGeometry.SkyName
   else

@@ -2524,6 +2524,7 @@ begin
   UpdateGun(SecondsPassed);
   UpdateProjectiles(SecondsPassed);
   UpdateFallingProps(SecondsPassed);
+  FMap.UpdateSkyRotation(FStats.LevelTime);
   UpdateEarthquakes;
   AddProjectileLights;
   Particles.Update(SecondsPassed);

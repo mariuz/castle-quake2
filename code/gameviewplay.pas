@@ -1438,6 +1438,8 @@ procedure TViewPlay.HandleConsoleCommand(const Cmd, Args: String);
 var
   Maps: TStringList;
   P: Integer;
+  Words: TStringList;
+  Axis: TVector3;
 begin
   { A recording replays the console commands typed while recording }
   if (FRecorder <> nil) and (Cmd <> 'record') and (Cmd <> 'stop') and (Cmd <> 'quit') and
@@ -1447,6 +1449,28 @@ begin
   if Cmd = 'spawn' then
     SpawnFromConsole(Args)
   else
+  if Cmd = 'sky' then
+  begin
+    { sky <name> [rotate [axis x y z]], like Quake 2's sky console command }
+    Words := SplitArgs(Args);
+    try
+      if Words.Count = 0 then
+        Console.Print(Format('sky %s, rotate %.1f, axis %s',
+          [QuakeMap.SkyName, QuakeMap.SkyRotate, QuakeMap.SkyAxis.ToString]))
+      else
+      begin
+        Axis := TVector3.Zero;
+        if Words.Count >= 5 then
+          Axis := Vector3(StrToFloatDef(Words[2], 0), StrToFloatDef(Words[3], 0), StrToFloatDef(Words[4], 0));
+        if Words.Count >= 2 then
+          QuakeMap.SetSky(Words[0], StrToFloatDef(Words[1], 0), Axis)
+        else
+          QuakeMap.SetSky(Words[0], 0, Axis);
+      end;
+    finally
+      Words.Free;
+    end;
+  end else
   if Cmd = 'record' then
   begin
     if Args <> '' then
@@ -1565,6 +1589,7 @@ begin
     Console.Print('  load [name]  - Load a saved game (F9 = quick load)');
     Console.Print('  lightstyle n p - Set light style n to pattern p (a = dark .. z = bright)');
     Console.Print('  spawn <class> [key value]... - Add an entity (e.g. spawn misc_viper)');
+    Console.Print('  sky <name> [rotate [x y z]] - Change the sky (e.g. sky unit1_ 10 0 0 1)');
     Console.Print('  record <name> - Restart the map and record an autotest script');
     Console.Print('  stop         - Stop recording and save the script');
     Console.Print('  kill         - Suicide');

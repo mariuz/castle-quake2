@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer;
 
 var
   Passed, Failed: Integer;
@@ -599,7 +599,8 @@ begin
   Check(ClassSupport('weapon_railgun', NoteText) = csSupported, 'items are supported');
   Check(ClassSupport('func_group', NoteText) = csSupported, 'func_group is merged into the world');
   Check((ClassSupport('monster_medic', NoteText) = csPartial) and (NoteText <> ''), 'medic is partial (no revive)');
-  Check(ClassSupport('func_conveyor', NoteText) = csPartial, 'unknown func_ brushes are drawn (partial)');
+  Check(ClassSupport('func_object', NoteText) = csPartial, 'unknown func_ brushes are drawn (partial)');
+  Check(ClassSupport('func_conveyor', NoteText) = csSupported, 'func_conveyor moves the player by its contents');
   Check(ClassSupport('misc_viper', NoteText) = csSupported, 'misc_viper flies its path');
   Check(ClassSupport('target_string', NoteText) = csUnsupported, 'target_string is unsupported');
 end;
@@ -1043,6 +1044,21 @@ begin
   end;
 end;
 
+procedure TestCurrents;
+var
+  V: TVector3;
+begin
+  { PM_AddCurrents }
+  V := PMCurrentVelocity(0, 0, True, CONTENTS_SOLID or CONTENTS_CURRENT_90);
+  Check(SameValue(V.Y, 100) and SameValue(V.X, 0), 'conveyor belt (CURRENT_90) moves the player 100 along +Y');
+  V := PMCurrentVelocity(0, 0, False, CONTENTS_SOLID or CONTENTS_CURRENT_90);
+  Check(V.IsZero, 'no conveyor push in the air');
+  V := PMCurrentVelocity(CONTENTS_WATER or CONTENTS_CURRENT_180, 2, False, 0);
+  Check(SameValue(V.X, -400), 'water current (CURRENT_180) pushes 400 along -X while swimming');
+  V := PMCurrentVelocity(CONTENTS_WATER or CONTENTS_CURRENT_UP, 1, True, CONTENTS_SOLID);
+  Check(SameValue(V.Z, 200), 'wading on the ground halves a water current');
+end;
+
 procedure TestTouch;
 var
   V: TVector2;
@@ -1208,6 +1224,7 @@ begin
   TestPlayerTrail;
   TestGamepad;
   TestTouch;
+  TestCurrents;
   TestRecord;
   TestGun;
   TestMonsterAttacks;
