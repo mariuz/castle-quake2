@@ -876,8 +876,33 @@ begin
   try
     { Soldier attack1: one shot on its third frame, 1.2 s long }
     P.Run(MonsterAttackSeqs('monster_soldier_light')[0], True);
-    Check((Length(P.Times) = 1) and SameValue(P.Times[0], 0.2, 0.011) and SameValue(P.Clock, 1.2, 0.02),
-      'light soldier fires on attak103 of a 1.2 s attack');
+    Check((Length(P.Times) = 1) and SameValue(P.Times[0], 0.2, 0.011) and SameValue(P.Clock, 0.9, 0.02),
+      'light soldier fires on attak103, then skips the cocking frames (0.9 s)');
+    P.Run(MonsterAttackSeqs('monster_soldier')[0], True);
+    Check((Length(P.Times) = 1) and SameValue(P.Clock, 1.2, 0.02), 'shotgun soldier: attack1 takes 1.2 s');
+    { soldier_attack1_refire1: in melee range, fire again every 0.5 s }
+    P.Attack.Melee := True;
+    P.Run(MonsterAttackSeqs('monster_soldier_light')[0], True);
+    P.Attack.Melee := False;
+    Check((Length(P.Times) > 10) and SameValue(P.Times[1] - P.Times[0], 0.5, 0.011),
+      'light soldier refires every 0.5 s in melee range');
+    { Machinegun soldier: only attack4 (+ attack3 for dodges, never chosen by range) }
+    Seqs := MonsterAttackSeqs('monster_soldier_ss');
+    Check((Length(Seqs) = 2) and (Seqs[0].FirstFrame = 'attak401') and (ChooseAttackSeq(Seqs, 400, 0.99) = 0) and
+      (ChooseAttackSeq(Seqs, 40, 0.99) = 0), 'machinegun soldier attacks with attack4 only');
+    { attack3 (duck and shoot): crouched, refires while the dodge pause lasts }
+    Seqs := MonsterAttackSeqs('monster_soldier_light');
+    P.Attack.PauseLeft := 1.0;
+    P.Run(Seqs[High(Seqs)], True);
+    Check((Seqs[High(Seqs)].Use = auDodge) and (Length(P.Times) = 2) and SameValue(P.Times[1], 0.6, 0.011),
+      'duck-and-shoot fires twice in a 1 s dodge pause');
+    P.Attack.Start(Seqs[High(Seqs)]);
+    P.Attack.Update(0.25, True);
+    Check(P.Attack.Ducked, 'crouched while shooting from the duck');
+    { Tank machinegun: 19 bullets of 20 from attak406 }
+    P.Run(MonsterAttackSeqs('monster_tank')[2], True);
+    Check((Length(P.Times) = 19) and (P.Damage = 380) and SameValue(P.Times[0], 0.5, 0.011),
+      'tank machinegun fires 19 bullets of 20');
     { Machinegun soldier: burst holding the frame, not when it lost sight }
     P.Run(MonsterAttackSeqs('monster_soldier_ss')[0], True);
     Check((Length(P.Times) >= 4) and (Length(P.Times) <= 11), 'machinegun soldier fires a 4 .. 11 bullet burst');

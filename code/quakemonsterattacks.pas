@@ -21,8 +21,16 @@ const
 type
   TAttackKind = (akMelee, akHitscan, akBlaster, akRocket, akGrenade, akRail, akPellets);
 
-  { When a sequence can be chosen }
-  TAttackUse = (auRanged, auMelee, auAny);
+  { When a sequence can be chosen (auDodge: only by a dodge, never by range) }
+  TAttackUse = (auRanged, auMelee, auAny, auDodge);
+
+  { When a refire loop goes back:
+    lcSeen: while the player is visible, with LoopChance;
+    lcRefire: soldier_attack*_refire: in melee range, or half the time on
+      nightmare (else on to SkipFrame, if any);
+    lcPause: soldier_attack3_refire: while the dodge pause has more than
+      0.4 s left }
+  TLoopCondition = (lcSeen, lcRefire, lcPause);
 
   TMonsterAttackSeq = record
     { Model frame where the sequence starts (e.g. 'attak101') and its length }
@@ -45,6 +53,12 @@ type
       player is visible (-1: none) }
     LoopStart, LoopEnd: Integer;
     LoopChance: Single;
+    LoopCondition: TLoopCondition;
+    { Frame to continue on when the loop doesn't go back (-1: the next) }
+    SkipFrame: Integer;
+    { Crouched on these frames (soldier_duck_down .. duck_up): the shot box
+      is 32 lower (-1: never) }
+    DuckFrom, DuckTo: Integer;
     Use: TAttackUse;
   end;
   PMonsterAttackSeq = ^TMonsterAttackSeq;
@@ -64,8 +78,14 @@ type
     FActive: Boolean;
     procedure EnterFrame(const CanSee: Boolean);
     procedure Fire;
+    function LoopsBack(const CanSee: Boolean): Boolean;
   public
     OnFire: TMonsterFireEvent;
+    { Set by the monster before Update, for lcRefire / lcPause loops }
+    Melee, Nightmare: Boolean;
+    PauseLeft: Single;
+    { Crouched now (DuckFrom .. DuckTo) }
+    function Ducked: Boolean;
     { Start Seq on its frame 0 (fires at once if frame 0 is a fire frame) }
     procedure Start(const Seq: TMonsterAttackSeq; const CanSee: Boolean = True);
     procedure Stop;
@@ -113,6 +133,9 @@ begin
   Result.HoldFrame := -1;
   Result.LoopStart := -1;
   Result.LoopEnd := -1;
+  Result.SkipFrame := -1;
+  Result.DuckFrom := -1;
+  Result.DuckTo := -1;
   Result.Use := Use;
 end;
 
@@ -125,6 +148,15 @@ begin
   SetLength(Result.FireFrames, Last - First + 1);
   for I := First to Last do
     Result.FireFrames[I - First] := I;
+end;
+
+{ Machinegun burst: fire again on Frame for 3 .. 10 more frames }
+function HoldBurst(const S: TMonsterAttackSeq; const Frame: Integer): TMonsterAttackSeq;
+begin
+  Result := S;
+  Result.HoldFrame := Frame;
+  Result.HoldMin := 3;
+  Result.HoldMax := 10;
 end;
 
 procedure AddSeq(var Seqs: TMonsterAttackSeqs; const S: TMonsterAttackSeq);
@@ -144,9 +176,8 @@ begin
   if (MonsterClass = 'monster_soldier_light') or (MonsterClass = 'monster_soldier') or
      (MonsterClass = 'monster_soldier_ss') then
   begin
-    { soldier_attack: attack1 (fire on attak103) or attack2 (attak205);
-      soldier_fire: blaster 5, shotgun 2 a pellet, machinegun 2 a bullet
-      holding the frame for 3 .. 10 more frames }
+    { soldier_fire: blaster 5, shotgun 2 a pellet, machinegun 2 a bullet
+      holding the frame for 3 .. 10 more frames (AI_HOLD_FRAME) }
     if MonsterClass = 'monster_soldier_light' then
     begin
       Kind := akBlaster;
@@ -164,21 +195,48 @@ begin
       Damage := 2;
       Sound := 'solatck3';
     end;
-    S := MakeSeq('attak101', 12, [2], Kind, Damage, Sound);
-    if Kind = akHitscan then
+    if MonsterClass = 'monster_soldier_ss' then
+      { soldier_attack: the machinegun soldier (skin 4+) only uses attack4,
+        firing on attak403 }
+      AddSeq(Result, HoldBurst(MakeSeq('attak401', 6, [2], Kind, Damage, Sound), 2))
+    else
     begin
-      S.HoldFrame := 2;
-      S.HoldMin := 3;
-      S.HoldMax := 10;
+      { attack1 fires on attak103. Light soldier: attack1_refire1 on attak106
+        goes back to attak102, or skips the cocking to attak110; the
+        shotgun soldier: attack1_refire2 on attak110 goes back to attak102 }
+      S := MakeSeq('attak101', 12, [2], Kind, Damage, Sound);
+      S.LoopCondition := lcRefire;
+      S.LoopStart := 1;
+      if MonsterClass = 'monster_soldier_light' then
+      begin
+        S.LoopEnd := 5;
+        S.SkipFrame := 9;
+      end else
+        S.LoopEnd := 9;
+      AddSeq(Result, S);
+      { attack2 fires on attak205; refire1 on attak208 goes back to attak204
+        or skips to attak216 (light), refire2 on attak216 goes back (shotgun) }
+      S := MakeSeq('attak201', 18, [4], Kind, Damage, Sound);
+      S.LoopCondition := lcRefire;
+      S.LoopStart := 3;
+      if MonsterClass = 'monster_soldier_light' then
+      begin
+        S.LoopEnd := 7;
+        S.SkipFrame := 15;
+      end else
+        S.LoopEnd := 15;
+      AddSeq(Result, S);
     end;
-    AddSeq(Result, S);
-    S := MakeSeq('attak201', 18, [4], Kind, Damage, Sound);
+    { attack3, from soldier_dodge: duck down (attak303), fire, fire again
+      from attak306 while the dodge pause lasts, stand up on attak307 }
+    S := MakeSeq('attak301', 9, [2], Kind, Damage, Sound, auDodge);
     if Kind = akHitscan then
-    begin
-      S.HoldFrame := 4;
-      S.HoldMin := 3;
-      S.HoldMax := 10;
-    end;
+      S := HoldBurst(S, 2);
+    S.LoopCondition := lcPause;
+    S.LoopStart := 2;
+    S.LoopEnd := 5;
+    S.DuckFrom := 2;
+    S.DuckTo := 5;
     AddSeq(Result, S);
   end else
   if MonsterClass = 'monster_infantry' then
@@ -232,9 +290,11 @@ begin
   if MonsterClass = 'monster_tank' then
   begin
     { attack_blast: three blaster bolts of 30 (attak110, 113, 116);
-      rockets: lean in, three rockets of 50 (attak322, 325, 328) }
+      rockets: lean in, three rockets of 50 (attak322, 325, 328);
+      attack_chain: TankMachineGun on attak406 .. 424, 19 bullets of 20 }
     AddSeq(Result, MakeSeq('attak101', 22, [9, 12, 15], akBlaster, 30, 'tnkatck3'));
     AddSeq(Result, MakeSeq('attak301', 53, [21, 24, 27], akRocket, 50, 'tnkatck1'));
+    AddSeq(Result, MakeSeq('attak401', 29, Frames(5, 23).FireFrames, akHitscan, 20, 'tnkatk2a'));
   end;
 end;
 
@@ -248,6 +308,7 @@ var
     case S.Use of
       auMelee: Result := Melee;
       auRanged: Result := not Melee;
+      auDodge: Result := False;
       else Result := True;
     end;
   end;
@@ -260,10 +321,22 @@ begin
       Inc(N);
   if N = 0 then
   begin
-    { Nothing for this range (e.g. a ranged monster up close): any }
-    if Length(Seqs) = 0 then
+    { Nothing for this range (e.g. a ranged monster up close): any but
+      the dodge-only ones }
+    for I := 0 to High(Seqs) do
+      if Seqs[I].Use <> auDodge then
+        Inc(N);
+    if N = 0 then
       Exit(-1);
-    Exit(Min(High(Seqs), Trunc(R * Length(Seqs))));
+    Pick := Min(N - 1, Trunc(R * N));
+    for I := 0 to High(Seqs) do
+      if Seqs[I].Use <> auDodge then
+      begin
+        if Pick = 0 then
+          Exit(I);
+        Dec(Pick);
+      end;
+    Exit(-1);
   end;
   Pick := Min(N - 1, Trunc(R * N));
   for I := 0 to High(Seqs) do
@@ -332,10 +405,26 @@ begin
     FHoldLeft := FSeq.HoldMin + Random(Max(1, FSeq.HoldMax - FSeq.HoldMin + 1));
 end;
 
+function TMonsterAttack.LoopsBack(const CanSee: Boolean): Boolean;
+begin
+  case FSeq.LoopCondition of
+    lcRefire: Result := Melee or (Nightmare and (Random < 0.5));
+    { Quake 2 checks on entering LoopEnd, a frame before leaving it }
+    lcPause: Result := PauseLeft + MonsterFrameTime > 0.4;
+    else Result := CanSee and (Random < FSeq.LoopChance);
+  end;
+end;
+
+function TMonsterAttack.Ducked: Boolean;
+begin
+  Result := FActive and (FSeq.DuckFrom >= 0) and (FFrame >= FSeq.DuckFrom) and (FFrame <= FSeq.DuckTo);
+end;
+
 procedure TMonsterAttack.Update(const SecondsPassed: Single; const CanSee: Boolean);
 begin
   if not FActive then
     Exit;
+  PauseLeft := PauseLeft - SecondsPassed;
   FClock := FClock + SecondsPassed;
   while FActive and (FClock >= MonsterFrameTime) do
   begin
@@ -349,9 +438,16 @@ begin
       Continue;
     end;
     FHoldLeft := 0;
-    if (FFrame = FSeq.LoopEnd) and CanSee and (Random < FSeq.LoopChance) then
-      FFrame := FSeq.LoopStart
-    else
+    if FFrame = FSeq.LoopEnd then
+    begin
+      if LoopsBack(CanSee) then
+        FFrame := FSeq.LoopStart
+      else
+      if FSeq.SkipFrame >= 0 then
+        FFrame := FSeq.SkipFrame
+      else
+        Inc(FFrame);
+    end else
       Inc(FFrame);
     if FFrame >= FSeq.Count then
     begin

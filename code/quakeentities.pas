@@ -161,6 +161,9 @@ type
     { Start a Quake 2 attack sequence for the distance; False if the
       monster has none (generic attack) }
     function StartAttackSeq(const Dist: Single): Boolean;
+    { soldier attack3 (duck and shoot) for a dodge; PauseTime: Quake 2's
+      pausetime from now }
+    function StartDodgeAttack(const PauseTime: Single): Boolean;
     procedure AttackSeqFire(const ShotIndex: Integer);
     procedure UpdateJump(const SecondsPassed: Single);
     function MTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer = MASK_MONSTERSOLID): TQuakeTrace;
@@ -847,13 +850,22 @@ end;
 procedure TQuakeMonster.Dodge(const Eta: Single);
 begin
   if Dormant or not IsAlive or not CanDodge or (Model = nil) or
-     (State in [msPain, msDuck]) then
+     (State in [msPain, msDuck]) or ((State = msAttack) and FAttack.Ducked) then
     Exit;
   { soldier_dodge & co.: only a quarter of the time }
   if Random > 0.25 then
     Exit;
   if not Alerted then
     Alert;
+  { soldier_dodge: from medium skill on, sometimes duck and shoot (attack3:
+    a third of the time on medium, two thirds from hard on) }
+  if (Copy(Def^.ClassName, 1, 15) = 'monster_soldier') and
+     (((GameSkill = 1) and (Random <= 0.33)) or ((GameSkill >= 2) and (Random <= 0.66))) and
+     StartDodgeAttack(Eta + 0.3) then
+  begin
+    WritelnLog('QuakeEntities', '%s ducks and shoots (shot in %.2f s)', [Transform.Name, Eta]);
+    Exit;
+  end;
   { Down until the shot passed (pausetime = eta + 0.3), within reason }
   FDuckTime := EnsureRange(Eta + 0.3, 0.4, 1.5);
   if not Model.PlayAnim('duck', False, 5 / FDuckTime) then
@@ -904,7 +916,7 @@ function TQuakeMonster.ShotBoxMaxs: TVector3;
 begin
   Result := BoxMaxs;
   { Quake 2 monster duck: maxs[2] -= 32 }
-  if State = msDuck then
+  if (State = msDuck) or ((State = msAttack) and FAttack.Ducked) then
     Result.Z := Max(BoxMins.Z + 16, Result.Z - 32);
 end;
 
@@ -1474,6 +1486,8 @@ begin
     { Quake 2 attack sequence: frames at 10 a second, shots on its fire frames }
     if FAttack.Active then
     begin
+      FAttack.Melee := Dist < MeleeDistance;
+      FAttack.Nightmare := GameSkill >= 3;
       FAttack.Update(SecondsPassed, CanSeePlayer);
       if Model <> nil then
         Model.ShowFrames(FAttackFirst + FAttack.OldFrame, FAttackFirst + FAttack.Frame, FAttack.FrameLerp);
@@ -1595,6 +1609,30 @@ begin
   end;
 end;
 
+function TQuakeMonster.StartDodgeAttack(const PauseTime: Single): Boolean;
+var
+  I, First: Integer;
+begin
+  Result := False;
+  if Model = nil then
+    Exit;
+  for I := 0 to High(FAttackSeqs) do
+    if FAttackSeqs[I].Use = auDodge then
+    begin
+      First := Model.Model.FrameNames.IndexOf(FAttackSeqs[I].FirstFrame);
+      if (First < 0) or (First + FAttackSeqs[I].Count > Model.Model.FrameCount) then
+        Exit;
+      SetState(msAttack);
+      FAttackFired := False;
+      FAttackFirst := First;
+      FAttack.PauseLeft := PauseTime;
+      FAttack.Start(FAttackSeqs[I], CanSeePlayer);
+      Model.ShowFrames(First, First, 0);
+      SetWalking(False);
+      Exit(True);
+    end;
+end;
+
 function TQuakeMonster.StartAttackSeq(const Dist: Single): Boolean;
 var
   I, First: Integer;
@@ -1611,6 +1649,7 @@ begin
   FAttackFirst := First;
   FAttack.Start(FAttackSeqs[I], CanSeePlayer);
   Model.ShowFrames(First, First, 0);
+  WritelnLog('QuakeEntities', '%s attacks: %s', [Transform.Name, FAttackSeqs[I].FirstFrame]);
   Result := True;
 end;
 
