@@ -54,15 +54,29 @@ type
 
   TQuakeExplosionModelList = specialize TObjectList<TQuakeExplosionModel>;
 
-  { Flying gib / debris model with gravity and simple floor bounce }
+  { One kind of piece a body breaks into (Quake 2 ThrowGib / ThrowHead) }
+  TGibPiece = record
+    Model: String;
+    Count: Integer;
+    { GIB_METALLIC: bounces (MOVETYPE_BOUNCE); organic ones stop on the
+      floor with a splat (MOVETYPE_TOSS, gib_touch) }
+    Metallic: Boolean;
+  end;
+
+  { Point trace for gibs against the map (CGE coordinates): True and the
+    end position / plane normal when something solid is in the way }
+  TGibTraceFunc = function(const Start, Stop: TVector3; out EndPos, Normal: TVector3): Boolean of object;
+
+  { Flying gib / debris model with gravity, landing and bouncing }
   TQuakeGib = class
   public
     Transform: TCastleTransform;
     Model: TQuakeMd2Instance;
     Velocity, Spin: TVector3;
-    Angle: Single;
+    Angle, SpinSpeed: Single;
     Life: Single;
     Resting: Boolean;
+    Metallic: Boolean;
     constructor Create(const Parent: TCastleTransform; const ModelPath: String;
       const Pos, Vel: TVector3);
     destructor Destroy; override;
@@ -124,18 +138,54 @@ type
 
     { Monster gibbed: flying meat, bones and a head, plus blood }
     procedure SpawnGibs(const Pos: TVector3);
+    { Quake 2 ThrowGib for each piece: from random points of the box
+      (CGE coordinates), with VelocityForDamage / ClipGibVelocity, spinning,
+      gone after 10 .. 20 s }
+    procedure ThrowGibs(const BoxMin, BoxMax: TVector3; const Pieces: array of TGibPiece;
+      const Damage: Integer);
 
     { Barrel / brush debris }
     procedure SpawnDebris(const Pos: TVector3);
 
     { Large green BFG explosion }
     procedure SpawnBfgExplosion(const Pos: TVector3);
+  public
+    { Set by the world: gibs land on and bounce off the map's brushes
+      (else render meshes are ray cast) }
+    GibTrace: TGibTraceFunc;
+  public
+    { Gibs flying or lying around }
+    function GibCount: Integer;
   end;
 
 var
   Particles: TQuakeParticleManager;
 
+{ Quake 2 VelocityForDamage + ClipGibVelocity in CGE coordinates (Y up);
+  R1 .. R3 in 0..1 are the random numbers (pure, for the tests) }
+function GibVelocity(const Damage: Integer; const R1, R2, R3: Single): TVector3;
+
 implementation
+
+uses
+  QuakeSound;
+
+function GibVelocity(const Damage: Integer; const R1, R2, R3: Single): TVector3;
+var
+  Scale: Single;
+begin
+  { 100 * crandom() sideways, 200 + 100 * random() up }
+  Result := Vector3(100 * (R1 * 2 - 1), 200 + 100 * R3, 100 * (R2 * 2 - 1));
+  if Damage < 50 then
+    Scale := 0.7
+  else
+    Scale := 1.2;
+  Result := Result * Scale;
+  { ClipGibVelocity }
+  Result.X := EnsureRange(Result.X, -300, 300);
+  Result.Z := EnsureRange(Result.Z, -300, 300);
+  Result.Y := EnsureRange(Result.Y, 200, 500);
+end;
 
 { Generate (once) a white disc with smooth alpha falloff, cached for quaketex: }
 function SoftDotTexture: String;
@@ -171,6 +221,7 @@ begin
   Transform.Translation := Pos;
   Velocity := Vel;
   Spin := Vector3(Random - 0.5, Random - 0.5, Random - 0.5).Normalize;
+  SpinSpeed := 6;
   Life := 8 + Random * 4;
   Model := Md2Manager.CreateInstance(ModelPath);
   if Model <> nil then
@@ -634,8 +685,8 @@ procedure TQuakeParticleManager.UpdateGibs(const SecondsPassed: Single);
 var
   I: Integer;
   G: TQuakeGib;
-  Dist: Single;
-  NewPos: TVector3;
+  Dist, Into: Single;
+  NewPos, EndPos, Normal: TVector3;
   Hit: TCastleTransform;
 begin
   for I := FGibs.Count - 1 downto 0 do
@@ -651,6 +702,33 @@ begin
       Continue;
     G.Velocity.Y := G.Velocity.Y - 800 * SecondsPassed;
     NewPos := G.Transform.Translation + G.Velocity * SecondsPassed;
+    if Assigned(GibTrace) then
+    begin
+      { Quake 2 SV_Physics_Toss on the map's brushes }
+      if GibTrace(G.Transform.Translation, NewPos, EndPos, Normal) then
+      begin
+        NewPos := EndPos + Normal * 0.25;
+        Into := TVector3.DotProduct(G.Velocity, Normal);
+        if G.Metallic then
+        begin
+          { MOVETYPE_BOUNCE: ClipVelocity with overbounce 1.5, stop on a
+            floor when slow }
+          G.Velocity := G.Velocity - Normal * (1.5 * Into);
+          if (Normal.Y > 0.7) and (G.Velocity.Y < 60) then
+            G.Resting := True;
+        end else
+        begin
+          { MOVETYPE_TOSS: slide along walls, stop on a floor (gib_touch
+            splats once) }
+          G.Velocity := G.Velocity - Normal * Into;
+          if Normal.Y > 0.7 then
+          begin
+            G.Resting := True;
+            Sounds.PlayAtPoint('sound/misc/fhit3.wav', NewPos);
+          end;
+        end;
+      end;
+    end else
     { Stop on the first surface below / ahead (ray cast along the motion) }
     if (G.Velocity.Length > 0.01) and (G.Transform.World <> nil) then
     begin
@@ -670,9 +748,44 @@ begin
       end;
     end;
     G.Transform.Translation := NewPos;
-    G.Angle := G.Angle + 6 * SecondsPassed;
-    G.Transform.Rotation := Vector4(G.Spin, G.Angle);
+    { Organic gibs stop turning when they land (avelocity cleared) }
+    if not G.Resting or G.Metallic then
+    begin
+      G.Angle := G.Angle + G.SpinSpeed * SecondsPassed;
+      G.Transform.Rotation := Vector4(G.Spin, G.Angle);
+    end;
   end;
+end;
+
+function TQuakeParticleManager.GibCount: Integer;
+begin
+  Result := FGibs.Count;
+end;
+
+procedure TQuakeParticleManager.ThrowGibs(const BoxMin, BoxMax: TVector3;
+  const Pieces: array of TGibPiece; const Damage: Integer);
+var
+  I, N: Integer;
+  Pos: TVector3;
+  G: TQuakeGib;
+begin
+  if FParent = nil then
+    Exit;
+  for I := 0 to High(Pieces) do
+    for N := 1 to Pieces[I].Count do
+    begin
+      Pos := Vector3(BoxMin.X + Random * (BoxMax.X - BoxMin.X), BoxMin.Y + Random * (BoxMax.Y - BoxMin.Y),
+        BoxMin.Z + Random * (BoxMax.Z - BoxMin.Z));
+      G := TQuakeGib.Create(FParent, Pieces[I].Model, Pos, GibVelocity(Damage, Random, Random, Random));
+      G.Metallic := Pieces[I].Metallic;
+      { avelocity: crandom() * 600 degrees a second on each axis }
+      G.SpinSpeed := DegToRad(300 + Random * 600);
+      G.Life := 10 + Random * 10;
+      FGibs.Add(G);
+    end;
+  Pos := (BoxMin + BoxMax) / 2;
+  SpawnBlood(Pos, Vector3(0, 1, 0));
+  SpawnBlood(Pos + Vector3(0, 16, 0), Vector3(0, 1, 0));
 end;
 
 procedure TQuakeParticleManager.SpawnGibs(const Pos: TVector3);
@@ -704,8 +817,12 @@ begin
   if FParent = nil then
     Exit;
   for I := 0 to High(Debris) do
+  begin
+    { ThrowDebris: MOVETYPE_BOUNCE }
     FGibs.Add(TQuakeGib.Create(FParent, Debris[I], Pos,
       Vector3((Random - 0.5) * 500, 250 + Random * 300, (Random - 0.5) * 500)));
+    FGibs.Last.Metallic := True;
+  end;
 end;
 
 procedure TQuakeParticleManager.SpawnBfgExplosion(const Pos: TVector3);

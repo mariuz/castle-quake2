@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Gibs like Quake 2's `ThrowGib`: each monster breaks into its own pieces (soldiers 3 meat + chest + head, the tank metal and a gear, ...) at its own gib health (soldiers -30, gunner -70, tank -200; it was -40 for all), thrown faster by harder hits from all over the body, spinning; flesh lands on the map's brushes with a splat, metal and barrel debris bounce; pieces vanish after 10 - 20 s. The flyer explodes when it dies.
 - Rotating skies: worldspawn `skyrotate` / `skyaxis` like Quake 2's `R_SetSky`, and a `sky <name> [rotate [x y z]]` console command (CI checks that the sky turns).
 - Water currents and conveyor belts: brushes with `CURRENT_*` contents push the player like Quake 2's `PM_AddCurrents` (400 in water, half when wading, 100 on a belt); `func_conveyor` is supported.
 

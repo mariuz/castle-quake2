@@ -254,6 +254,8 @@ type
     procedure ResolveTargets;
     procedure UpdateAI(const SecondsPassed: Single; const PlayerPos: TVector3);
     procedure TakeDamage(const Dmg: Integer);
+    { Throw the class's gibs (or explode) and vanish }
+    procedure Gib(const Dmg: Integer);
     { Part of Dmg the power armor absorbs (and uses up) }
     function AbsorbPowerArmor(const Dmg: Integer): Integer;
     procedure Alert;
@@ -582,7 +584,87 @@ var
   moved so the bottom is at -24 like every monster's origin here }
 procedure MonsterBoxSize(const MonsterClass: String; out Mins, Maxs: TVector3);
 
+type
+  TMonsterGibs = record
+    { Pieces thrown when gibbed (the *_die functions' ThrowGib / ThrowHead) }
+    Pieces: array of TGibPiece;
+    { Health at or below which the body is gibbed (gib_health) }
+    GibHealth: Integer;
+    { BecomeExplosion1 on death instead of a corpse (the flyer) }
+    Explodes: Boolean;
+  end;
+
+{ Quake 2 gibs of a monster class (generic meat and bones for others) }
+function MonsterGibs(const MonsterClass: String): TMonsterGibs;
+
 implementation
+
+function MonsterGibs(const MonsterClass: String): TMonsterGibs;
+
+  procedure Add(const Model: String; const Count: Integer; const Metallic: Boolean = False);
+  begin
+    SetLength(Result.Pieces, Length(Result.Pieces) + 1);
+    Result.Pieces[High(Result.Pieces)].Model := 'models/objects/gibs/' + Model + '/tris.md2';
+    Result.Pieces[High(Result.Pieces)].Count := Count;
+    Result.Pieces[High(Result.Pieces)].Metallic := Metallic;
+  end;
+
+begin
+  Result := Default(TMonsterGibs);
+  Result.GibHealth := -40;
+  if Copy(MonsterClass, 1, 15) = 'monster_soldier' then
+  begin
+    { soldier_die: 3 meat, chest, head2; gib_health -30 }
+    Result.GibHealth := -30;
+    Add('sm_meat', 3);
+    Add('chest', 1);
+    Add('head2', 1);
+  end else
+  if MonsterClass = 'monster_infantry' then
+  begin
+    Add('bone', 1);
+    Add('sm_meat', 4);
+    Add('head2', 1);
+  end else
+  if (MonsterClass = 'monster_gunner') or (MonsterClass = 'monster_berserk') then
+  begin
+    { gunner_die (gib_health -70), berserk_die (-60) }
+    if MonsterClass = 'monster_gunner' then
+      Result.GibHealth := -70
+    else
+      Result.GibHealth := -60;
+    Add('bone', 2);
+    Add('sm_meat', 4);
+    Add('head2', 1);
+  end else
+  if MonsterClass = 'monster_parasite' then
+  begin
+    Result.GibHealth := -50;
+    Add('bone', 2);
+    Add('sm_meat', 4);
+    Add('head2', 1);
+  end else
+  if Copy(MonsterClass, 1, 12) = 'monster_tank' then
+  begin
+    { tank_die: meat, 4 metal pieces, chest, a gear for the head; -200 }
+    Result.GibHealth := -200;
+    Add('sm_meat', 1);
+    Add('sm_metal', 4, True);
+    Add('chest', 1);
+    Add('gear', 1, True);
+  end else
+  if MonsterClass = 'monster_flyer' then
+  begin
+    { flyer_die: BecomeExplosion1, always }
+    Result.GibHealth := -50;
+    Result.Explodes := True;
+  end else
+  begin
+    Add('bone', 2);
+    Add('sm_meat', 4);
+    Add('head2', 1);
+  end;
+end;
 
 procedure MonsterBoxSize(const MonsterClass: String; out Mins, Maxs: TVector3);
 var
@@ -1268,6 +1350,28 @@ begin
   Sounds.PlayAt('sound/weapons/lashit.wav', Transform);
 end;
 
+procedure TQuakeMonster.Gib(const Dmg: Integer);
+var
+  G: TMonsterGibs;
+  Org: TVector3;
+begin
+  Gibbed := True;
+  G := MonsterGibs(Def^.ClassName);
+  Org := Origin;
+  if G.Explodes then
+  begin
+    { BecomeExplosion1: TE_EXPLOSION1 }
+    Particles.SpawnExplosion(Transform.Translation);
+    Sounds.PlayAtPoint('sound/weapons/rocklx1a.wav', Transform.Translation);
+  end else
+  begin
+    Sounds.PlayAt('sound/misc/udeath.wav', Transform, 1, 1, chBody);
+    Particles.ThrowGibs(QuakeToCge(Org + BoxMins), QuakeToCge(Org + BoxMaxs), G.Pieces, Dmg);
+  end;
+  Transform.Exists := False;
+  WritelnLog('QuakeEntities', '%s gibbed (%d damage)', [Transform.Name, Dmg]);
+end;
+
 procedure TQuakeMonster.TakeDamage(const Dmg: Integer);
 begin
   if Dormant then
@@ -1276,13 +1380,8 @@ begin
   begin
     { Shooting corpses gibs them }
     Health := Health - Dmg;
-    if (Health < -40) and not Gibbed then
-    begin
-      Gibbed := True;
-      Sounds.PlayAt('sound/misc/udeath.wav', Transform, 1, 1, chBody);
-      Particles.SpawnGibs(Transform.Translation);
-      Transform.Exists := False;
-    end;
+    if (Health <= MonsterGibs(Def^.ClassName).GibHealth) and not Gibbed then
+      Gib(Dmg);
     Exit;
   end;
 
@@ -1292,12 +1391,9 @@ begin
     Sounds.PlayAt(MonsterSound(Def, Def^.DeathSound), Transform, 1, 1, chVoice);
     if Model <> nil then
       Model.Scene.Collides := False;
-    if Health < -40 then
+    if (Health <= MonsterGibs(Def^.ClassName).GibHealth) or MonsterGibs(Def^.ClassName).Explodes then
     begin
-      Gibbed := True;
-      Sounds.PlayAt('sound/misc/udeath.wav', Transform, 1, 1, chBody);
-      Particles.SpawnGibs(Transform.Translation);
-      Transform.Exists := False;
+      Gib(Dmg);
       State := msDead;
     end else
       SetState(msDying);

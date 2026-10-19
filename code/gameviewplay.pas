@@ -833,8 +833,8 @@ begin
         WritelnLog('Demo', 'Hunting monster %d sees player %s dist %.0f', [J,
           BoolToStr(FWorld.Monsters[J].CanSeePlayer, True),
           PointsDistance(FWorld.Monsters[J].Transform.Translation, PlayerMovement.AimPosition)]);
-    WritelnLog('Demo', 'Projectiles: %d, delayed targets: %d, earthquakes: %d, player gravity %.2f',
-      [FWorld.ProjectileCount, FWorld.DelayedCount, FWorld.EarthquakeCount, FWorld.PlayerGravity]);
+    WritelnLog('Demo', 'Projectiles: %d, delayed targets: %d, earthquakes: %d, player gravity %.2f, gibs: %d',
+      [FWorld.ProjectileCount, FWorld.DelayedCount, FWorld.EarthquakeCount, FWorld.PlayerGravity, Particles.GibCount]);
     WritelnLog('Demo', 'Monster shots: %d, player health %d armor %d, player stuck %d', [FWorld.MonsterShots,
       FWorld.Stats.Health, FWorld.Stats.Armor, PlayerMovement.StuckCount]);
     WritelnLog('Demo', 'Replay drift: max %.1f units', [FDemoMaxDrift]);

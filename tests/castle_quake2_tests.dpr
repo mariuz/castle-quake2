@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles;
 
 var
   Passed, Failed: Integer;
@@ -1059,6 +1059,29 @@ begin
   Check(SameValue(V.Z, 200), 'wading on the ground halves a water current');
 end;
 
+procedure TestGibs;
+var
+  V: TVector3;
+  G: TMonsterGibs;
+  P: TGibPiece;
+  N: Integer;
+begin
+  { VelocityForDamage + ClipGibVelocity }
+  V := GibVelocity(20, 1, 0, 0);
+  Check(SameValue(V.X, 70) and SameValue(V.Z, -70) and SameValue(V.Y, 200), 'weak hits throw gibs at 0.7 speed, at least 200 up');
+  V := GibVelocity(200, 1, 1, 1);
+  Check(SameValue(V.X, 120) and SameValue(V.Y, 360), 'strong hits throw gibs at 1.2 speed');
+  { Per-class gibs from the die functions }
+  G := MonsterGibs('monster_soldier');
+  N := 0;
+  for P in G.Pieces do
+    N := N + P.Count;
+  Check((G.GibHealth = -30) and (N = 5), 'soldier: gib health -30, 5 pieces');
+  G := MonsterGibs('monster_tank');
+  Check((G.GibHealth = -200) and G.Pieces[High(G.Pieces)].Metallic, 'tank: gib health -200, metal gear head');
+  Check(MonsterGibs('monster_flyer').Explodes, 'flyer explodes instead of leaving a corpse');
+end;
+
 procedure TestTouch;
 var
   V: TVector2;
@@ -1225,6 +1248,7 @@ begin
   TestGamepad;
   TestTouch;
   TestCurrents;
+  TestGibs;
   TestRecord;
   TestGun;
   TestMonsterAttacks;

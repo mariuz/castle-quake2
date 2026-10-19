@@ -100,6 +100,8 @@ type
     end;
     FPlayerGravity, FBaseGravity: Single;
     procedure UpdateEarthquakes;
+    { Particles.GibTrace: gibs against the map's brushes and movers }
+    function GibTraceMap(const Start, Stop: TVector3; out EndPos, Normal: TVector3): Boolean;
     procedure UpdateFallingProps(const SecondsPassed: Single);
     procedure SetPlayerGravity(const Value: Single);
     { Brush model box, or (entities made by "spawn") origin + mins / maxs fields }
@@ -360,10 +362,13 @@ begin
   FWeaponTransform := TCastleTransform.Create(nil);
   FWeaponModelSlot := -1;
   ResetStats;
+  Particles.GibTrace := @GibTraceMap;
 end;
 
 destructor TQuakeWorld.Destroy;
 begin
+  if Particles <> nil then
+    Particles.GibTrace := nil;
   Sounds.ClearLoops;
   Sounds.WorldParent := nil;
   ClearLevel;
@@ -1338,6 +1343,27 @@ end;
 function TQuakeWorld.EarthquakeCount: Integer;
 begin
   Result := Length(FQuakes);
+end;
+
+function TQuakeWorld.GibTraceMap(const Start, Stop: TVector3; out EndPos, Normal: TVector3): Boolean;
+var
+  T: TQuakeTrace;
+begin
+  EndPos := Stop;
+  Normal := Vector3(0, 1, 0);
+  Result := False;
+  if FBsp = nil then
+    Exit;
+  T := WorldTrace(CgeToQuake(Start), CgeToQuake(Stop), TVector3.Zero, TVector3.Zero,
+    CONTENTS_SOLID or CONTENTS_WINDOW, nil);
+  if T.AllSolid then
+    Exit;
+  Result := T.Hit;
+  if Result then
+  begin
+    EndPos := QuakeToCge(T.EndPos);
+    Normal := QuakeToCge(T.Normal) - QuakeToCge(TVector3.Zero);
+  end;
 end;
 
 procedure TQuakeWorld.UpdateEarthquakes;
