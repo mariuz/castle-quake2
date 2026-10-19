@@ -17,7 +17,7 @@
   author="castle-quake2"
   screen_orientation="landscape"
 >
-  <version value="0.4.0" code="4" />
+  <version value="0.5.0" code="5" />
   <compiler_options>
     <search_paths>
       <path value="code/" />
