@@ -98,6 +98,8 @@ type
     procedure EndIntermission;
     procedure PlaceCamera(const Pos: TVector3; const YawDeg: Single);
     procedure HandleConsoleCommand(const Cmd, Args: String);
+    { "spawn classname key value...": a new map entity in front of the player }
+    procedure SpawnFromConsole(const Args: String);
     procedure HandleMenuAction(const Action: TMenuAction; const Param: String);
     procedure ParseDemoScript(const Script: String);
     procedure RunDemoStep(const SecondsPassed: Single);
@@ -831,7 +833,8 @@ begin
         WritelnLog('Demo', 'Hunting monster %d sees player %s dist %.0f', [J,
           BoolToStr(FWorld.Monsters[J].CanSeePlayer, True),
           PointsDistance(FWorld.Monsters[J].Transform.Translation, PlayerMovement.AimPosition)]);
-    WritelnLog('Demo', 'Projectiles: %d, delayed targets: %d', [FWorld.ProjectileCount, FWorld.DelayedCount]);
+    WritelnLog('Demo', 'Projectiles: %d, delayed targets: %d, earthquakes: %d, player gravity %.2f',
+      [FWorld.ProjectileCount, FWorld.DelayedCount, FWorld.EarthquakeCount, FWorld.PlayerGravity]);
     WritelnLog('Demo', 'Monster shots: %d, player health %d armor %d, player stuck %d', [FWorld.MonsterShots,
       FWorld.Stats.Health, FWorld.Stats.Armor, PlayerMovement.StuckCount]);
     WritelnLog('Demo', 'Replay drift: max %.1f units', [FDemoMaxDrift]);
@@ -1363,6 +1366,74 @@ begin
   end;
 end;
 
+{ Words of a console line; "double quotes" keep spaces }
+function SplitArgs(const Args: String): TStringList;
+var
+  I: Integer;
+  Word: String;
+  Quoted, HasWord: Boolean;
+begin
+  Result := TStringList.Create;
+  Word := '';
+  Quoted := False;
+  HasWord := False;
+  for I := 1 to Length(Args) do
+    if Args[I] = '"' then
+    begin
+      Quoted := not Quoted;
+      HasWord := True;
+    end else
+    if (Args[I] = ' ') and not Quoted then
+    begin
+      if HasWord then
+        Result.Add(Word);
+      Word := '';
+      HasWord := False;
+    end else
+    begin
+      Word := Word + Args[I];
+      HasWord := True;
+    end;
+  if HasWord then
+    Result.Add(Word);
+end;
+
+procedure TViewPlay.SpawnFromConsole(const Args: String);
+var
+  Words: TStringList;
+  Ent: TQuakeEntity;
+  I: Integer;
+  Org: TVector3;
+begin
+  Words := SplitArgs(Args);
+  try
+    if (Words.Count = 0) or (FWorld.Bsp = nil) then
+    begin
+      Console.Print('Usage: spawn <classname> [key value]...  e.g. spawn target_earthquake targetname q count 2');
+      Exit;
+    end;
+    Ent := TQuakeEntity.Create;
+    Ent.SetField('classname', Words[0]);
+    { 96 units in front of the player, at foot level, unless "origin" is given }
+    Org := CgeToQuake(PlayerMovement.AimPosition) +
+      CgeToQuake(Vector3(PlayerMovement.AimDirection.X, 0, PlayerMovement.AimDirection.Z).Normalize * 96);
+    Org.Z := PlayerMovement.Origin.Z;
+    Ent.SetField('origin', Format('%d %d %d', [Round(Org.X), Round(Org.Y), Round(Org.Z)]));
+    I := 1;
+    while I + 1 < Words.Count do
+    begin
+      Ent.SetField(Words[I], Words[I + 1]);
+      Inc(I, 2);
+    end;
+    FWorld.Bsp.Entities.Add(Ent);
+    FWorld.SpawnEntity(Ent);
+    Console.Print(Format('Spawned %s at %s', [Ent.ClassName, Ent.GetField('origin')]));
+    WritelnLog('Console', 'Spawned %s at %s', [Ent.ClassName, Ent.GetField('origin')]);
+  finally
+    Words.Free;
+  end;
+end;
+
 procedure TViewPlay.HandleConsoleCommand(const Cmd, Args: String);
 var
   Maps: TStringList;
@@ -1373,6 +1444,9 @@ begin
      (Cmd <> 'exit') and (Cmd <> 'help') and (Cmd <> 'fps') and (Cmd <> 'maps') then
     RecordCommand('O:' + Trim(Cmd + ' ' + Args));
 
+  if Cmd = 'spawn' then
+    SpawnFromConsole(Args)
+  else
   if Cmd = 'record' then
   begin
     if Args <> '' then
@@ -1490,6 +1564,7 @@ begin
     Console.Print('  save [name]  - Save the game (F6 = quick save)');
     Console.Print('  load [name]  - Load a saved game (F9 = quick load)');
     Console.Print('  lightstyle n p - Set light style n to pattern p (a = dark .. z = bright)');
+    Console.Print('  spawn <class> [key value]... - Add an entity (e.g. spawn misc_viper)');
     Console.Print('  record <name> - Restart the map and record an autotest script');
     Console.Print('  stop         - Stop recording and save the script');
     Console.Print('  kill         - Suicide');

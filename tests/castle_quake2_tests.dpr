@@ -600,7 +600,8 @@ begin
   Check(ClassSupport('func_group', NoteText) = csSupported, 'func_group is merged into the world');
   Check((ClassSupport('monster_medic', NoteText) = csPartial) and (NoteText <> ''), 'medic is partial (no revive)');
   Check(ClassSupport('func_conveyor', NoteText) = csPartial, 'unknown func_ brushes are drawn (partial)');
-  Check(ClassSupport('misc_viper', NoteText) = csUnsupported, 'misc_viper is unsupported');
+  Check(ClassSupport('misc_viper', NoteText) = csSupported, 'misc_viper flies its path');
+  Check(ClassSupport('target_string', NoteText) = csUnsupported, 'target_string is unsupported');
 end;
 
 type

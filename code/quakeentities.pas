@@ -346,10 +346,13 @@ type
 
   TQuakeSpeakerList = specialize TObjectList<TQuakeSpeaker>;
 
-  TPropKind = (pkExplobox, pkBanner, pkDeadSoldier, pkSatelliteDish, pkStroggShip, pkGibHead);
+  TPropKind = (pkExplobox, pkBanner, pkDeadSoldier, pkSatelliteDish, pkStroggShip, pkGibHead,
+    pkViper, pkBigViper, pkViperBomb, pkBlackHole, pkEasterTank, pkEasterChick, pkEasterChick2);
 
   { misc_* decorations: exploding barrels, banners, corpses, the satellite dish,
-    flying Strogg ships (follow path_corners when triggered), gib heads. }
+    flying Strogg ships and vipers (follow path_corners when triggered), gib
+    heads, the big viper, viper bombs (fall when triggered, explode on
+    impact), the black hole and the "easter egg" tank / chick poses. }
   TQuakeProp = class(TCastleBehavior)
   strict private
     function GetEntityClass: String;
@@ -365,6 +368,12 @@ type
     FlySpeed: Single;
     FlyTarget: TVector3;
     FlyCorner: TQuakeEntity;
+    { Viper bomb fall (Quake 2 MOVETYPE_TOSS) }
+    Falling: Boolean;
+    Velocity: TVector3;
+    { Looping frame range (black hole, easter tank / chick), 10 frames a second }
+    AnimFirst, AnimLast: Integer;
+    AnimTime: Single;
     constructor CreateProp(const AParent: TCastleTransform; const AKind: TPropKind;
       const AEntity: TQuakeEntity);
     destructor Destroy; override;
@@ -1915,7 +1924,11 @@ const
   Models: array[TPropKind] of String = (
     'models/objects/barrels/tris.md2', 'models/objects/banner/tris.md2',
     'models/deadbods/dude/tris.md2', 'models/objects/satellite/tris.md2',
-    'models/ships/strogg1/tris.md2', 'models/objects/gibs/head2/tris.md2');
+    'models/ships/strogg1/tris.md2', 'models/objects/gibs/head2/tris.md2',
+    'models/ships/viper/tris.md2', 'models/ships/bigviper/tris.md2',
+    'models/objects/bomb/tris.md2', 'models/objects/black/tris.md2',
+    'models/monsters/tank/tris.md2', 'models/monsters/bitch/tris.md2',
+    'models/monsters/bitch/tris.md2');
 var
   Pos: TVector3;
   Flags, Frame: Integer;
@@ -1963,13 +1976,27 @@ begin
         else Frame := 0;
         Model.SetFrame(Frame);
       end;
-    pkStroggShip:
+    pkStroggShip, pkViper:
       begin
         { Invisible until triggered, then flies along its path_corners }
         Transform.Exists := False;
         FlySpeed := AEntity.Speed(300);
       end;
+    pkViperBomb:
+      { Invisible until triggered (misc_viper_bomb_use) }
+      Transform.Exists := False;
   end;
+  { SP_misc_blackhole / eastertank / easterchick(2): frame ranges }
+  AnimFirst := -1;
+  case AKind of
+    pkBlackHole: begin AnimFirst := 0; AnimLast := 18; end;
+    pkEasterTank: begin AnimFirst := 254; AnimLast := 292; end;
+    pkEasterChick: begin AnimFirst := 208; AnimLast := 247; end;
+    pkEasterChick2: begin AnimFirst := 248; AnimLast := 286; end;
+    else ;
+  end;
+  if (AnimFirst >= 0) and (Model <> nil) then
+    Model.SetFrame(AnimFirst);
 
   Transform.AddBehavior(Self);
   AParent.Add(Transform);
@@ -1997,11 +2024,18 @@ procedure TQuakeProp.UpdateProp(const SecondsPassed: Single);
 var
   Delta: TVector3;
   Dist, Step: Single;
+  Frame: Integer;
 begin
   if Destroyed then
     Exit;
   if (Model <> nil) and (Kind in [pkBanner, pkSatelliteDish]) then
     Model.Update(SecondsPassed);
+  if (Model <> nil) and (AnimFirst >= 0) and (AnimLast > AnimFirst) then
+  begin
+    AnimTime := AnimTime + SecondsPassed * 10;
+    Frame := Trunc(AnimTime) mod (AnimLast - AnimFirst + 1);
+    Model.ShowFrames(AnimFirst + Frame, AnimFirst + (Frame + 1) mod (AnimLast - AnimFirst + 1), Frac(AnimTime));
+  end;
   if Flying then
   begin
     Delta := FlyTarget - Transform.Translation;

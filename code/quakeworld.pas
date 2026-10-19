@@ -92,6 +92,20 @@ type
     FLastWaterLevel: Integer;
     FAirFinished: Single;
     FLiquidDamageTimer: Single;
+    { target_earthquake shakes: entity -> end time; time of the next shove /
+      sound per quake }
+    FQuakes: array of record
+      Entity: TQuakeEntity;
+      EndTime, NextShove, NextSound: Single;
+    end;
+    FPlayerGravity, FBaseGravity: Single;
+    procedure UpdateEarthquakes;
+    procedure UpdateFallingProps(const SecondsPassed: Single);
+    procedure SetPlayerGravity(const Value: Single);
+    { Brush model box, or (entities made by "spawn") origin + mins / maxs fields }
+    function EntityBox(const Ent: TQuakeEntity; out Box: TBox3D): Boolean;
+    { Quake 2 KillBox: telefrag everything in the box }
+    procedure KillBox(const Box: TBox3D);
     procedure UpdateLiquids(const SecondsPassed: Single);
     procedure SetPlayer(const Value: TQuakePlayerMovement);
     procedure PlayerFallDamage(const Damage: Integer);
@@ -212,6 +226,14 @@ type
 
     { Press / open what the player is looking at }
     procedure ActivateUse(const Origin, Dir: TVector3);
+
+    { Spawn one entity of the map (or a new one: add it to Bsp.Entities
+      first, see the "spawn" console command and target_spawner) }
+    procedure SpawnEntity(const Ent: TQuakeEntity);
+    { Active target_earthquake shakes }
+    function EarthquakeCount: Integer;
+    { Gravity multiplier set by trigger_gravity (1 = normal) }
+    property PlayerGravity: Single read FPlayerGravity;
 
     { Damage the player (armor absorbs part of it) }
     procedure DamagePlayer(const Amount: Integer; const FromPos: TVector3);
@@ -499,145 +521,171 @@ begin
   end;
 end;
 
-procedure TQuakeWorld.SpawnEntities(const SpawnName: String);
+procedure TQuakeWorld.SpawnEntity(const Ent: TQuakeEntity);
 var
-  Ent: TQuakeEntity;
   CName: String;
   Pos: TVector3;
   ItemDef: PQuakeItemDef;
   MonsterDef: PQuakeMonsterDef;
   Monster: TQuakeMonster;
-  AmbushCount, DormantCount: Integer;
   Box: TBox3D;
   Trig: TQuakeTrigger;
   SpawnFlags: Integer;
   D: TDelayedTarget;
 begin
+  CName := Ent.ClassName;
+  Pos := QuakeToCge(Ent.Origin);
+  SpawnFlags := Ent.SpawnFlags;
+
+  { Entities not on this skill (single player) }
+  if (SpawnFlags and SkillSpawnFlag(GameSkill)) <> 0 then
+    Exit;
+
+  if (CName = 'info_player_start') or (CName = 'info_player_deathmatch') then
+    Exit; { chosen by ChooseSpawnPoint }
+
+  ItemDef := FindItemDef(CName);
+  if ItemDef <> nil then
+  begin
+    { Items rest on the floor; origin is 15 units above it }
+    FPickups.Add(TQuakePickup.CreatePickup(FMap, ItemDef, Ent, Pos));
+    Exit;
+  end;
+
+  MonsterDef := FindMonsterDef(CName);
+  if MonsterDef <> nil then
+  begin
+    Monster := TQuakeMonster.CreateMonster(FMap, MonsterDef, Ent, Pos, Ent.Angle);
+    Monster.OnAttack := @MonsterAttack;
+    Monster.OnFoundTarget := @MonsterFoundTarget;
+    Monster.OnPickTarget := @PickTarget;
+    Monster.OnUseTargets := @UseTargets;
+    Monster.ResolveTargets;
+    FMonsters.Add(Monster);
+    Inc(FStats.TotalKills);
+    Exit;
+  end;
+
+  if (Copy(CName, 1, 8) = 'trigger_') and EntityBox(Ent, Box) then
+  begin
+    Trig := TQuakeTrigger.Create(Ent, Box);
+    if ((SpawnFlags and TRIGGER_TRIGGERED) <> 0) and (Ent.TargetName <> '') then
+      Trig.Enabled := False;
+    FTriggers.Add(Trig);
+    Exit;
+  end;
+
+  if CName = 'misc_teleporter' then
+  begin
+    { Teleporter pad trigger, around its origin }
+    Trig := TQuakeTrigger.Create(Ent, Box3D(Pos - Vector3(24, 24, 24), Pos + Vector3(24, 32, 24)));
+    FTriggers.Add(Trig);
+    Exit;
+  end;
+
+  if CName = 'target_speaker' then
+  begin
+    FSpeakers.Add(TQuakeSpeaker.CreateSpeaker(FMap, Ent));
+    Exit;
+  end;
+
+  { Switchable lights (style 32+ assigned by the map compiler), START_OFF = 1 }
+  if (Copy(CName, 1, 5) = 'light') and (Ent.TargetName <> '') and
+     (Ent.GetInt('style', 0) >= 32) then
+  begin
+    if (SpawnFlags and 1) <> 0 then
+      Lighting.SetStyle(Ent.GetInt('style', 0), 'a')
+    else
+      Lighting.SetStyle(Ent.GetInt('style', 0), 'm');
+    Exit;
+  end;
+
+  if CName = 'misc_explobox' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkExplobox, Ent))
+  else
+  if CName = 'misc_banner' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkBanner, Ent))
+  else
+  if CName = 'misc_deadsoldier' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkDeadSoldier, Ent))
+  else
+  if CName = 'misc_satellite_dish' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkSatelliteDish, Ent))
+  else
+  if CName = 'misc_strogg_ship' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkStroggShip, Ent))
+  else
+  if CName = 'misc_gib_head' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkGibHead, Ent))
+  else
+  if CName = 'misc_viper' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkViper, Ent))
+  else
+  if CName = 'misc_bigviper' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkBigViper, Ent))
+  else
+  if CName = 'misc_viper_bomb' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkViperBomb, Ent))
+  else
+  if CName = 'misc_blackhole' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkBlackHole, Ent))
+  else
+  if CName = 'misc_eastertank' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkEasterTank, Ent))
+  else
+  if CName = 'misc_easterchick' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkEasterChick, Ent))
+  else
+  if CName = 'misc_easterchick2' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkEasterChick2, Ent))
+  else
+  if CName = 'target_laser' then
+    FLasers.Add(TQuakeLaser.CreateLaser(FMap, Ent, EntityMoveDir(Ent)))
+  else
+  if CName = 'func_timer' then
+  begin
+    { spawnflags 1 = START_ON }
+    if (SpawnFlags and 1) <> 0 then
+      FTimers.AddOrSetValue(Ent, FTime + 1 + Ent.GetFloat('delay', 0) + TimerInterval(Ent))
+    else
+      FTimers.AddOrSetValue(Ent, -1);
+  end;
+
+  if CName = 'target_crosslevel_target' then
+  begin
+    { Fires its targets after "delay" (default 1 s) if all its bits were set
+      by target_crosslevel_trigger in other levels }
+    if ((SpawnFlags and $FF) <> 0) and ((FServerFlags and SpawnFlags and $FF) = (SpawnFlags and $FF)) then
+    begin
+      D.Time := FTime + Ent.GetFloat('delay', 1);
+      D.Target := Ent.Target;
+      D.Entity := nil;
+      FDelayed.Add(D);
+      WritelnLog('QuakeWorld', 'Cross-level target will fire "%s"', [Ent.Target]);
+    end;
+  end else
+  if CName = 'target_secret' then
+    Inc(FStats.TotalSecrets)
+  else
+  if CName = 'target_goal' then
+    Inc(FStats.TotalGoals)
+  else
+  if CName = 'trigger_counter' then
+    FCounters.AddOrSetValue(Ent, Ent.GetInt('count', 2))
+  else
+  if CName = 'trigger_always' then
+    UseEntity(Ent);
+end;
+
+procedure TQuakeWorld.SpawnEntities(const SpawnName: String);
+var
+  Ent: TQuakeEntity;
+  Monster: TQuakeMonster;
+  AmbushCount, DormantCount: Integer;
+begin
   ChooseSpawnPoint(SpawnName);
   for Ent in FBsp.Entities do
-  begin
-    CName := Ent.ClassName;
-    Pos := QuakeToCge(Ent.Origin);
-    SpawnFlags := Ent.SpawnFlags;
-
-    { Entities not on this skill (single player) }
-    if (SpawnFlags and SkillSpawnFlag(GameSkill)) <> 0 then
-      Continue;
-
-    if (CName = 'info_player_start') or (CName = 'info_player_deathmatch') then
-      Continue; { chosen by ChooseSpawnPoint }
-
-    ItemDef := FindItemDef(CName);
-    if ItemDef <> nil then
-    begin
-      { Items rest on the floor; origin is 15 units above it }
-      FPickups.Add(TQuakePickup.CreatePickup(FMap, ItemDef, Ent, Pos));
-      Continue;
-    end;
-
-    MonsterDef := FindMonsterDef(CName);
-    if MonsterDef <> nil then
-    begin
-      Monster := TQuakeMonster.CreateMonster(FMap, MonsterDef, Ent, Pos, Ent.Angle);
-      Monster.OnAttack := @MonsterAttack;
-      Monster.OnFoundTarget := @MonsterFoundTarget;
-      Monster.OnPickTarget := @PickTarget;
-      Monster.OnUseTargets := @UseTargets;
-      Monster.ResolveTargets;
-      FMonsters.Add(Monster);
-      Inc(FStats.TotalKills);
-      Continue;
-    end;
-
-    if (Copy(CName, 1, 8) = 'trigger_') and ModelBox(Ent.Model, Box) then
-    begin
-      Trig := TQuakeTrigger.Create(Ent, Box);
-      if ((SpawnFlags and TRIGGER_TRIGGERED) <> 0) and (Ent.TargetName <> '') then
-        Trig.Enabled := False;
-      FTriggers.Add(Trig);
-      Continue;
-    end;
-
-    if CName = 'misc_teleporter' then
-    begin
-      { Teleporter pad trigger, around its origin }
-      Trig := TQuakeTrigger.Create(Ent, Box3D(Pos - Vector3(24, 24, 24), Pos + Vector3(24, 32, 24)));
-      FTriggers.Add(Trig);
-      Continue;
-    end;
-
-    if CName = 'target_speaker' then
-    begin
-      FSpeakers.Add(TQuakeSpeaker.CreateSpeaker(FMap, Ent));
-      Continue;
-    end;
-
-    { Switchable lights (style 32+ assigned by the map compiler), START_OFF = 1 }
-    if (Copy(CName, 1, 5) = 'light') and (Ent.TargetName <> '') and
-       (Ent.GetInt('style', 0) >= 32) then
-    begin
-      if (SpawnFlags and 1) <> 0 then
-        Lighting.SetStyle(Ent.GetInt('style', 0), 'a')
-      else
-        Lighting.SetStyle(Ent.GetInt('style', 0), 'm');
-      Continue;
-    end;
-
-    if CName = 'misc_explobox' then
-      FProps.Add(TQuakeProp.CreateProp(FMap, pkExplobox, Ent))
-    else
-    if CName = 'misc_banner' then
-      FProps.Add(TQuakeProp.CreateProp(FMap, pkBanner, Ent))
-    else
-    if CName = 'misc_deadsoldier' then
-      FProps.Add(TQuakeProp.CreateProp(FMap, pkDeadSoldier, Ent))
-    else
-    if CName = 'misc_satellite_dish' then
-      FProps.Add(TQuakeProp.CreateProp(FMap, pkSatelliteDish, Ent))
-    else
-    if CName = 'misc_strogg_ship' then
-      FProps.Add(TQuakeProp.CreateProp(FMap, pkStroggShip, Ent))
-    else
-    if CName = 'misc_gib_head' then
-      FProps.Add(TQuakeProp.CreateProp(FMap, pkGibHead, Ent))
-    else
-    if CName = 'target_laser' then
-      FLasers.Add(TQuakeLaser.CreateLaser(FMap, Ent, EntityMoveDir(Ent)))
-    else
-    if CName = 'func_timer' then
-    begin
-      { spawnflags 1 = START_ON }
-      if (SpawnFlags and 1) <> 0 then
-        FTimers.AddOrSetValue(Ent, FTime + 1 + Ent.GetFloat('delay', 0) + TimerInterval(Ent))
-      else
-        FTimers.AddOrSetValue(Ent, -1);
-    end;
-
-    if CName = 'target_crosslevel_target' then
-    begin
-      { Fires its targets after "delay" (default 1 s) if all its bits were set
-        by target_crosslevel_trigger in other levels }
-      if ((SpawnFlags and $FF) <> 0) and ((FServerFlags and SpawnFlags and $FF) = (SpawnFlags and $FF)) then
-      begin
-        D.Time := FTime + Ent.GetFloat('delay', 1);
-        D.Target := Ent.Target;
-        D.Entity := nil;
-        FDelayed.Add(D);
-        WritelnLog('QuakeWorld', 'Cross-level target will fire "%s"', [Ent.Target]);
-      end;
-    end else
-    if CName = 'target_secret' then
-      Inc(FStats.TotalSecrets)
-    else
-    if CName = 'target_goal' then
-      Inc(FStats.TotalGoals)
-    else
-    if CName = 'trigger_counter' then
-      FCounters.AddOrSetValue(Ent, Ent.GetInt('count', 2))
-    else
-    if CName = 'trigger_always' then
-      UseEntity(Ent);
-  end;
+    SpawnEntity(Ent);
 
   WritelnLog('QuakeWorld', 'Spawned %d pickups, %d monsters, %d triggers, %d movers, %d speakers, %d props, %d lasers, %d timers',
     [FPickups.Count, FMonsters.Count, FTriggers.Count, FGeometry.Movers.Count, FSpeakers.Count,
@@ -701,6 +749,9 @@ begin
   RestoreRemembered := FLevelExited;
 
   ClearLevel;
+  FQuakes := nil;
+  { PutClientInServer: every level starts with normal gravity }
+  SetPlayerGravity(1);
   FLevelExited := False;
   FNextMap := '';
   FTeleportPending := False;
@@ -930,6 +981,8 @@ var
   Prop: TQuakeProp;
   Lights: TQuakeEntityList;
   Light: TQuakeEntity;
+  NewEnt: TQuakeEntity;
+  Box: TBox3D;
 begin
   CName := Ent.ClassName;
   Msg := Ent.MessageText;
@@ -1100,8 +1153,41 @@ begin
     end;
   end else
   if CName = 'target_earthquake' then
-    Sounds.Play('sound/world/quake.wav')
-  else
+  begin
+    { target_earthquake_use: shake for "count" seconds (default 5) }
+    SetLength(FQuakes, Length(FQuakes) + 1);
+    FQuakes[High(FQuakes)].Entity := Ent;
+    FQuakes[High(FQuakes)].EndTime := FTime + Ent.GetFloat('count', 5);
+    FQuakes[High(FQuakes)].NextShove := FTime;
+    FQuakes[High(FQuakes)].NextSound := FTime;
+  end else
+  if CName = 'target_blaster' then
+  begin
+    { use_target_blaster: a blaster bolt along movedir ("dmg" 15, "speed" 1000) }
+    SpawnProjectile(pkBlasterBolt, QuakeToCge(Ent.Origin), EntityMoveDir(Ent), Ent.Speed(1000),
+      Ent.GetInt('dmg', 15), False);
+    Sounds.PlayAtPoint('sound/weapons/laser2.wav', QuakeToCge(Ent.Origin));
+  end else
+  if CName = 'func_killbox' then
+  begin
+    if EntityBox(Ent, Box) then
+      KillBox(Box);
+  end else
+  if CName = 'target_spawner' then
+  begin
+    { use_target_spawner: a new entity of class "target" here, facing the
+      same way (G_Spawn + ED_CallSpawn); "speed" throws it along movedir,
+      which only matters for items in Quake 2 and is ignored here }
+    NewEnt := TQuakeEntity.Create;
+    NewEnt.SetField('classname', Ent.Target);
+    NewEnt.SetField('origin', Ent.GetField('origin'));
+    NewEnt.SetField('angle', Ent.GetField('angle', '0'));
+    FBsp.Entities.Add(NewEnt);
+    SpawnEntity(NewEnt);
+    { Like KillBox at the spawn point: telefrag what is in the way }
+    KillBox(Box3D(QuakeToCge(NewEnt.Origin) - Vector3(16, 24, 16), QuakeToCge(NewEnt.Origin) + Vector3(16, 32, 16)));
+    WritelnLog('QuakeWorld', 'target_spawner made a %s', [Ent.Target]);
+  end else
   if CName = 'trigger_relay' then
     UseTargetsOf(Ent)
   else
@@ -1214,15 +1300,142 @@ begin
   Result := nil;
 end;
 
+function TQuakeWorld.EntityBox(const Ent: TQuakeEntity; out Box: TBox3D): Boolean;
+begin
+  Result := ModelBox(Ent.Model, Box);
+  if (not Result) and Ent.HasField('mins') and Ent.HasField('maxs') then
+  begin
+    Box := QuakeBoxToCge(Ent.Origin + Ent.GetVector('mins', TVector3.Zero),
+      Ent.Origin + Ent.GetVector('maxs', TVector3.Zero));
+    Result := True;
+  end;
+end;
+
+procedure TQuakeWorld.KillBox(const Box: TBox3D);
+var
+  M: TQuakeMonster;
+  Prop: TQuakeProp;
+begin
+  { KillBox: MOD_TELEFRAG damage to everything solid in the box }
+  if (FPlayer <> nil) and not FDead and Box.Collision(PlayerBox) then
+    DamagePlayer(100000, Box.Center);
+  for M in FMonsters do
+    if M.IsAlive and not M.Dormant and
+       Box.Collision(QuakeBoxToCge(M.Origin + M.BoxMins, M.Origin + M.BoxMaxs)) then
+      M.TakeDamage(100000);
+  for Prop in FProps do
+    if (Prop.Kind = pkExplobox) and not Prop.Destroyed and Box.Contains(Prop.Transform.Translation) then
+      DamageProp(Prop, 100000);
+end;
+
+procedure TQuakeWorld.SetPlayerGravity(const Value: Single);
+begin
+  FPlayerGravity := Value;
+  if (FPlayer <> nil) and (FBaseGravity > 0) then
+    FPlayer.GravityAcceleration := FBaseGravity * Value;
+end;
+
+function TQuakeWorld.EarthquakeCount: Integer;
+begin
+  Result := Length(FQuakes);
+end;
+
+procedure TQuakeWorld.UpdateEarthquakes;
+var
+  I: Integer;
+  V: TVector3;
+begin
+  { target_earthquake_think, every 0.1 s: shove the player while on the
+    ground (Quake 2 adds crandom() * 150 sideways and sets the vertical
+    speed to speed * 100 / mass, mass 200), quake.wav every 0.5 s }
+  for I := High(FQuakes) downto 0 do
+  begin
+    if FTime >= FQuakes[I].EndTime then
+    begin
+      Delete(FQuakes, I, 1);
+      Continue;
+    end;
+    if FTime >= FQuakes[I].NextSound then
+    begin
+      FQuakes[I].NextSound := FTime + 0.5;
+      Sounds.Play('sound/world/quake.wav');
+    end;
+    if (FTime >= FQuakes[I].NextShove) and (FPlayer <> nil) and FPlayer.OnGround and not FDead then
+    begin
+      FQuakes[I].NextShove := FTime + 0.1;
+      V := FPlayer.Velocity;
+      V.X := V.X + (Random * 2 - 1) * 150;
+      V.Z := V.Z + (Random * 2 - 1) * 150;
+      V.Y := FQuakes[I].Entity.Speed(200) * 0.5;
+      FPlayer.Velocity := V;
+    end;
+  end;
+end;
+
+procedure TQuakeWorld.UpdateFallingProps(const SecondsPassed: Single);
+var
+  Prop: TQuakeProp;
+  OldPos, NewPos: TVector3;
+  T: TQuakeTrace;
+  Dmg: Integer;
+begin
+  { misc_viper_bomb: MOVETYPE_TOSS until it touches something, then
+    misc_viper_bomb_touch: radius damage "dmg" (1000) }
+  for Prop in FProps do
+    if Prop.Falling and not Prop.Destroyed then
+    begin
+      Prop.Velocity.Y := Prop.Velocity.Y - 800 * SecondsPassed;
+      OldPos := Prop.Transform.Translation;
+      NewPos := OldPos + Prop.Velocity * SecondsPassed;
+      if not Prop.Velocity.IsZero then
+        Prop.Transform.Rotation := Vector4(0, 1, 0, ArcTan2(-Prop.Velocity.Z, Prop.Velocity.X));
+      T := WorldTrace(CgeToQuake(OldPos), CgeToQuake(NewPos), Vector3(-8, -8, -8), Vector3(8, 8, 8),
+        MASK_SHOT, Prop);
+      if T.Hit then
+      begin
+        Prop.Falling := False;
+        Prop.Destroyed := True;
+        Prop.Transform.Exists := False;
+        Dmg := Prop.Entity.GetInt('dmg', 1000);
+        Explode(QuakeToCge(T.EndPos), Dmg, Dmg + 40, False);
+        UseTargets(Prop.Entity.Target);
+      end else
+        Prop.Transform.Translation := NewPos;
+    end;
+end;
+
 procedure TQuakeWorld.ActivateProp(const Prop: TQuakeProp);
 var
   List: TQuakeEntityList;
+  Other: TQuakeProp;
 begin
   case Prop.Kind of
     pkSatelliteDish:
       if Prop.Model <> nil then
         Prop.Model.PlayAnim('', False, 10);
-    pkStroggShip:
+    pkBlackHole:
+      begin
+        { misc_blackhole_use: it goes away }
+        Prop.Destroyed := True;
+        Prop.Transform.Exists := False;
+      end;
+    pkViperBomb:
+      if not Prop.Falling and not Prop.Destroyed then
+      begin
+        { misc_viper_bomb_use: drop with the velocity of the flying viper }
+        Prop.Transform.Exists := True;
+        Prop.Falling := True;
+        Prop.Velocity := TVector3.Zero;
+        for Other in FProps do
+          if (Other.Kind = pkViper) and Other.Flying then
+          begin
+            Prop.Velocity := Other.FlyTarget - Other.Transform.Translation;
+            if not Prop.Velocity.IsZero then
+              Prop.Velocity := Prop.Velocity.Normalize * Other.FlySpeed;
+            Break;
+          end;
+      end;
+    pkStroggShip, pkViper:
       begin
         List := FBsp.FindByTargetName(Prop.Entity.Target);
         try
@@ -1434,6 +1647,12 @@ begin
         Trig.Enabled := False
       else
         Trig.Cooldown := Max(0.2, Trig.Entity.GetFloat('wait', 0.2));
+    end else
+    if CName = 'trigger_gravity' then
+    begin
+      { trigger_gravity_touch: the toucher keeps this gravity multiplier }
+      SetPlayerGravity(Trig.Entity.GetFloat('gravity', 1));
+      Continue;
     end else
     if CName = 'trigger_push' then
     begin
@@ -2304,6 +2523,8 @@ begin
   UpdateLiquids(SecondsPassed);
   UpdateGun(SecondsPassed);
   UpdateProjectiles(SecondsPassed);
+  UpdateFallingProps(SecondsPassed);
+  UpdateEarthquakes;
   AddProjectileLights;
   Particles.Update(SecondsPassed);
   Lighting.Update(SecondsPassed);
@@ -2887,6 +3108,8 @@ begin
   FPlayer := Value;
   if FPlayer <> nil then
   begin
+    FBaseGravity := FPlayer.GravityAcceleration;
+    FPlayerGravity := 1;
     FPlayer.OnFallDamage := @PlayerFallDamage;
     FPlayer.OnPointContents := @PlayerPointContents;
     FPlayer.OnLandSound := @PlayerLanded;

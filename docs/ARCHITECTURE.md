@@ -140,6 +140,8 @@ Audio can be checked headless with OpenAL Soft's wave backend (`ALSOFT_CONF` wit
 
 ---
 
+Full-game entities the demo maps don't use are tested by spawning them (`spawn` console command, `TQuakeWorld.SpawnEntity` = the per-entity body of `SpawnEntities`): `misc_viper` flies its `path_corner`s like `misc_strogg_ship`; `misc_viper_bomb` drops with the flying viper's velocity under gravity (`UpdateFallingProps`, traced with `MASK_SHOT`) and explodes for `dmg` (1000) on impact; `misc_bigviper` and the easter-egg tank / chick poses are static models (`AnimFirst`..`AnimLast` frame loops, like `misc_blackhole`, which disappears when used); `target_blaster` fires a blaster bolt along its movedir; `target_earthquake` shoves a grounded player every 0.1 s for `count` seconds (`target_earthquake_think`: ±150 sideways, `speed` / 2 up) with `quake.wav` every 0.5 s; `target_spawner` spawns an entity of class `target` at its origin and telefrags what is there; `func_killbox` (invisible, not solid) and `KillBox` telefrag everything in the box; `trigger_gravity` sets the player's gravity multiplier until the next level (`SetPlayerGravity`).
+
 ## 6b. Savegames
 
 `TQuakeWorld.SaveState` / `LoadState` write and read a `fpjson` object: player stats and inventory, then arrays per entity list (monsters, pickups, movers, props, triggers, lasers, speakers) in spawn order, plus `func_timer` / `trigger_counter` state keyed by BSP entity index and light styles 32–62. Loading reloads the map fresh and applies the state on top (`TQuakeMonster.RestoreState`, `TQuakeMover.ApplyPose`). The view adds the camera and stores the file with `UrlSaveStream('castle-config:/saves/<name>.json')`.

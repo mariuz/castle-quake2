@@ -357,7 +357,8 @@ const
 function IsVisibleBrushClass(const CName: String): Boolean;
 begin
   Result := (Copy(CName, 1, 5) = 'func_') and (CName <> 'func_areaportal') and
-    (CName <> 'func_clock') and (CName <> 'func_timer') and (CName <> 'func_group');
+    (CName <> 'func_clock') and (CName <> 'func_timer') and (CName <> 'func_group') and
+    (CName <> 'func_killbox');
 end;
 
 { CGE direction from Quake movedir conventions (angle -1 = up, -2 = down) }
