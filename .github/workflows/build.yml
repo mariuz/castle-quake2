@@ -142,6 +142,10 @@ jobs:
           # Gibs (ThrowGib): a railgun shot gibs a soldier into its 5 pieces, a flyer explodes (BecomeExplosion1)
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/gibs --demo 'O:notarget,W:1.5,A:90,Y,K,C:9,W:1.2,O:spawn monster_soldier origin "128 -150 24" angle 270,W:0.2,X,W:2,V,O:spawn monster_flyer origin "128 -200 46" angle 270,W:0.2,X,W:1,V,Q' > test_output/gibs.log 2>&1
           grep -q "monster_soldier gibbed" test_output/gibs.log && grep -q "gibs: 5$" test_output/gibs.log && grep -q "monster_flyer gibbed" test_output/gibs.log && ! grep -q Exception test_output/gibs.log || { echo "::error::Gibs misbehaved (see gibs.log)"; exit 1; }
+          # Brush entity texture frames (R_TextureAnimation + EF_ANIM*): demo3's alarm button shows frame 0 until
+          # pressed, then cycles frames 2 / 3; the ANIMATED key door cycles all its frames
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo3 test_output/btntex --demo "O:notarget,W:1,V,E:lita,W:1.3,V,Q" > test_output/btntex.log 2>&1
+          grep "func_button \*7 " test_output/btntex.log | head -1 | grep -q "tex frame 0 " && grep "func_button \*7 " test_output/btntex.log | tail -1 | grep -qE "tex frame [23] " && ! grep -q Exception test_output/btntex.log || { echo "::error::Button texture frames are wrong (see btntex.log)"; exit 1; }
           # Movers push entities: a corpse left under demo1's auto door is gibbed when it closes (SV_Push / door_blocked)
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/doorcorpse --demo "O:notarget,W:1,N:3,W:0.2,X,W:0.6,X,W:0.6,X,W:1.5,G:-1180 1632 -1.97,W:1.5,MV:3 -1112 1632 -23.9,G:-1300 1632 -1.97,W:7,V,Q" > test_output/doorcorpse.log 2>&1
           grep -E "Demo: Monster 3 " test_output/doorcorpse.log | grep -q "health -10[0-9][0-9]" && ! grep -q Exception test_output/doorcorpse.log || { echo "::error::The door did not crush the corpse"; exit 1; }

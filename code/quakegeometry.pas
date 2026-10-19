@@ -170,6 +170,8 @@ type
     TrainRunning: Boolean;
     { Time of the last Blocked call (damage once a frame of 0.1 s) }
     BlockedTime: Single;
+    { A button that has been pressed (cycles its textures from then on) }
+    ButtonUsed: Boolean;
     constructor CreateMover(const AGeometry: TQuakeGeometry; const AEntity: TQuakeEntity;
       const AModelIndex: Integer);
     destructor Destroy; override;
@@ -191,6 +193,12 @@ type
     function Blocked: Integer;
     { Re-apply Transform from State / Progress / SpinAngle (after loading a save) }
     procedure ApplyPose;
+    { Texture animation frame at Time, like the Quake 2 client picks the
+      entity frame: EF_ANIM_ALL / EF_ANIM_ALLFAST from the spawnflags of
+      doors, walls, rotating brushes and explosives; buttons show frame 0
+      until pressed, cycle 2 / 3 while pressed (EF_ANIM23) and 0 / 1 after
+      (EF_ANIM01); everything else stays on frame 0 }
+    function TexFrame(const Time: Single): Integer;
     procedure UpdateMoveSound(const Moving: Boolean);
     procedure PlayMoverSound(const APath: String);
   published
@@ -208,11 +216,21 @@ type
 
   TQuakeMoverList = specialize TObjectList<TQuakeMover>;
 
-  { Animated texture chain (WAL animname), cycled at 2 frames/second like Quake 2 }
+  { A texture node of an animated chain: its brush model (0 = world) and
+    where its face's own texture is in the chain }
+  TQuakeAnimNode = record
+    Node: TImageTextureNode;
+    Model, Offset, Shown: Integer;
+  end;
+
+  { Animated texture chain (WAL animname). The world cycles it at 2 frames
+    a second; brush entities show their entity frame (R_TextureAnimation:
+    frame mod chain length, from the face's own texture), see
+    TQuakeMover.TexFrame }
   TQuakeAnimTex = class
   public
     Frames: TStringList;
-    Nodes: specialize TList<TImageTextureNode>;
+    Nodes: specialize TList<TQuakeAnimNode>;
     constructor Create;
     destructor Destroy; override;
   end;
@@ -268,9 +286,12 @@ type
       const SkyRoot: TX3DRootNode; const LiquidRoot: TX3DRootNode = nil);
     procedure SetupMovers(const Parent: TCastleTransform);
     procedure BuildPlayerClip;
-    procedure RegisterAnimNode(const TexName: String; const Node: TImageTextureNode);
+    procedure RegisterAnimNode(const TexName: String; const Node: TImageTextureNode; const ModelIdx: Integer);
+
     function CreateDLightEffect: TEffectNode;
   public
+    { Texture animation frame of a brush model (0 = world) now }
+    function ModelTexFrame(const ModelIdx: Integer): Integer;
     constructor Create(const ABsp: TQuakeBsp);
     destructor Destroy; override;
 
@@ -758,7 +779,7 @@ constructor TQuakeAnimTex.Create;
 begin
   inherited Create;
   Frames := TStringList.Create;
-  Nodes := specialize TList<TImageTextureNode>.Create;
+  Nodes := specialize TList<TQuakeAnimNode>.Create;
 end;
 
 destructor TQuakeAnimTex.Destroy;
@@ -769,6 +790,58 @@ begin
 end;
 
 { TQuakeMover }
+
+function TQuakeMover.TexFrame(const Time: Single): Integer;
+const
+  { client autoanim selections (CL_AddPacketEntities) }
+  AnimStatic = 0;
+  Anim01 = 1;
+  Anim23 = 2;
+  AnimAll = 3;
+  AnimAllFast = 4;
+var
+  Mode, Flags, AutoAnim: Integer;
+  CName: String;
+begin
+  Mode := AnimStatic;
+  Flags := Entity.SpawnFlags;
+  CName := Entity.ClassName;
+  if Kind = mkButton then
+  begin
+    { button_wait: EF_ANIM23 at the top and on the way back; button_done:
+      EF_ANIM01 from then on; frame 0 before the first press }
+    if State in [msAtEnd, msToStart] then
+    begin
+      ButtonUsed := True;
+      Mode := Anim23;
+    end else
+    if ButtonUsed then
+      Mode := Anim01;
+  end else
+  if (CName = 'func_door') or (CName = 'func_door_rotating') then
+  begin
+    if (Flags and 16) <> 0 then Mode := AnimAll;
+    if (Flags and 64) <> 0 then Mode := AnimAllFast;
+  end else
+  if (CName = 'func_wall') or (CName = 'func_explosive') then
+  begin
+    if (Flags and 8) <> 0 then Mode := AnimAll;
+    if (Flags and 16) <> 0 then Mode := AnimAllFast;
+  end else
+  if CName = 'func_rotating' then
+  begin
+    if (Flags and 64) <> 0 then Mode := AnimAll;
+    if (Flags and 128) <> 0 then Mode := AnimAllFast;
+  end;
+  AutoAnim := Trunc(Time * 2);
+  case Mode of
+    Anim01: Result := AutoAnim and 1;
+    Anim23: Result := 2 + (AutoAnim and 1);
+    AnimAll: Result := AutoAnim;
+    AnimAllFast: Result := Trunc(Time * 10);
+    else Result := 0;
+  end;
+end;
 
 constructor TQuakeMover.CreateMover(const AGeometry: TQuakeGeometry; const AEntity: TQuakeEntity;
   const AModelIndex: Integer);
@@ -1289,20 +1362,26 @@ begin
   inherited Destroy;
 end;
 
-procedure TQuakeGeometry.RegisterAnimNode(const TexName: String; const Node: TImageTextureNode);
+procedure TQuakeGeometry.RegisterAnimNode(const TexName: String; const Node: TImageTextureNode;
+  const ModelIdx: Integer);
 var
   Anim: TQuakeAnimTex;
   Info: TQuakeWalInfo;
   Cur: String;
+  A: TQuakeAnimNode;
 begin
   Palette.LoadWal(TexName, Info);
   if Info.AnimName = '' then
     Exit;
+  A.Node := Node;
+  A.Model := ModelIdx;
 
   for Anim in FAnimTextures do
     if Anim.Frames.IndexOf(TexName) >= 0 then
     begin
-      Anim.Nodes.Add(Node);
+      A.Offset := Anim.Frames.IndexOf(TexName);
+      A.Shown := A.Offset;
+      Anim.Nodes.Add(A);
       Exit;
     end;
 
@@ -1314,8 +1393,23 @@ begin
     Palette.LoadWal(Cur, Info);
     Cur := Info.AnimName;
   end;
-  Anim.Nodes.Add(Node);
+  A.Offset := 0;
+  A.Shown := 0;
+  Anim.Nodes.Add(A);
   FAnimTextures.Add(Anim);
+end;
+
+function TQuakeGeometry.ModelTexFrame(const ModelIdx: Integer): Integer;
+var
+  Mover: TQuakeMover;
+begin
+  { The world: autoanim, 2 frames a second }
+  if ModelIdx <= 0 then
+    Exit(Trunc(FTime * 2));
+  for Mover in FMovers do
+    if Mover.ModelIndex = ModelIdx then
+      Exit(Mover.TexFrame(FTime));
+  Result := 0;
 end;
 
 procedure TQuakeGeometry.BuildModelGeometry(const ModelIdx: Integer; const RootNode: TX3DRootNode;
@@ -1504,7 +1598,7 @@ begin
         RootNode.AddChildren(Batch.Shape);
       if Batch.Region >= 0 then
         FVisRegions[Batch.Region].Shapes.Add(Batch.Shape);
-      RegisterAnimNode(Batch.TextureName, Batch.TexNode);
+      RegisterAnimNode(Batch.TextureName, Batch.TexNode, ModelIdx);
       if Batch.ScrollNode <> nil then
         FScrollNodes.Add(Batch.ScrollNode);
     end;
@@ -1929,8 +2023,8 @@ procedure TQuakeGeometry.Update(const SecondsPassed: Single);
 var
   Mover: TQuakeMover;
   Anim: TQuakeAnimTex;
-  Node: TImageTextureNode;
-  Frame: Integer;
+  A: TQuakeAnimNode;
+  I, Frame: Integer;
   Scroll: TTextureTransformNode;
   Dyn: TQuakeDynamicLightmap;
 begin
@@ -1947,15 +2041,20 @@ begin
       Dyn.Node.FdImage.Changed;
     end;
 
-  { Quake 2 animates wall textures at 2 frames per second }
-  Frame := Trunc(FTime * 2);
-  if Frame <> FAnimFrame then
-  begin
-    FAnimFrame := Frame;
-    for Anim in FAnimTextures do
-      for Node in Anim.Nodes do
-        Node.SetUrl(['quaketex:/' + WalTextureId(Anim.Frames[Frame mod Anim.Frames.Count])]);
-  end;
+  { Texture animation: the world at 2 frames a second, brush entities on
+    their own frame (ModelTexFrame) }
+  for Anim in FAnimTextures do
+    for I := 0 to Anim.Nodes.Count - 1 do
+    begin
+      A := Anim.Nodes[I];
+      Frame := (A.Offset + ModelTexFrame(A.Model)) mod Anim.Frames.Count;
+      if Frame <> A.Shown then
+      begin
+        A.Shown := Frame;
+        A.Node.SetUrl(['quaketex:/' + WalTextureId(Anim.Frames[Frame])]);
+        Anim.Nodes[I] := A;
+      end;
+    end;
 
   FWarpTime.Send(FTime);
 

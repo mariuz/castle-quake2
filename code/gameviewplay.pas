@@ -792,8 +792,9 @@ begin
       BoolToStr(PlayerMovement.OnGround, True), PlayerMovement.Velocity.ToString,
       FWorld.Stats.Health]);
     for J := 0 to FWorld.Geometry.Movers.Count - 1 do
-      WritelnLog('Demo', 'Mover %d %s state %d progress %.2f exists %s', [J,
-        FWorld.Geometry.Movers[J].Entity.ClassName, Ord(FWorld.Geometry.Movers[J].State),
+      WritelnLog('Demo', 'Mover %d %s %s tex frame %d state %d progress %.2f exists %s', [J,
+        FWorld.Geometry.Movers[J].Entity.ClassName, FWorld.Geometry.Movers[J].Entity.Model,
+        FWorld.Geometry.ModelTexFrame(FWorld.Geometry.Movers[J].ModelIndex), Ord(FWorld.Geometry.Movers[J].State),
         FWorld.Geometry.Movers[J].Progress, BoolToStr(FWorld.Geometry.Movers[J].Transform.Exists, True)]);
     for J := 0 to FWorld.Props.Count - 1 do
       WritelnLog('Demo', 'Prop %d %s health %d destroyed %s flying %s exists %s', [J,
