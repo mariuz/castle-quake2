@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.6.0 — 2026-10-20
+
+Clocks and digit displays from the full game, and models lit by the flickering and switchable lights around them. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - Models are lit by all the light styles of the floor below them, like Quake 2's `R_LightPoint`: monsters, items and props flicker with flickering lights and go dark when a light is switched off (they only saw the first style before); they are re-lit 10 times a second.
 - Clocks and displays: `func_clock` (count up, count down or the time of day, once a second, firing its `pathtarget` when the time is up), `target_string` and `target_character` (digit brushes showing 0-9, `-` and `:` through their texture frame), like the full game's countdowns.
