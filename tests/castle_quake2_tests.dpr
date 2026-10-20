@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld;
 
 var
   Passed, Failed: Integer;
@@ -602,7 +602,8 @@ begin
   Check(ClassSupport('func_object', NoteText) = csPartial, 'unknown func_ brushes are drawn (partial)');
   Check(ClassSupport('func_conveyor', NoteText) = csSupported, 'func_conveyor moves the player by its contents');
   Check(ClassSupport('misc_viper', NoteText) = csSupported, 'misc_viper flies its path');
-  Check(ClassSupport('target_string', NoteText) = csUnsupported, 'target_string is unsupported');
+  Check(ClassSupport('turret_breach', NoteText) = csUnsupported, 'turret_breach is unsupported');
+  Check(ClassSupport('target_string', NoteText) = csSupported, 'target_string writes its target_characters');
 end;
 
 type
@@ -1082,6 +1083,17 @@ begin
   Check(MonsterGibs('monster_flyer').Explodes, 'flyer explodes instead of leaving a corpse');
 end;
 
+procedure TestClock;
+begin
+  { func_clock_format_countdown and target_string_use }
+  Check(ClockText(0, 7) = ' 7', 'clock style 0: seconds');
+  Check(ClockText(1, 65) = ' 1:05', 'clock style 1: minutes and zero-padded seconds');
+  Check(ClockText(2, 3725) = ' 1:02:05', 'clock style 2: hours, minutes, seconds');
+  Check((CharacterFrame(' 1:05', 2) = 1) and (CharacterFrame(' 1:05', 3) = 11) and
+    (CharacterFrame('-', 1) = 10), 'target_character frames: digits, colon, minus');
+  Check((CharacterFrame(' 1:05', 1) = 12) and (CharacterFrame(' 1:05', 9) = 12), 'blank for spaces and past the end');
+end;
+
 procedure TestTouch;
 var
   V: TVector2;
@@ -1249,6 +1261,7 @@ begin
   TestTouch;
   TestCurrents;
   TestGibs;
+  TestClock;
   TestRecord;
   TestGun;
   TestMonsterAttacks;

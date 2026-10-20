@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Clocks and displays: `func_clock` (count up, count down or the time of day, once a second, firing its `pathtarget` when the time is up), `target_string` and `target_character` (digit brushes showing 0-9, `-` and `:` through their texture frame), like the full game's countdowns.
+
 ## v0.5.0 — 2026-10-19
 
 Quake 2 gibs, rotating skies, currents and conveyor belts, and brush textures that animate like the original. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.

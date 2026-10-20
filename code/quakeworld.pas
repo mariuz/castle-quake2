@@ -99,6 +99,19 @@ type
       EndTime, NextShove, NextSound: Single;
     end;
     FPlayerGravity, FBaseGravity: Single;
+    { func_clock timers (Health counts, Wait is the end; NextThink < 0: off) }
+    FClocks: array of record
+      Entity, Display: TQuakeEntity;
+      Health, Wait: Integer;
+      NextThink: Single;
+      Activated: Boolean;
+    end;
+    FLastString: String;
+    procedure ResetClock(const I: Integer);
+    procedure ClockThink(const I: Integer);
+    procedure UpdateClocks;
+    { target_string_use: write the message on the team's target_characters }
+    procedure TargetStringUse(const Ent: TQuakeEntity);
     procedure UpdateEarthquakes;
     { Particles.GibTrace: gibs against the map's brushes and movers }
     function GibTraceMap(const Start, Stop: TVector3; out EndPos, Normal: TVector3): Boolean;
@@ -234,6 +247,8 @@ type
     procedure SpawnEntity(const Ent: TQuakeEntity);
     { Active target_earthquake shakes }
     function EarthquakeCount: Integer;
+    { Last text a target_string showed (for the V log) }
+    property LastString: String read FLastString;
     { Gravity multiplier set by trigger_gravity (1 = normal) }
     property PlayerGravity: Single read FPlayerGravity;
 
@@ -298,7 +313,38 @@ type
     property Bsp: TQuakeBsp read FBsp;
   end;
 
+{ func_clock_format_countdown: style 0 "%2i", 1 "%2i:%2i", 2 "%2i:%2i:%2i"
+  (minutes / seconds zero-padded) }
+function ClockText(const Style, Value: Integer): String;
+{ target_string_use: the frame of the target_character with this "count"
+  (1-based position): 0..9 digits, 10 '-', 11 ':', 12 blank }
+function CharacterFrame(const Msg: String; const Count: Integer): Integer;
+
 implementation
+
+function ClockText(const Style, Value: Integer): String;
+begin
+  case Style of
+    0: Result := Format('%2d', [Value]);
+    1: Result := Format('%2d:%.2d', [Value div 60, Value mod 60]);
+    else Result := Format('%2d:%.2d:%.2d', [Value div 3600, (Value mod 3600) div 60, Value mod 60]);
+  end;
+end;
+
+function CharacterFrame(const Msg: String; const Count: Integer): Integer;
+var
+  C: Char;
+begin
+  if (Count < 1) or (Count > Length(Msg)) then
+    Exit(12);
+  C := Msg[Count];
+  case C of
+    '0'..'9': Result := Ord(C) - Ord('0');
+    '-': Result := 10;
+    ':': Result := 11;
+    else Result := 12;
+  end;
+end;
 
 const
   SPAWNFLAG_NOT_DEATHMATCH = 2048;
@@ -669,6 +715,19 @@ begin
       WritelnLog('QuakeWorld', 'Cross-level target will fire "%s"', [Ent.Target]);
     end;
   end else
+  if CName = 'func_clock' then
+  begin
+    { SP_func_clock: TIMER_UP 1 (default an hour), TIMER_DOWN 2, START_OFF 4,
+      MULTI_USE 8 }
+    SetLength(FClocks, Length(FClocks) + 1);
+    FClocks[High(FClocks)].Entity := Ent;
+    FClocks[High(FClocks)].Display := nil;
+    ResetClock(High(FClocks));
+    if (SpawnFlags and 4) <> 0 then
+      FClocks[High(FClocks)].NextThink := -1
+    else
+      FClocks[High(FClocks)].NextThink := FTime + 1;
+  end else
   if CName = 'target_secret' then
     Inc(FStats.TotalSecrets)
   else
@@ -754,6 +813,8 @@ begin
   RestoreRemembered := FLevelExited;
 
   ClearLevel;
+  FClocks := nil;
+  FLastString := '';
   FQuakes := nil;
   { PutClientInServer: every level starts with normal gravity }
   SetPlayerGravity(1);
@@ -988,6 +1049,7 @@ var
   Light: TQuakeEntity;
   NewEnt: TQuakeEntity;
   Box: TBox3D;
+  I: Integer;
 begin
   CName := Ent.ClassName;
   Msg := Ent.MessageText;
@@ -1034,7 +1096,8 @@ begin
     Exit;
   end;
 
-  if (Msg <> '') and (FHud <> nil) and (Copy(CName, 1, 7) = 'target_') then
+  { (target_string's message is its text, not a centerprint) }
+  if (Msg <> '') and (FHud <> nil) and (Copy(CName, 1, 7) = 'target_') and (CName <> 'target_string') then
     FHud.ShowMessage(Msg, 4);
 
   if CName = 'target_changelevel' then
@@ -1165,6 +1228,19 @@ begin
     FQuakes[High(FQuakes)].EndTime := FTime + Ent.GetFloat('count', 5);
     FQuakes[High(FQuakes)].NextShove := FTime;
     FQuakes[High(FQuakes)].NextSound := FTime;
+  end else
+  if CName = 'target_string' then
+    TargetStringUse(Ent)
+  else
+  if CName = 'func_clock' then
+  begin
+    { func_clock_use: start once (again only with MULTI_USE after a reset) }
+    for I := 0 to High(FClocks) do
+      if (FClocks[I].Entity = Ent) and not FClocks[I].Activated then
+      begin
+        FClocks[I].Activated := True;
+        ClockThink(I);
+      end;
   end else
   if CName = 'target_blaster' then
   begin
@@ -1364,6 +1440,118 @@ begin
     EndPos := QuakeToCge(T.EndPos);
     Normal := QuakeToCge(T.Normal) - QuakeToCge(TVector3.Zero);
   end;
+end;
+
+procedure TQuakeWorld.ResetClock(const I: Integer);
+var
+  Flags, Count: Integer;
+begin
+  { func_clock_reset }
+  Flags := FClocks[I].Entity.SpawnFlags;
+  Count := FClocks[I].Entity.GetInt('count', 0);
+  if ((Flags and 1) <> 0) and (Count = 0) then
+    Count := 60 * 60;
+  FClocks[I].Activated := False;
+  if (Flags and 1) <> 0 then
+  begin
+    FClocks[I].Health := 0;
+    FClocks[I].Wait := Count;
+  end else
+  if (Flags and 2) <> 0 then
+  begin
+    FClocks[I].Health := Count;
+    FClocks[I].Wait := 0;
+  end;
+end;
+
+procedure TQuakeWorld.ClockThink(const I: Integer);
+var
+  Ent: TQuakeEntity;
+  Flags, Style: Integer;
+  Text: String;
+  List: TQuakeEntityList;
+  H, M, Sec, MSec: Word;
+begin
+  { func_clock_think, once a second }
+  Ent := FClocks[I].Entity;
+  Flags := Ent.SpawnFlags;
+  Style := Ent.GetInt('style', 0);
+  if FClocks[I].Display = nil then
+  begin
+    List := FBsp.FindByTargetName(Ent.Target);
+    try
+      if List.Count > 0 then
+        FClocks[I].Display := List[0];
+    finally
+      List.Free;
+    end;
+    if FClocks[I].Display = nil then
+    begin
+      FClocks[I].NextThink := -1;
+      Exit;
+    end;
+  end;
+  if (Flags and 1) <> 0 then
+  begin
+    Text := ClockText(Style, FClocks[I].Health);
+    Inc(FClocks[I].Health);
+  end else
+  if (Flags and 2) <> 0 then
+  begin
+    Text := ClockText(Style, FClocks[I].Health);
+    Dec(FClocks[I].Health);
+  end else
+  begin
+    { The time of day }
+    DecodeTime(Now, H, M, Sec, MSec);
+    Text := ClockText(2, H * 3600 + M * 60 + Sec);
+  end;
+  FClocks[I].Display.SetField('message', Text);
+  TargetStringUse(FClocks[I].Display);
+  FClocks[I].NextThink := FTime + 1;
+  if (((Flags and 1) <> 0) and (FClocks[I].Health > FClocks[I].Wait)) or
+     (((Flags and 2) <> 0) and (FClocks[I].Health < FClocks[I].Wait)) then
+  begin
+    { Time is up: fire the pathtarget }
+    if Ent.GetField('pathtarget') <> '' then
+    begin
+      WritelnLog('QuakeWorld', 'func_clock fires "%s"', [Ent.GetField('pathtarget')]);
+      UseTargets(Ent.GetField('pathtarget'));
+    end;
+    if (Flags and 8) = 0 then
+    begin
+      FClocks[I].NextThink := -1;
+      Exit;
+    end;
+    ResetClock(I);
+    if (Flags and 4) <> 0 then
+      FClocks[I].NextThink := -1;
+  end;
+end;
+
+procedure TQuakeWorld.UpdateClocks;
+var
+  I: Integer;
+begin
+  for I := 0 to High(FClocks) do
+    if (FClocks[I].NextThink >= 0) and (FTime >= FClocks[I].NextThink) then
+      ClockThink(I);
+end;
+
+procedure TQuakeWorld.TargetStringUse(const Ent: TQuakeEntity);
+var
+  Mover: TQuakeMover;
+  Team, Msg: String;
+begin
+  Team := Ent.GetField('team');
+  Msg := Ent.MessageText;
+  FLastString := Msg;
+  if Team = '' then
+    Exit;
+  for Mover in FGeometry.Movers do
+    if (Mover.Entity.ClassName = 'target_character') and (Mover.Entity.GetField('team') = Team) and
+       (Mover.Entity.GetInt('count', 0) > 0) then
+      Mover.CharFrame := CharacterFrame(Msg, Mover.Entity.GetInt('count', 0));
 end;
 
 procedure TQuakeWorld.UpdateEarthquakes;
@@ -2550,6 +2738,7 @@ begin
   UpdateGun(SecondsPassed);
   UpdateProjectiles(SecondsPassed);
   UpdateFallingProps(SecondsPassed);
+  UpdateClocks;
   FMap.UpdateSkyRotation(FStats.LevelTime);
   UpdateEarthquakes;
   AddProjectileLights;

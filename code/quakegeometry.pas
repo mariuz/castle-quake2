@@ -172,6 +172,9 @@ type
     BlockedTime: Single;
     { A button that has been pressed (cycles its textures from then on) }
     ButtonUsed: Boolean;
+    { target_character: the frame set by its target_string (0..9 digits,
+      10 '-', 11 ':', 12 blank); -1 for other movers }
+    CharFrame: Integer;
     constructor CreateMover(const AGeometry: TQuakeGeometry; const AEntity: TQuakeEntity;
       const AModelIndex: Integer);
     destructor Destroy; override;
@@ -377,6 +380,9 @@ const
 
 function IsVisibleBrushClass(const CName: String): Boolean;
 begin
+  { target_character: a digit of a target_string display }
+  if CName = 'target_character' then
+    Exit(True);
   Result := (Copy(CName, 1, 5) = 'func_') and (CName <> 'func_areaportal') and
     (CName <> 'func_clock') and (CName <> 'func_timer') and (CName <> 'func_group') and
     (CName <> 'func_killbox');
@@ -803,6 +809,8 @@ var
   Mode, Flags, AutoAnim: Integer;
   CName: String;
 begin
+  if CharFrame >= 0 then
+    Exit(CharFrame);
   Mode := AnimStatic;
   Flags := Entity.SpawnFlags;
   CName := Entity.ClassName;
@@ -854,6 +862,11 @@ var
   SpawnFlags: Integer;
 begin
   inherited Create(nil);
+  { SP_target_character: blank until its target_string writes it }
+  if AEntity.ClassName = 'target_character' then
+    CharFrame := 12
+  else
+    CharFrame := -1;
   Geometry := AGeometry;
   Entity := AEntity;
   ModelIndex := AModelIndex;
