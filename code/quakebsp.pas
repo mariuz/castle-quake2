@@ -217,6 +217,14 @@ type
   TBSPModelArray = array of TBSPModel;
   TFaceExtentsArray = array of TQuakeFaceExtents;
 
+  { Lightmap samples at a point, one per light style of the face hit
+    (R_LightPoint before the styles' values scale them) }
+  TLightPointSamples = record
+    Count: Integer;
+    Styles: array[0..3] of Byte;
+    Colors: array[0..3] of TVector3;
+  end;
+
   { Loaded Quake 2 BSP map }
   TQuakeBsp = class
   private
@@ -259,7 +267,7 @@ type
     procedure LoadLadderBrushes(const Data: PByte; const Hdr: Pointer);
     procedure ComputeExtents;
     function RecursiveLightPoint(const NodeIdx: Integer; const Start, Stop: TVector3;
-      out Color: TVector3): Integer;
+      out Samples: TLightPointSamples): Integer;
   public
     constructor Create;
     destructor Destroy; override;
@@ -286,6 +294,9 @@ type
     { Sample the baked lightmap below a point, like Quake 2's R_LightPoint.
       Returns 0..1 RGB (unmodulated); False when nothing below was found. }
     function LightPoint(const P: TVector3; out Color: TVector3): Boolean;
+    { Every light style's sample there (Quake 2 adds them, each scaled by
+      the style's current value: TQuakeLighting.SampleLight) }
+    function LightPointStyles(const P: TVector3; out Samples: TLightPointSamples): Boolean;
 
     { Contents (CONTENTS_* bits) of the BSP leaf containing a point
       (Quake coordinates), like Quake 2's CM_PointContents for the world. }
@@ -823,7 +834,7 @@ begin
 end;
 
 function TQuakeBsp.RecursiveLightPoint(const NodeIdx: Integer; const Start, Stop: TVector3;
-  out Color: TVector3): Integer;
+  out Samples: TLightPointSamples): Integer;
 var
   Node: TBSPNode;
   Plane: TBSPPlane;
@@ -831,9 +842,9 @@ var
   Side, I, FaceIdx, DS, DT, Ofs: Integer;
   Mid: TVector3;
   Ext: TQuakeFaceExtents;
-  Ti: Integer;
+  Ti, Block, M: Integer;
 begin
-  Color := Vector3(0, 0, 0);
+  Samples := Default(TLightPointSamples);
   if NodeIdx < 0 then
     Exit(-1); { reached a leaf }
 
@@ -844,13 +855,13 @@ begin
   Side := Ord(Front < 0);
 
   if (Back < 0) = (Side = 1) then
-    Exit(RecursiveLightPoint(Node.Children[Side], Start, Stop, Color));
+    Exit(RecursiveLightPoint(Node.Children[Side], Start, Stop, Samples));
 
   Frac := Front / (Front - Back);
   Mid := Start + (Stop - Start) * Frac;
 
   { Go down front side }
-  Result := RecursiveLightPoint(Node.Children[Side], Start, Mid, Color);
+  Result := RecursiveLightPoint(Node.Children[Side], Start, Mid, Samples);
   if Result >= 0 then
     Exit;
 
@@ -872,22 +883,47 @@ begin
       Continue;
     if FFaces[FaceIdx].LightmapOffset < 0 then
       Exit(0);
+    { One lightmap block per style of the face, one after another }
     Ofs := FFaces[FaceIdx].LightmapOffset + 3 * ((DT shr 4) * Ext.LightmapWidth + (DS shr 4));
-    if Ofs + 2 < Length(FLightmaps) then
-      Color := Vector3(FLightmaps[Ofs], FLightmaps[Ofs + 1], FLightmaps[Ofs + 2]) / 255.0;
+    Block := 3 * Ext.LightmapWidth * Ext.LightmapHeight;
+    for M := 0 to 3 do
+    begin
+      if FFaces[FaceIdx].Styles[M] = 255 then
+        Break;
+      if Ofs + 2 >= Length(FLightmaps) then
+        Break;
+      Samples.Styles[M] := FFaces[FaceIdx].Styles[M];
+      Samples.Colors[M] := Vector3(FLightmaps[Ofs], FLightmaps[Ofs + 1], FLightmaps[Ofs + 2]) / 255.0;
+      Samples.Count := M + 1;
+      Ofs := Ofs + Block;
+    end;
     Exit(1);
   end;
 
   { Go down back side }
-  Result := RecursiveLightPoint(Node.Children[1 - Side], Mid, Stop, Color);
+  Result := RecursiveLightPoint(Node.Children[1 - Side], Mid, Stop, Samples);
 end;
 
 function TQuakeBsp.LightPoint(const P: TVector3; out Color: TVector3): Boolean;
+var
+  Samples: TLightPointSamples;
 begin
-  Color := Vector3(0.5, 0.5, 0.5);
+  Result := LightPointStyles(P, Samples);
+  if not Result then
+    Color := Vector3(0.5, 0.5, 0.5)
+  else
+  if Samples.Count > 0 then
+    Color := Samples.Colors[0]
+  else
+    Color := TVector3.Zero; { a face without a lightmap }
+end;
+
+function TQuakeBsp.LightPointStyles(const P: TVector3; out Samples: TLightPointSamples): Boolean;
+begin
+  Samples := Default(TLightPointSamples);
   if (Length(FNodes) = 0) or (Length(FModels) = 0) or (Length(FLightmaps) = 0) then
     Exit(False);
-  Result := RecursiveLightPoint(FModels[0].HeadNode, P, P - Vector3(0, 0, 2048), Color) >= 0;
+  Result := RecursiveLightPoint(FModels[0].HeadNode, P, P - Vector3(0, 0, 2048), Samples) >= 0;
 end;
 
 function TQuakeBsp.LeafBrush(const Index: Integer): Integer;

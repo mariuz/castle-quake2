@@ -73,6 +73,8 @@ type
     Origin: TVector3;
     RotationAngle: Single;
     Collected: Boolean;
+    { Re-light the model 10 times a second (light styles flicker) }
+    LightTimer: Single;
     constructor CreatePickup(const AParent: TCastleTransform; const ADef: PQuakeItemDef;
       const AEntity: TQuakeEntity; const Pos: TVector3);
     destructor Destroy; override;
@@ -379,6 +381,8 @@ type
     { Looping frame range (black hole, easter tank / chick), 10 frames a second }
     AnimFirst, AnimLast: Integer;
     AnimTime: Single;
+    { Re-light the model 10 times a second (light styles flicker) }
+    LightTimer: Single;
     constructor CreateProp(const AParent: TCastleTransform; const AKind: TPropKind;
       const AEntity: TQuakeEntity);
     destructor Destroy; override;
@@ -853,6 +857,12 @@ begin
   { Quake 2 items rotate (EF_ROTATE) at 180 degrees per second }
   RotationAngle := FloatModulo(RotationAngle + 180 * SecondsPassed, 360);
   Transform.Rotation := Vector4(0, 1, 0, DegToRad(RotationAngle));
+  LightTimer := LightTimer - SecondsPassed;
+  if (LightTimer <= 0) and (Model <> nil) and Transform.Visible then
+  begin
+    LightTimer := 0.1;
+    Model.SetTint(Lighting.SampleLight(Transform.Translation + Vector3(0, 8, 0)));
+  end;
 end;
 
 { TQuakeMonster }
@@ -1464,7 +1474,8 @@ begin
     FLightTimer := FLightTimer - SecondsPassed;
     if FLightTimer <= 0 then
     begin
-      FLightTimer := 0.25;
+      { 10 times a second, like Quake 2 relights entities every frame }
+      FLightTimer := 0.1;
       Model.SetTint(Lighting.SampleLight(Transform.Translation));
     end;
     { M_SetEffects: green shell while the power armor is absorbing }
@@ -2163,6 +2174,12 @@ var
 begin
   if Destroyed then
     Exit;
+  LightTimer := LightTimer - SecondsPassed;
+  if (LightTimer <= 0) and (Model <> nil) and Transform.Exists and Transform.Visible then
+  begin
+    LightTimer := 0.1;
+    Model.SetTint(Lighting.SampleLight(Transform.Translation + Vector3(0, 8, 0)));
+  end;
   if (Model <> nil) and (Kind in [pkBanner, pkSatelliteDish]) then
     Model.Update(SecondsPassed);
   if (Model <> nil) and (AnimFirst >= 0) and (AnimLast > AnimFirst) then

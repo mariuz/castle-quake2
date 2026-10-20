@@ -242,11 +242,19 @@ function TQuakeLighting.SampleLight(const CgePos: TVector3): TVector3;
 var
   C: TVector3;
   L: TQuakeDynLight;
+  Samples: TLightPointSamples;
+  I: Integer;
 begin
-  if (FBsp <> nil) and FBsp.LightPoint(CgeToQuake(CgePos), C) then
-    { Same 2x "overbright" factor as the world lightmaps }
-    Result := C * 2.0
-  else
+  if (FBsp <> nil) and FBsp.LightPointStyles(CgeToQuake(CgePos), Samples) then
+  begin
+    { R_LightPoint: each style's lightmap scaled by its current value (so
+      models flicker and switch with the lights), with the same 2x
+      "overbright" factor as the world lightmaps }
+    C := TVector3.Zero;
+    for I := 0 to Samples.Count - 1 do
+      C := C + Samples.Colors[I] * StyleValue(Samples.Styles[I]);
+    Result := C * 2.0;
+  end else
     Result := Vector3(1, 1, 1);
 
   { Never fully black, so silhouettes stay readable }

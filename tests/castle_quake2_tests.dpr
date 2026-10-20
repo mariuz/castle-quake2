@@ -1094,6 +1094,69 @@ begin
   Check((CharacterFrame(' 1:05', 1) = 12) and (CharacterFrame(' 1:05', 9) = 12), 'blank for spaces and past the end');
 end;
 
+procedure TestModelLightStyles;
+var
+  Bsp: TQuakeBsp;
+  Samples: TLightPointSamples;
+  P, Found: TVector3;
+  X, Y, Z, K, Style: Integer;
+  Lit, Dark: TVector3;
+begin
+  Bsp := TQuakeBsp.Create;
+  try
+    if not Bsp.LoadFromPak('maps/demo1.bsp') then
+    begin
+      Check(False, 'load demo1 for light styles');
+      Exit;
+    end;
+    { A point whose floor has a light style other than 0, with some light }
+    Style := -1;
+    Found := TVector3.Zero;
+    X := Trunc(Bsp.Models[0].Mins.X);
+    while (X < Bsp.Models[0].Maxs.X) and (Style < 0) do
+    begin
+      Y := Trunc(Bsp.Models[0].Mins.Y);
+      while (Y < Bsp.Models[0].Maxs.Y) and (Style < 0) do
+      begin
+        Z := Trunc(Bsp.Models[0].Mins.Z);
+        while (Z < Bsp.Models[0].Maxs.Z) and (Style < 0) do
+        begin
+          P := Vector3(X, Y, Z);
+          if Bsp.LightPointStyles(P, Samples) then
+            for K := 1 to Samples.Count - 1 do
+              if (Samples.Styles[K] <> 0) and (Samples.Colors[K].Length > 0.05) then
+              begin
+                Style := Samples.Styles[K];
+                Found := P;
+                Break;
+              end;
+          Z := Z + 48;
+        end;
+        Y := Y + 48;
+      end;
+      X := X + 48;
+    end;
+    Check(Style > 0, 'demo1 has floors lit by a second light style');
+    if Style <= 0 then
+      Exit;
+    Lighting.SetMap(Bsp);
+    try
+      Lighting.Update(0.1);
+      Lit := Lighting.SampleLight(QuakeToCge(Found));
+      { Switch that style off ('a' = 0): models there get darker (R_LightPoint) }
+      Lighting.SetStyle(Style, 'a');
+      Lighting.Update(0.1);
+      Dark := Lighting.SampleLight(QuakeToCge(Found));
+      Check((Dark.X + Dark.Y + Dark.Z) < (Lit.X + Lit.Y + Lit.Z) - 0.05,
+        Format('a model under light style %d darkens when it is switched off', [Style]));
+    finally
+      Lighting.SetMap(nil);
+    end;
+  finally
+    Bsp.Free;
+  end;
+end;
+
 procedure TestTouch;
 var
   V: TVector2;
@@ -1262,6 +1325,7 @@ begin
   TestCurrents;
   TestGibs;
   TestClock;
+  TestModelLightStyles;
   TestRecord;
   TestGun;
   TestMonsterAttacks;
