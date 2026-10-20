@@ -107,9 +107,13 @@ type
       Activated: Boolean;
     end;
     FLastString: String;
+    { Medics look for corpses to revive once a second (medic_FindDeadMonster) }
+    FMedicTimer: Single;
     procedure ResetClock(const I: Integer);
     procedure ClockThink(const I: Integer);
     procedure UpdateClocks;
+    procedure UpdateMedics(const SecondsPassed: Single);
+    procedure MonsterRevived(const Monster: TQuakeMonster);
     { target_string_use: write the message on the team's target_characters }
     procedure TargetStringUse(const Ent: TQuakeEntity);
     procedure UpdateEarthquakes;
@@ -611,6 +615,7 @@ begin
     Monster.OnFoundTarget := @MonsterFoundTarget;
     Monster.OnPickTarget := @PickTarget;
     Monster.OnUseTargets := @UseTargets;
+    Monster.OnRevived := @MonsterRevived;
     Monster.ResolveTargets;
     FMonsters.Add(Monster);
     Inc(FStats.TotalKills);
@@ -1527,6 +1532,44 @@ begin
     if (Flags and 4) <> 0 then
       FClocks[I].NextThink := -1;
   end;
+end;
+
+procedure TQuakeWorld.UpdateMedics(const SecondsPassed: Single);
+var
+  Medic, M, Best: TQuakeMonster;
+begin
+  FMedicTimer := FMedicTimer - SecondsPassed;
+  if FMedicTimer > 0 then
+    Exit;
+  FMedicTimer := 1;
+  for Medic in FMonsters do
+  begin
+    if (not Medic.IsMedic) or (not Medic.IsAlive) or Medic.Dormant or (Medic.HealTarget <> nil) then
+      Continue;
+    { medic_FindDeadMonster: a visible, finished corpse within 1024 units,
+      not claimed by another medic, the one with the most max health }
+    Best := nil;
+    for M in FMonsters do
+      if (M <> Medic) and (not M.IsAlive) and (M.State = msDead) and (not M.Gibbed) and
+         (not M.Dormant) and M.Transform.Exists and (M.Healer = nil) and
+         (PointsDistance(M.Transform.Translation, Medic.Transform.Translation) <= 1024) and
+         Medic.HasLineOfSight(M.Transform.Translation + Vector3(0, 8, 0)) and
+         ((Best = nil) or (M.Def^.Health > Best.Def^.Health)) then
+        Best := M;
+    if Best <> nil then
+    begin
+      Medic.HealTarget := Best;
+      Medic.HealTime := 0;
+      Best.Healer := Medic;
+      WritelnLog('QuakeWorld', '%s goes to revive %s', [Medic.Transform.Name, Best.Transform.Name]);
+    end;
+  end;
+end;
+
+procedure TQuakeWorld.MonsterRevived(const Monster: TQuakeMonster);
+begin
+  { monster_start counts the monster again }
+  Inc(FStats.TotalKills);
 end;
 
 procedure TQuakeWorld.UpdateClocks;
@@ -2739,6 +2782,7 @@ begin
   UpdateProjectiles(SecondsPassed);
   UpdateFallingProps(SecondsPassed);
   UpdateClocks;
+  UpdateMedics(SecondsPassed);
   FMap.UpdateSkyRotation(FStats.LevelTime);
   UpdateEarthquakes;
   AddProjectileLights;

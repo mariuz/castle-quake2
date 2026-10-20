@@ -104,7 +104,7 @@ begin
   if FindMonsterDef(CName) <> nil then
   begin
     if CName = 'monster_medic' then
-      Note := 'no revive of dead monsters'
+      Note := 'revives dead monsters; generic attack (no attack frames table)'
     else
     if (CName = 'monster_supertank') or (CName = 'monster_boss2') or (CName = 'monster_jorg') or
        (CName = 'monster_makron') then

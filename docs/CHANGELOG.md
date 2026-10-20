@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Medics revive dead monsters (`m_medic.c`): once a second a medic looks for a corpse it can see within 1024 units (the one with the most health), walks to it, uses its healing cable for a second and the monster gets up with full health, after the player; it counts towards the level's monsters again. Tested on the demo with a medic without its model (the demo has none).
+
 ## v0.6.0 — 2026-10-20
 
 Clocks and digit displays from the full game, and models lit by the flickering and switchable lights around them. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.

@@ -14,7 +14,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Sprites | SP2 (BFG, explosions) | SP2 loader, BFG ball / explosion sprites | Other sprite users (bubbles, flashes). |
 | Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove as `TQuakePlayerMovement`: the 32 × 32 × 56 box traced against the BSP brushes, movers and monsters (`CM_BoxTrace`, `PM_StepSlideMove`), movers carry and push the player, water currents and conveyor belts (`PM_AddCurrents`) | — |
 | Weapons | 10 + hand grenades, frame-timed | 10 + hand grenades on Quake 2's gun frames (`Weapon_Generic`: fire frames, refire, put away / raise, chaingun spin, BFG delay, grenade cook) | — |
-| Monsters | Full AI (`ai_run`, dodge, ambush, medic revive, bosses), skill levels | Quake 2 perception (`FindTarget`, PHS hearing, group wake, ambush, trigger spawn), player trail pursuit, dodging, attacks on Quake 2's attack frames (demo monsters), `trigger_monsterjump`, patrols, combat points, 19 types tunable in the editor, skill 0–3 | Attack tables for the full game's monsters; medic revive, bosses. |
+| Monsters | Full AI (`ai_run`, dodge, ambush, bosses), skill levels | Quake 2 perception (`FindTarget`, PHS hearing, group wake, ambush, trigger spawn), player trail pursuit, dodging, attacks on Quake 2's attack frames (demo monsters), `trigger_monsterjump`, patrols, combat points, 19 types tunable in the editor, skill 0–3 | Attack tables for the full game's monsters; bosses. |
 | Props / effects | Barrels, banners, ships, lasers, splashes, explosion models | All of these used by the demo maps, plus the full game's `misc_viper` / `misc_bigviper` / `misc_viper_bomb`, `misc_blackhole`, easter-egg poses, `target_blaster`, `target_earthquake` (shakes), `target_spawner`, `func_killbox`, `trigger_gravity` | Turrets. |
 | Level flow | Units, cross-level triggers, help computer, intermission, savegames | All of these (JSON savegames, including projectiles in flight and pending delayed events) | — |
 | Audio | 3D sounds, entity channels, merged loop sounds, CD music | Quake 2 attenuation (incl. `ATTN_STATIC`), `CHAN_*` channels, point sounds that outlive entities, loop mixer (one voice per sound, PVS-checked, `SOUND_LOOPATTENUATE`), 32 sources, OGG tracks, named sounds editable in the editor | Stereo panning curve (OpenAL's, not Quake 2's), `s_volume` style master limiter. |
@@ -167,5 +167,6 @@ Phase 5 is complete; v0.3.0 to v0.6.0 are released. What would help most now, ro
 - [x] `func_clock`, `target_string`, `target_character` (countdowns and clocks on digit brushes)
 - [x] Light styles in the model tint (R_LightPoint over all styles of the face below)
 - [ ] Turrets (`turret_breach` / `turret_base` / `turret_driver`): need full-game maps to test
-- [ ] Attack tables for the full game's monsters, medic revive, bosses (retail PAK)
+- [x] Medic revive (`medic_FindDeadMonster`, healing cable, the corpse gets up after the player); tested with a model-less medic on the demo
+- [ ] Attack tables for the full game's monsters, bosses (retail PAK)
 - [x] Tagged release v0.3.0 with Windows, Linux, Android and Web packages (notes from `docs/CHANGELOG.md`)

@@ -242,6 +242,13 @@ type
     OnFoundTarget: TMonsterAttackEvent;
     OnPickTarget: TPickTargetEvent;
     OnUseTargets: TUseTargetsEvent;
+    { Medic (m_medic.c): the corpse it goes to revive (set by the world's
+      medic_FindDeadMonster), and on a corpse the medic coming for it }
+    HealTarget, Healer: TQuakeMonster;
+    { Seconds of the healing cable so far (revives at 1 s, attack43) }
+    HealTime: Single;
+    { Called on the medic when its patient got up (the world counts it) }
+    OnRevived: TMonsterAttackEvent;
     { Origin in Quake coordinates }
     function Origin: TVector3;
     { The box shots and players collide with (shorter while ducking) }
@@ -258,6 +265,13 @@ type
     procedure TakeDamage(const Dmg: Integer);
     { Throw the class's gibs (or explode) and vanish }
     procedure Gib(const Dmg: Integer);
+    { A medic brought this corpse back: full health, standing, after the
+      player (ED_CallSpawn + FoundTarget) }
+    procedure Revive;
+    { The medic's walk to its patient and the healing cable; False when it
+      has no (valid) patient }
+    function UpdateMedic(const SecondsPassed: Single): Boolean;
+    function IsMedic: Boolean;
     { Part of Dmg the power armor absorbs (and uses up) }
     function AbsorbPowerArmor(const Dmg: Integer): Integer;
     procedure Alert;
@@ -1360,6 +1374,75 @@ begin
   Sounds.PlayAt('sound/weapons/lashit.wav', Transform);
 end;
 
+function TQuakeMonster.IsMedic: Boolean;
+begin
+  Result := Def^.ClassName = 'monster_medic';
+end;
+
+procedure TQuakeMonster.Revive;
+begin
+  Health := Def^.Health;
+  Healer := nil;
+  Gibbed := False;
+  Transform.Exists := True;
+  if Model <> nil then
+    Model.Scene.Collides := True;
+  FDropped := False;
+  SetState(msChase);
+  Alert;
+  WritelnLog('QuakeEntities', '%s revived', [Transform.Name]);
+end;
+
+function TQuakeMonster.UpdateMedic(const SecondsPassed: Single): Boolean;
+var
+  Delta, CorpsePos: TVector3;
+  Dist: Single;
+begin
+  Result := False;
+  if HealTarget = nil then
+    Exit;
+  { The patient got gibbed, revived by someone else or removed }
+  if HealTarget.IsAlive or HealTarget.Gibbed or not HealTarget.Transform.Exists then
+  begin
+    if HealTarget.Healer = Self then
+      HealTarget.Healer := nil;
+    HealTarget := nil;
+    HealTime := 0;
+    Exit;
+  end;
+  Result := True;
+  CorpsePos := HealTarget.Transform.Translation;
+  Delta := CorpsePos - Transform.Translation;
+  Delta.Y := 0;
+  Dist := Delta.Length;
+  FaceTowards(Delta, SecondsPassed);
+  { medic_cable_attack reaches MEDIC_MAX_HEAL_DISTANCE (400); get well inside
+    it, in sight of the corpse }
+  if (Dist > 250) or not SightClear(EyePos, CorpsePos + Vector3(0, 8, 0)) then
+  begin
+    HealTime := 0;
+    if Dist > 1 then
+      Steer(Delta.Normalize, SecondsPassed);
+    StickToFloor(SecondsPassed);
+    Exit;
+  end;
+  SetWalking(False);
+  if HealTime = 0 then
+    Sounds.PlayAt(MonsterSound(Def, 'medatck2'), Transform, 1, 1, chWeapon);
+  HealTime := HealTime + SecondsPassed;
+  { attack33 .. attack43 at 10 frames a second: the patient gets up }
+  if HealTime >= 1.0 then
+  begin
+    Sounds.PlayAt(MonsterSound(Def, 'medatck5'), Transform, 1, 1, chWeapon);
+    HealTarget.Revive;
+    if Assigned(OnRevived) then
+      OnRevived(HealTarget);
+    HealTarget := nil;
+    HealTime := 0;
+  end;
+  StickToFloor(SecondsPassed);
+end;
+
 procedure TQuakeMonster.Gib(const Dmg: Integer);
 var
   G: TMonsterGibs;
@@ -1522,6 +1605,10 @@ begin
         Exit;
       end;
   end;
+
+  { A medic on its way to a corpse (AI_MEDIC) does only that }
+  if UpdateMedic(SecondsPassed) then
+    Exit;
 
   Delta := PlayerPos - Transform.Translation;
   Dist := Delta.Length;

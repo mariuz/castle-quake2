@@ -149,6 +149,10 @@ jobs:
           # func_clock counts down on a target_string (" 0:03" ...) and fires its pathtarget at the end
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/clock --demo 'O:notarget,W:1,O:spawn target_string targetname disp team clk1,O:spawn target_earthquake targetname boom count 1,O:spawn func_clock target disp spawnflags 2 count 3 style 1 pathtarget boom,W:1.3,V,W:4,V,Q' > test_output/clock.log 2>&1
           grep -q 'String: " 0:03"' test_output/clock.log && grep -q 'func_clock fires "boom"' test_output/clock.log && ! grep -q Exception test_output/clock.log || { echo "::error::func_clock / target_string misbehaved (see clock.log)"; exit 1; }
+          # Medic revive (m_medic.c; the demo has no medic model, the logic runs without it): a medic 450 units up a
+          # demo1 corridor walks to a soldier's corpse and brings it back
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/medic --demo 'O:notarget,W:1.5,Y,C:1,G:-904 780 -2,A:90,W:1,O:spawn monster_soldier_light origin "-904 900 -24" angle 270,W:0.3,X,W:0.6,X,W:3,O:spawn monster_medic origin "-904 1350 -24" angle 270,MV:22 -904 1350 -24,W:0.5,V,W:7,V,Q' > test_output/medic.log 2>&1
+          grep -q "monster_medic goes to revive" test_output/medic.log && grep -q "monster_soldier_light revived" test_output/medic.log && ! grep -q Exception test_output/medic.log || { echo "::error::The medic did not revive the soldier (see medic.log)"; exit 1; }
           # Movers push entities: a corpse left under demo1's auto door is gibbed when it closes (SV_Push / door_blocked)
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/doorcorpse --demo "O:notarget,W:1,N:3,W:0.2,X,W:0.6,X,W:0.6,X,W:1.5,G:-1180 1632 -1.97,W:1.5,MV:3 -1112 1632 -23.9,G:-1300 1632 -1.97,W:7,V,Q" > test_output/doorcorpse.log 2>&1
           grep -E "Demo: Monster 3 " test_output/doorcorpse.log | grep -q "health -10[0-9][0-9]" && ! grep -q Exception test_output/doorcorpse.log || { echo "::error::The door did not crush the corpse"; exit 1; }
