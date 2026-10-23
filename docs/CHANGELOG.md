@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Player death like Quake 2's `player_die`: the view drops (eye 8 above the origin), turns to the killer, looks a little up and rolls 40°, and the view weapon goes away; below -40 health the player is gibbed (splat, 4 pieces of meat, the view at floor level). The `kill` command is a suicide at health 0 (no gibs, also in god mode), as in Quake 2.
+
 ## v0.7.0 — 2026-10-23
 
 Medics bring dead monsters back. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.

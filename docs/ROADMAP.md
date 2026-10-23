@@ -166,6 +166,7 @@ Phase 5 is complete; v0.3.0 to v0.7.0 are released. What would help most now, ro
 - [x] Brush entity texture animation like Quake 2 (button frames, ANIMATED spawnflags)
 - [x] `func_clock`, `target_string`, `target_character` (countdowns and clocks on digit brushes)
 - [x] Light styles in the model tint (R_LightPoint over all styles of the face below)
+- [x] Player death view and gibbing (`player_die`, `LookAtKiller`, dead view angles)
 - [ ] Turrets (`turret_breach` / `turret_base` / `turret_driver`): need full-game maps to test
 - [x] Medic revive (`medic_FindDeadMonster`, healing cable, the corpse gets up after the player); tested with a model-less medic on the demo
 - [ ] Attack tables for the full game's monsters, bosses (retail PAK)

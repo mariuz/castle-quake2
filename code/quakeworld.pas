@@ -78,6 +78,11 @@ type
     FTeleportAngle: Single;
     FDead: Boolean;
     FDeadTimer: Single;
+    { How the player died: gibbed (health below -40), and where the killing
+      blow came from (CGE coordinates; the death view turns to it) }
+    FPlayerGibbed: Boolean;
+    FKillerPos: TVector3;
+    FHasKiller: Boolean;
     FRestartPending: Boolean;
     FPainSoundTimer: Single;
     FHurtTimer: Single;
@@ -306,6 +311,12 @@ type
     property TeleportAngle: Single read FTeleportAngle;
     property RestartPending: Boolean read FRestartPending;
     property Dead: Boolean read FDead;
+    property PlayerGibbed: Boolean read FPlayerGibbed;
+    { The killer's position, when the death had one (LookAtKiller) }
+    function KillerPosition(out Pos: TVector3): Boolean;
+    { The "kill" console command: health 0 and player_die (no gibs, also in
+      god mode) }
+    procedure Suicide;
     property Monsters: TQuakeMonsterList read FMonsters;
     function ProjectileCount: Integer;
     function DelayedCount: Integer;
@@ -818,6 +829,10 @@ begin
   RestoreRemembered := FLevelExited;
 
   ClearLevel;
+  FPlayerGibbed := False;
+  FHasKiller := False;
+  if FWeaponTransform <> nil then
+    FWeaponTransform.Exists := True;
   FClocks := nil;
   FLastString := '';
   FQuakes := nil;
@@ -2673,6 +2688,8 @@ begin
 
   if FStats.Health <= 0 then
   begin
+    FKillerPos := FromPos;
+    FHasKiller := PointsDistance(FromPos, FPlayerPos) > 1;
     KillPlayer;
     Exit;
   end;
@@ -2694,13 +2711,50 @@ begin
 end;
 
 procedure TQuakeWorld.KillPlayer;
+var
+  Pieces: array[0..0] of TGibPiece;
+  Org: TVector3;
 begin
   FDead := True;
   FDeadTimer := 3.0;
+  { player_die: below -40 health the body is gibbed (4 meat + the head the
+    view stays in), else the death sound }
+  FPlayerGibbed := FStats.Health < -40;
+  if FPlayerGibbed then
+  begin
+    Sounds.Play('sound/misc/udeath.wav', 1, chBody);
+    Pieces[0].Model := 'models/objects/gibs/sm_meat/tris.md2';
+    Pieces[0].Count := 4;
+    Pieces[0].Metallic := False;
+    Org := FPlayerPos - Vector3(0, PlayerEyeHeight - 24, 0);
+    Particles.ThrowGibs(Org + Vector3(-16, -24, -16), Org + Vector3(16, 32, 16), Pieces, -FStats.Health);
+    WritelnLog('QuakeWorld', 'Player gibbed (health %d)', [FStats.Health]);
+  end else
+  begin
+    Sounds.Play('sound/player/male/death' + IntToStr(1 + Random(4)) + '.wav', 1, chVoice);
+    WritelnLog('QuakeWorld', 'Player died (health %d)', [FStats.Health]);
+  end;
   FStats.Health := Min(FStats.Health, 0);
-  Sounds.Play('sound/player/male/death' + IntToStr(1 + Random(4)) + '.wav', 1, chVoice);
+  { ps.gunindex = 0: no view weapon while dead }
+  if FWeaponTransform <> nil then
+    FWeaponTransform.Exists := False;
   if FHud <> nil then
     FHud.ShowMessage('You died. Restarting level...', 3);
+end;
+
+function TQuakeWorld.KillerPosition(out Pos: TVector3): Boolean;
+begin
+  Pos := FKillerPos;
+  Result := FDead and FHasKiller;
+end;
+
+procedure TQuakeWorld.Suicide;
+begin
+  if FDead then
+    Exit;
+  FStats.Health := 0;
+  FHasKiller := False;
+  KillPlayer;
 end;
 
 procedure TQuakeWorld.Update(const SecondsPassed: Single; const PlayerPos, PlayerDir: TVector3);

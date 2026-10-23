@@ -67,6 +67,11 @@ type
     FTouchPos: array[0..4] of TVector2;
     { Monster placed by MV: always in the V log }
     FWatchedMonster: Integer;
+    { Death view: seconds since death (-1 alive), the eye then and the yaw
+      it turns to }
+    FDeathTime: Single;
+    FDeathFrom: TVector3;
+    FDeathYawDir: TVector3;
     { Script clock for IN commands: seconds since the script (or its last L) started }
     FDemoClock: Single;
     { Held by the last IN command }
@@ -89,6 +94,7 @@ type
     procedure DoToggleHelp;
     { Look along Quake yaw / pitch (pitch positive looks down), keeping the velocity }
     procedure SetLook(const YawDeg, PitchDeg: Single);
+    procedure UpdateDeathView(const SecondsPassed: Single);
     function WantMouseLook: Boolean;
     procedure TouchUse(Sender: TObject);
     procedure TouchNextWeapon(Sender: TObject);
@@ -146,6 +152,7 @@ begin
   DesignUrl := 'castle-data:/gameviewplay.castle-user-interface';
   FCameraMode := cmFirstPerson;
   FWatchedMonster := -1;
+  FDeathTime := -1;
   FDemoCommands := TStringList.Create;
 end;
 
@@ -1186,6 +1193,47 @@ begin
   FRecorder.Sample(Input);
 end;
 
+procedure TViewPlay.UpdateDeathView(const SecondsPassed: Single);
+const
+  DropTime = 0.3;
+var
+  Killer, Dir, Up, Pos: TVector3;
+  T, Drop: Single;
+begin
+  if not FWorld.Dead then
+  begin
+    FDeathTime := -1;
+    Exit;
+  end;
+  if FDeathTime < 0 then
+  begin
+    PlayerMovement.ClearViewEffects;
+    FDeathTime := 0;
+    FDeathFrom := MainViewport.Camera.Translation;
+    { LookAtKiller: face where the killing blow came from }
+    FDeathYawDir := MainViewport.Camera.Direction;
+    if FWorld.KillerPosition(Killer) then
+      FDeathYawDir := Killer - FDeathFrom;
+    FDeathYawDir.Y := 0;
+    if FDeathYawDir.IsZero then
+      FDeathYawDir := Vector3(1, 0, 0);
+    FDeathYawDir := FDeathYawDir.Normalize;
+  end;
+  FDeathTime := FDeathTime + SecondsPassed;
+  T := Min(1, FDeathTime / DropTime);
+  { The eye goes from origin + 22 to origin + 8 (PM_DEAD); a gibbed
+    player's head lies on the floor (PM_GIB: eye at floor + 8) }
+  if FWorld.PlayerGibbed then
+    Drop := (PlayerEyeHeight - 24) + 24 - 8
+  else
+    Drop := (PlayerEyeHeight - 24) - 8;
+  Pos := FDeathFrom - Vector3(0, Drop * T, 0);
+  { Dead view angles: pitch -15 (a bit up), roll 40 }
+  Dir := FDeathYawDir * Cos(DegToRad(15 * T)) + Vector3(0, Sin(DegToRad(15 * T)), 0);
+  Up := RotatePointAroundAxisRad(DegToRad(40 * T), Vector3(0, 1, 0), Dir.Normalize);
+  MainViewport.Camera.SetWorldView(Pos, Dir.Normalize, Up);
+end;
+
 procedure TViewPlay.Update(const SecondsPassed: Single; var HandleInput: Boolean);
 var
   Firing: Boolean;
@@ -1222,6 +1270,7 @@ begin
   FWorld.CullEntities;
   FWorld.UpdateLoopSounds(MainViewport.Camera.Translation);
   WalkNavigation.Exists := not FWorld.Dead;
+  UpdateDeathView(SecondsPassed);
 
   if FWorld.TeleportPending then
   begin
@@ -1570,7 +1619,7 @@ begin
       SetCameraMode(cmFirstPerson);
   end else
   if Cmd = 'kill' then
-    FWorld.DamagePlayer(1000, MainViewport.Camera.Translation)
+    FWorld.Suicide
   else
   if (Cmd = 'quit') or (Cmd = 'exit') then
     Application.Terminate
