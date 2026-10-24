@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.9.0 — 2026-10-24
+
+Random levels and a level editor, compiled into Quake 2 maps while the game runs; monsters walk and run at their Quake 2 pace. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - Random levels: *Random Level* in the menu or `randmap [seed]` makes a level from a seed, following classic Quake / Doom design. Rooms of varied size are linked into loops (more than one way around). Low corridors climb in steps between high rooms. Big rooms get pillars for cover and raised platforms, and some rooms open to the sky. Monsters get more numerous and tougher further in, some in ambush and some only on harder skills. Weapons come in order of strength, with ammo after them, health and armor after the fights, and barrels. There is a secret room with a reward, and an exit to the next random level. The same seed always makes the same level.
 - Level editor: *Level Editor* in the menu (or `editor`) to paint levels from above. You can paint walls and floors, set floor and ceiling heights, sky and texture themes, and place the player start, lights, monsters, weapons, ammo, items, barrels and the exit. It has undo, can generate a random level to start from, and saves and loads levels. *Play* compiles the level into a Quake 2 map and starts it at once; *Export* saves the `.bsp`. In the Castle Game Engine editor, `TQuakeMap.LevelUrl` shows a saved level and `MapName` `rand<seed>` a random one, and the editor is a component too (`TQuakeLevelEditor`).
