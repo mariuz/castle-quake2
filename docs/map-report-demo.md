@@ -8,9 +8,9 @@ are checked against what the game handles (`QuakeMapReport.EntitySupport`).
 
 | Map | Loaded | Load time | Faces | Entities | Monsters | Items | Partial | Unsupported |
 | :--- | :---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| demo1 | yes | 0.38 s | 7905 | 652 | 21 | 35 | 0 | 0 |
-| demo2 | yes | 0.49 s | 9228 | 673 | 43 | 60 | 4 | 0 |
-| demo3 | yes | 0.50 s | 9263 | 885 | 40 | 73 | 12 | 0 |
+| demo1 | yes | 0.33 s | 7905 | 652 | 21 | 35 | 0 | 0 |
+| demo2 | yes | 0.45 s | 9228 | 673 | 43 | 60 | 0 | 0 |
+| demo3 | yes | 0.48 s | 9263 | 885 | 40 | 73 | 0 | 0 |
 
 ## Unsupported classnames
 
@@ -18,9 +18,4 @@ None.
 
 ## Partially supported classnames
 
-| Classname | Entities | Maps | Note |
-| :--- | ---: | :--- | :--- |
-| `monster_berserk` | 5 | demo3 | Quake 2 attack frames, generic movement (no special moves) |
-| `monster_flyer` | 6 | demo2, demo3 | Quake 2 attack frames, generic movement (no special moves) |
-| `monster_parasite` | 4 | demo3 | Quake 2 attack frames, generic movement (no special moves) |
-| `monster_tank` | 1 | demo2 | Quake 2 attack frames, generic movement (no special moves) |
+None.
