@@ -33,11 +33,11 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - **Reach**: options menu with key rebinding, skill levels, gamepad, touch controls, Android APK and WebAssembly builds.
 - **Engineering**: CI on Windows / Linux / Android / Web, autotests under Mesa (keyboard, virtual gamepad and simulated touch), screenshot references, culling check (vis vs `novis`), map compatibility report, recorded replays, 263 unit checks.
 - **Levels**: random levels from a seed (`QuakeLevelGen`, Quake / Doom layout rules: loops, steps, lifts, doors, pools, an exit switch, pacing) and an in-game level editor (`QuakeLevelEditor`: doors, lifts, switches, water, sky, themes, entities), compiled at runtime into Quake 2 maps (`QuakeBspBuilder`); levels show in the CGE editor through `TQuakeMap`.
-- **Releases**: v0.3.0 to v0.10.0, each with Windows / Linux / Android packages and the browser build ([changelog](CHANGELOG.md)).
+- **Releases**: v0.3.0 to v0.11.0, each with Windows / Linux / Android packages and the browser build ([changelog](CHANGELOG.md)).
 
 ## Next (prioritised)
 
-Phases 1–6 are done as far as the demo data and a headless machine allow; Phase 7 (levels) is in progress; v0.3.0 to v0.10.0 are released. In order of value for effort:
+Phases 1–6 are done as far as the demo data and a headless machine allow; Phase 7 (levels) is in progress; v0.3.0 to v0.11.0 are released. In order of value for effort:
 
 1. **Real visibility for compiled levels** (Phase 7). Generated and edited levels mark everything visible (one shared all-ones PVS row), so the whole level is drawn all the time. A grid PVS (cluster to cluster sight through open cells and door cells, like qvis on the leaf portals) would bring the same culling the original maps get, and allow bigger levels.
 2. **More level content** (Phase 7): more themes (and the full game's textures when a retail PAK is loaded), keys and key doors in the generator (a key hunt as well as the exit switch), teleporters, ladders, slime / lava pools, outdoor terrain with height variation.
