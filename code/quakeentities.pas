@@ -10,7 +10,7 @@ uses
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions, CastleUtils,
   CastleSoundEngine, CastleBehaviors, CastleColors, CastleRenderOptions,
   QuakePak, QuakeBsp, QuakeMd2, QuakeLight, QuakeSound, QuakeHud, QuakeParticles, QuakeSprite, QuakeSettings,
-  QuakeMonsterAttacks, QuakeTrace;
+  QuakeMonsterAttacks, QuakeMonsterMoves, QuakeTrace;
 
 type
   TItemCategory = (icWeapon, icAmmo, icHealth, icArmor, icPowerup, icKey);
@@ -138,6 +138,11 @@ type
     FAttackSeqs: TMonsterAttackSeqs;
     FAttack: TMonsterAttack;
     FAttackFirst: Integer;
+    { Quake 2 walk / run loops (QuakeMonsterMoves) and the one playing }
+    FWalkSeq, FRunSeq: TMonsterMoveSeq;
+    FMove: TMonsterMoveAnim;
+    FMoveFirst: Integer;
+    FMoveRun: Boolean;
     { trigger_monsterjump: flying through the air with this velocity (CGE) }
     FJumping: Boolean;
     FJumpVel: TVector3;
@@ -181,6 +186,8 @@ type
     function TryMove(const Dir: TVector3; const SecondsPassed: Single;
       const SpeedScale: Single = 1): Boolean;
     { Move towards WantDir, detouring around obstacles }
+    { Play the walk / run frames; their distance sets the speed of TryMove }
+    procedure AdvanceMove(const Run: Boolean; const SecondsPassed: Single);
     procedure Steer(const WantDir: TVector3; const SecondsPassed: Single;
       const SpeedScale: Single = 1);
     { Turn (at most 360 degrees per second) to look along Delta }
@@ -906,6 +913,9 @@ begin
   FAttack := TMonsterAttack.Create;
   FAttack.OnFire := @AttackSeqFire;
   FAttackSeqs := MonsterAttackSeqs(Def^.ClassName);
+  FMove := TMonsterMoveAnim.Create;
+  FWalkSeq := MonsterMoveSeq(Def^.ClassName, False);
+  FRunSeq := MonsterMoveSeq(Def^.ClassName, True);
   MonsterBoxSize(Def^.ClassName, BoxMins, BoxMaxs);
   { Quake 2 base game: only the brain has power armor (a power screen) }
   if Def^.ClassName = 'monster_brain' then
@@ -1157,6 +1167,7 @@ begin
   FreeAndNil(Model);
   FreeAndNil(Transform);
   FreeAndNil(FAttack);
+  FreeAndNil(FMove);
   inherited Destroy;
 end;
 
@@ -1215,6 +1226,8 @@ begin
   { Pain, ducking or death interrupt an attack sequence }
   if FAttack <> nil then
     FAttack.Stop;
+  if FMove <> nil then
+    FMove.Stop;
   if Model = nil then
     Exit;
   { The turret driver stands (infantry_stand) until it dies }
@@ -1280,6 +1293,8 @@ begin
   if FWalking = Value then
     Exit;
   FWalking := Value;
+  if (not Value) and (FMove <> nil) then
+    FMove.Stop;
   if Model = nil then
     Exit;
   if Value then
@@ -1321,6 +1336,7 @@ begin
   if DistanceTo(MoveTarget, Delta) > 24 then
   begin
     SetWalking(True);
+    AdvanceMove(False, SecondsPassed);
     FaceTowards(Delta, SecondsPassed);
     Steer(Delta.Normalize, SecondsPassed, 0.4);
     Exit;
@@ -1698,6 +1714,9 @@ begin
   end;
   FWalking := False;
 
+  if State = msChase then
+    AdvanceMove(True, SecondsPassed);
+
   if (GoalEntity <> nil) and (State <> msAttack) then
   begin
     GoToCombatPoint(SecondsPassed);
@@ -1880,6 +1899,33 @@ begin
     end;
 end;
 
+procedure TQuakeMonster.AdvanceMove(const Run: Boolean; const SecondsPassed: Single);
+var
+  Seq: TMonsterMoveSeq;
+  First: Integer;
+begin
+  if Model = nil then
+    Exit;
+  if (not FMove.Active) or (FMoveRun <> Run) then
+  begin
+    if Run then
+      Seq := FRunSeq
+    else
+      Seq := FWalkSeq;
+    First := Model.Model.FrameNames.IndexOf(Seq.FirstFrame);
+    if (Length(Seq.Dists) = 0) or (First < 0) or (First + Length(Seq.Dists) > Model.Model.FrameCount) then
+    begin
+      FMove.Stop;
+      Exit;
+    end;
+    FMoveFirst := First;
+    FMoveRun := Run;
+    FMove.Start(Seq);
+  end else
+    FMove.Update(SecondsPassed);
+  Model.ShowFrames(FMoveFirst + FMove.OldFrame, FMoveFirst + FMove.Frame, FMove.FrameLerp);
+end;
+
 function TQuakeMonster.StartAttackSeq(const Dist: Single): Boolean;
 var
   I, First: Integer;
@@ -1933,11 +1979,17 @@ function TQuakeMonster.TryMove(const Dir: TVector3; const SecondsPassed: Single;
   const SpeedScale: Single): Boolean;
 var
   Probe: TVector3;
-  Above: Single;
+  Above, MoveSpeed: Single;
   Box: TBox3D;
 begin
+  { The distance of the walk / run frame shown (Quake 2 ai_walk / ai_run),
+    else the type's constant speed }
+  if (FMove <> nil) and FMove.Active then
+    MoveSpeed := FMove.Speed
+  else
+    MoveSpeed := Def^.Speed * SpeedScale;
   if Assigned(EntityTrace) then
-    Exit(StepMove(CgeToQuake(Dir * Def^.Speed * SpeedScale * SecondsPassed) - CgeToQuake(TVector3.Zero)));
+    Exit(StepMove(CgeToQuake(Dir * MoveSpeed * SecondsPassed) - CgeToQuake(TVector3.Zero)));
   { Don't walk off ledges higher than 64 units (Quake 2 M_CheckBottom-like) }
   if not Def^.Flying then
   begin
@@ -1948,10 +2000,10 @@ begin
   { The player's box blocks monsters like a solid (Quake 2 SV_movestep) }
   Box := Transform.BoundingBox;
   if (not PlayerBlockBox.IsEmpty) and (not Box.IsEmpty) and
-     Box.Translate(Dir * Def^.Speed * SpeedScale * SecondsPassed).Collision(PlayerBlockBox) and
+     Box.Translate(Dir * MoveSpeed * SecondsPassed).Collision(PlayerBlockBox) and
      not Box.Collision(PlayerBlockBox) then
     Exit(False);
-  Result := Transform.Move(Dir * Def^.Speed * SpeedScale * SecondsPassed, False, True);
+  Result := Transform.Move(Dir * MoveSpeed * SecondsPassed, False, True);
 end;
 
 function TQuakeMonster.PursuitGoal(out Goal: TVector3): Boolean;

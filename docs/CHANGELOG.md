@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Monsters walk and run on Quake 2's animation frames: each frame moves them by its distance from the original game's tables, so their feet keep step and every type has its Quake 2 pace — the tank plods at under half the speed it had (47 units a second), parasites lunge almost twice as fast (254), infantry and berserkers are quicker, flyers slower (100). The demo maps' monsters are now all fully supported in the map report.
+
 ## v0.8.1 — 2026-10-24
 
 Flyers fight up close and the tank picks its attacks like Quake 2. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.

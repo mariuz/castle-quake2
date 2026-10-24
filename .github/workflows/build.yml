@@ -166,6 +166,9 @@ jobs:
           # A flyer next to the player pops its blades and slashes (flyer_melee)
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/flyer --demo 'W:1.5,Y,G:-904 780 -2,A:90,W:0.5,O:spawn monster_flyer origin "-904 840 20" angle 270,W:3,V,Q' > test_output/flyer.log 2>&1
           grep -q "monster_flyer attacks: attak101" test_output/flyer.log && ! grep -q Exception test_output/flyer.log || { echo "::error::The flyer did not slash in melee range (see flyer.log)"; exit 1; }
+          # Quake 2 run frames set the pace: a parasite runs ~254 units a second
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/runpace --demo 'W:1.5,Y,G:-904 780 -2,A:90,W:0.3,O:spawn monster_parasite origin "-904 1350 -24" angle 270,X,W:0.6,V,W:1,V,Q' > test_output/runpace.log 2>&1
+          grep "Demo: Monster 21 monster_parasite" test_output/runpace.log | grep -oE "pos [-0-9.]+ [-0-9.]+" | awk '{ x[NR] = $2; y[NR] = $3 } END { d = sqrt((x[2]-x[1])^2 + (y[2]-y[1])^2); print "parasite ran " d; exit !(NR == 2 && d > 180 && d < 300) }' && ! grep -q Exception test_output/runpace.log || { echo "::error::The parasite did not run at its Quake 2 pace (see runpace.log)"; exit 1; }
           # Movers push entities: a corpse left under demo1's auto door is gibbed when it closes (SV_Push / door_blocked)
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/doorcorpse --demo "O:notarget,W:1,N:3,W:0.2,X,W:0.6,X,W:0.6,X,W:1.5,G:-1180 1632 -1.97,W:1.5,MV:3 -1112 1632 -23.9,G:-1300 1632 -1.97,W:7,V,Q" > test_output/doorcorpse.log 2>&1
           grep -E "Demo: Monster 3 " test_output/doorcorpse.log | grep -q "health -10[0-9][0-9]" && ! grep -q Exception test_output/doorcorpse.log || { echo "::error::The door did not crush the corpse"; exit 1; }

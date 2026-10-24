@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves;
 
 var
   Passed, Failed: Integer;
@@ -1114,6 +1114,66 @@ begin
   Check((CharacterFrame(' 1:05', 1) = 12) and (CharacterFrame(' 1:05', 9) = 12), 'blank for spaces and past the end');
 end;
 
+procedure TestMonsterMoves;
+const
+  MonsterClasses: array[0..8] of String = ('monster_soldier_light', 'monster_soldier', 'monster_soldier_ss',
+    'monster_infantry', 'monster_gunner', 'monster_berserk', 'monster_flyer', 'monster_parasite',
+    'monster_tank');
+var
+  C: String;
+  Run: Boolean;
+  Seq: TMonsterMoveSeq;
+  Mdl: TQuakeMd2;
+  First, I: Integer;
+  AllMatch: Boolean;
+  Anim: TMonsterMoveAnim;
+begin
+  { Every walk / run loop lies on the frames of one model animation }
+  AllMatch := True;
+  for C in MonsterClasses do
+  begin
+    Mdl := Md2Manager.GetModel(FindMonsterDef(C)^.Model);
+    for Run in Boolean do
+    begin
+      Seq := MonsterMoveSeq(C, Run);
+      First := -1;
+      if Mdl <> nil then
+        First := Mdl.FrameNames.IndexOf(Seq.FirstFrame);
+      if (Length(Seq.Dists) = 0) or (First < 0) or (First + Length(Seq.Dists) > Mdl.FrameCount) then
+      begin
+        AllMatch := False;
+        Writeln('  ', C, ': move frames ', Seq.FirstFrame, ' missing');
+        Continue;
+      end;
+      for I := First to First + High(Seq.Dists) do
+        if FrameBase(Mdl.FrameNames[I]) <> FrameBase(Seq.FirstFrame) then
+        begin
+          AllMatch := False;
+          Writeln('  ', C, ': ', Seq.FirstFrame, ' runs into ', Mdl.FrameNames[I]);
+          Break;
+        end;
+    end;
+  end;
+  Check(AllMatch, 'monster walk / run loops match the demo models frame names');
+  CheckEquals(0, Length(MonsterMoveSeq('monster_supertank', True).Dists), 'monsters without a move table keep their speed');
+  { Quake 2 paces: 10 frames a second of ai_run distances }
+  Check(SameValue(MoveSeqSpeed(MonsterMoveSeq('monster_soldier', True)), 121.67, 0.01) and
+    SameValue(MoveSeqSpeed(MonsterMoveSeq('monster_tank', True)), 46.875, 0.01) and
+    SameValue(MoveSeqSpeed(MonsterMoveSeq('monster_parasite', True)), 254.29, 0.01),
+    'soldier runs 122, tank 47, parasite 254 units a second');
+  Anim := TMonsterMoveAnim.Create;
+  try
+    Anim.Start(MonsterMoveSeq('monster_infantry', True));
+    Anim.Update(0.25);
+    Check((Anim.Frame = 2) and SameValue(Anim.Speed, 50) and SameValue(Anim.FrameLerp, 0.5, 0.01),
+      'infantry run: frame 3 after 0.25 s moves 5 a frame');
+    Anim.Update(0.6);
+    CheckEquals(0, Anim.Frame, 'the run loop wraps around');
+  finally
+    Anim.Free;
+  end;
+end;
+
 procedure TestTurret;
 var
   L: TTurretLimits;
@@ -1391,6 +1451,7 @@ begin
   TestRecord;
   TestGun;
   TestMonsterAttacks;
+  TestMonsterMoves;
   TestTrace;
   TestMonsterJump;
 
