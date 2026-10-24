@@ -27,6 +27,12 @@ type
     Floor, Ceil: SmallInt;
     Sky: Boolean;
     Theme: Byte;
+    { A door fills the cell from floor to ceiling and slides up (func_door;
+      touching door cells with the same heights are one door) }
+    Door: Boolean;
+    { Water in the cell, its surface at height Water (above Floor) }
+    Wet: Boolean;
+    Water: SmallInt;
   end;
   PLevelCell = ^TLevelCell;
 
@@ -106,6 +112,11 @@ const
       Step: 'e1u1/metal3_5'; Light: 'e1u1/baselt_2')
   );
   LevelSkyTexture = 'e1u1/sky1';
+  LevelWaterTexture = 'e1u1/bluwter';
+  LevelDoorTexture = 'e1u1/dr02_1';
+
+{ Water in the cell (its surface above the floor) }
+function CellHasWater(const C: PLevelCell): Boolean;
 
 { Height above the floor where an entity of this class has its origin:
   its box 1 unit above the floor (an origin that makes the box touch the
@@ -119,6 +130,11 @@ uses
 
 var
   DotFormat: TFormatSettings;
+
+function CellHasWater(const C: PLevelCell): Boolean;
+begin
+  Result := (not C^.Solid) and C^.Wet and (C^.Water > C^.Floor);
+end;
 
 function EntityFloorOffset(const AClassName: String): Single;
 begin
@@ -264,6 +280,13 @@ begin
       if C^.Ceil < C^.Floor + LevelMinHeadroom then
         C^.Ceil := C^.Floor + LevelMinHeadroom;
       C^.Theme := Min(C^.Theme, High(LevelThemes));
+      if C^.Wet and (C^.Water > C^.Floor) then
+        C^.Water := EnsureRange(Round(C^.Water / 8) * 8, C^.Floor + 8, C^.Ceil - 8)
+      else
+        C^.Wet := False;
+      { A door under the sky or over water isn't supported }
+      if C^.Door and (C^.Sky or C^.Wet) then
+        C^.Door := False;
     end;
 end;
 
@@ -376,8 +399,8 @@ begin
     Root.Add('seed', Int64(Seed));
     Root.Add('width', FWidth);
     Root.Add('height', FHeight);
-    { One string per row: "#" for walls, else floor,ceil,theme[,s] cells
-      separated by spaces }
+    { One string per row: "#" for walls, else floor,ceil,theme[,s][,d][,w<h>]
+      cells (sky, door, water surface) separated by spaces }
     Rows := TJSONArray.Create;
     for Y := 0 to FHeight - 1 do
     begin
@@ -394,6 +417,10 @@ begin
           Row := Row + Format('%d,%d,%d', [C^.Floor, C^.Ceil, C^.Theme]);
           if C^.Sky then
             Row := Row + ',s';
+          if C^.Door then
+            Row := Row + ',d';
+          if CellHasWater(C) then
+            Row := Row + ',w' + IntToStr(C^.Water);
         end;
       end;
       Rows.Add(Row);
@@ -468,7 +495,18 @@ begin
           C^.Ceil := StrToIntDef(Vals[1], 128);
           if Length(Vals) > 2 then
             C^.Theme := StrToIntDef(Vals[2], 0);
-          C^.Sky := (Length(Vals) > 3) and (Vals[3] = 's');
+          for I := 3 to High(Vals) do
+            if Vals[I] = 's' then
+              C^.Sky := True
+            else
+            if Vals[I] = 'd' then
+              C^.Door := True
+            else
+            if Copy(Vals[I], 1, 1) = 'w' then
+            begin
+              C^.Wet := True;
+              C^.Water := StrToIntDef(Copy(Vals[I], 2, MaxInt), 0);
+            end;
         end;
       end;
     Ents := Root.Find('entities', jtArray) as TJSONArray;

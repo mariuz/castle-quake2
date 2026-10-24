@@ -29,7 +29,7 @@ uses
 
 type
   TBspBuildStats = record
-    Nodes, Leafs, Faces, Brushes, Clusters, LightBytes: Integer;
+    Nodes, Leafs, Faces, Brushes, Clusters, LightBytes, Models: Integer;
   end;
 
 { The map file of a level }
@@ -60,7 +60,10 @@ type
   TRegion = record
     X0, Y0, X1, Y1: Integer;
     NodeCeil, NodeFloor, Leaf: Integer;
+    { With water: the water plane's node and the leaf under the surface }
+    NodeWater, WaterLeaf: Integer;
   end;
+  TModelList = specialize TList<TBSPModel>;
   TRegionList = specialize TList<TRegion>;
 
   TLight = record
@@ -97,6 +100,12 @@ type
     Lighting: TMemoryStream;
     Lights: array of TLight;
     Clusters: Integer;
+    Models: TModelList;
+    { func_door entities of the door models, for the entity lump }
+    DoorEntities: String;
+    { Door building: cells of the current door (component id per cell) }
+    DoorComp: array of Integer;
+    CurrentDoor: Integer;
     constructor Create(const ALevel: TQuakeLevel);
     destructor Destroy; override;
     function CellKey(const X, Y: Integer): String;
@@ -106,13 +115,21 @@ type
     function NewNode: Integer;
     procedure AddDummySolidLeaf;
     function NewLeaf(const Solid: Boolean; const Mins, Maxs: TVector3): Integer;
+    { A leaf of water (CONTENTS_WATER, its own cluster, a water brush) }
+    function NewWaterLeaf(const Mins, Maxs: TVector3): Integer;
+    { An empty leaf of a brush model (no cluster) }
+    function NewModelEmptyLeaf(const Mins, Maxs: TVector3): Integer;
+    function AddBoxBrush(const Mins, Maxs: TVector3; const Contents: Integer): Integer;
+    function DoorKey(const X, Y: Integer): String;
+    function BuildDoorRegion(const X0, Y0, X1, Y1: Integer): Integer;
+    procedure BuildDoors;
     function BuildRegion(const X0, Y0, X1, Y1: Integer): Integer;
     function TexInfo(const Tex: String; const Axis: Integer; const Flags: Integer): Integer;
     function AddVertex(const V: TVector3): Integer;
     { A rectangle on the plane (Axis, Positive normal at Dist), From..To
       in the other two axes; returns the face index }
     function AddFace(const FA: TFaceAxis; const Dist: Single; const AMin, AMax: TVector3;
-      const Tex: String; const Sky: Boolean): Integer;
+      const Tex: String; const Flags: Integer): Integer;
     procedure AddWalls(const X, Y: Integer);
     procedure BuildFaces;
     function Blocked(const A, B: TVector3): Boolean;
@@ -173,6 +190,7 @@ begin
   LeafBrushes := TWordList.Create;
   Regions := TRegionList.Create;
   Lighting := TMemoryStream.Create;
+  Models := TModelList.Create;
   ZMin := 0;
   ZMax := 128;
   for Y := 0 to Level.Height - 1 do
@@ -208,6 +226,7 @@ begin
   LeafBrushes.Free;
   Regions.Free;
   Lighting.Free;
+  Models.Free;
   inherited Destroy;
 end;
 
@@ -219,7 +238,8 @@ begin
   if C^.Solid then
     Result := '#'
   else
-    Result := Format('%d,%d,%d,%d', [C^.Floor, C^.Ceil, Ord(C^.Sky), C^.Theme]);
+    Result := Format('%d,%d,%d,%d,%d,%d', [C^.Floor, C^.Ceil, Ord(C^.Sky), C^.Theme, Ord(C^.Door),
+      IfThen(CellHasWater(C), C^.Water, 0)]);
 end;
 
 function TBuilder.Uniform(const X0, Y0, X1, Y1: Integer): Boolean;
@@ -280,13 +300,71 @@ begin
   Result := Nodes.Add(Default(TBSPNode));
 end;
 
-function TBuilder.NewLeaf(const Solid: Boolean; const Mins, Maxs: TVector3): Integer;
+function TBuilder.AddBoxBrush(const Mins, Maxs: TVector3; const Contents: Integer): Integer;
 var
-  L: TBSPLeaf;
   B: TBSPBrush;
   I: Integer;
   Sides: array[0..5] of Integer;
   S: TBSPBrushSide;
+begin
+  Sides[0] := AddPlane(0, True, Maxs.X);
+  Sides[1] := AddPlane(0, False, Mins.X);
+  Sides[2] := AddPlane(1, True, Maxs.Y);
+  Sides[3] := AddPlane(1, False, Mins.Y);
+  Sides[4] := AddPlane(2, True, Maxs.Z);
+  Sides[5] := AddPlane(2, False, Mins.Z);
+  B.FirstSide := BrushSides.Count;
+  B.NumSides := 6;
+  B.Contents := Contents;
+  for I := 0 to 5 do
+  begin
+    S.PlaneNum := Sides[I];
+    S.TexInfo := 0;
+    BrushSides.Add(S);
+  end;
+  Result := Brushes.Add(B);
+end;
+
+function TBuilder.NewWaterLeaf(const Mins, Maxs: TVector3): Integer;
+var
+  L: TBSPLeaf;
+  I: Integer;
+begin
+  L := Default(TBSPLeaf);
+  for I := 0 to 2 do
+  begin
+    L.Mins[I] := ClampShort(Mins.Data[I]);
+    L.Maxs[I] := ClampShort(Maxs.Data[I]);
+  end;
+  L.Contents := CONTENTS_WATER;
+  L.Cluster := Clusters;
+  Inc(Clusters);
+  L.Area := 1;
+  L.FirstLeafBrush := LeafBrushes.Count;
+  L.NumLeafBrushes := 1;
+  LeafBrushes.Add(AddBoxBrush(Mins, Maxs, CONTENTS_WATER));
+  Result := Leafs.Add(L);
+end;
+
+function TBuilder.NewModelEmptyLeaf(const Mins, Maxs: TVector3): Integer;
+var
+  L: TBSPLeaf;
+  I: Integer;
+begin
+  L := Default(TBSPLeaf);
+  for I := 0 to 2 do
+  begin
+    L.Mins[I] := ClampShort(Mins.Data[I]);
+    L.Maxs[I] := ClampShort(Maxs.Data[I]);
+  end;
+  L.Cluster := -1;
+  Result := Leafs.Add(L);
+end;
+
+function TBuilder.NewLeaf(const Solid: Boolean; const Mins, Maxs: TVector3): Integer;
+var
+  L: TBSPLeaf;
+  I: Integer;
 begin
   L := Default(TBSPLeaf);
   for I := 0 to 2 do
@@ -300,24 +378,9 @@ begin
     L.Cluster := -1;
     L.Area := 0;
     { Its brush: the leaf's box }
-    Sides[0] := AddPlane(0, True, Maxs.X);
-    Sides[1] := AddPlane(0, False, Mins.X);
-    Sides[2] := AddPlane(1, True, Maxs.Y);
-    Sides[3] := AddPlane(1, False, Mins.Y);
-    Sides[4] := AddPlane(2, True, Maxs.Z);
-    Sides[5] := AddPlane(2, False, Mins.Z);
-    B.FirstSide := BrushSides.Count;
-    B.NumSides := 6;
-    B.Contents := CONTENTS_SOLID;
-    for I := 0 to 5 do
-    begin
-      S.PlaneNum := Sides[I];
-      S.TexInfo := 0;
-      BrushSides.Add(S);
-    end;
     L.FirstLeafBrush := LeafBrushes.Count;
     L.NumLeafBrushes := 1;
-    LeafBrushes.Add(Brushes.Add(B));
+    LeafBrushes.Add(AddBoxBrush(Mins, Maxs, CONTENTS_SOLID));
   end else
   begin
     L.Contents := 0;
@@ -355,25 +418,51 @@ begin
     C := Level.Cell(X0, Y0);
     if C^.Solid then
       Exit(-(NewLeaf(True, Mins, Maxs) + 1));
-    { Ceiling node (solid above), floor node (empty above, solid below) }
+    { Ceiling node (solid above), [water node (air above, water below),]
+      floor node (empty or water above, solid below) }
     NodeCeil := NewNode;
+    R.NodeWater := -1;
+    R.WaterLeaf := -1;
+    if CellHasWater(C) then
+      R.NodeWater := NewNode;
     NodeFloor := NewNode;
     R.X0 := X0; R.Y0 := Y0; R.X1 := X1; R.Y1 := Y1;
     R.NodeCeil := NodeCeil;
     R.NodeFloor := NodeFloor;
-    R.Leaf := NewLeaf(False, Vector3(Mins.X, Mins.Y, C^.Floor), Vector3(Maxs.X, Maxs.Y, C^.Ceil));
+    if R.NodeWater >= 0 then
+    begin
+      R.Leaf := NewLeaf(False, Vector3(Mins.X, Mins.Y, C^.Water), Vector3(Maxs.X, Maxs.Y, C^.Ceil));
+      R.WaterLeaf := NewWaterLeaf(Vector3(Mins.X, Mins.Y, C^.Floor), Vector3(Maxs.X, Maxs.Y, C^.Water));
+    end else
+      R.Leaf := NewLeaf(False, Vector3(Mins.X, Mins.Y, C^.Floor), Vector3(Maxs.X, Maxs.Y, C^.Ceil));
     Regions.Add(R);
 
     N := Default(TBSPNode);
     N.PlaneNum := AxialPlane(2, C^.Ceil);
     N.Children[0] := -(NewLeaf(True, Vector3(Mins.X, Mins.Y, C^.Ceil), Maxs) + 1);
-    N.Children[1] := NodeFloor;
+    if R.NodeWater >= 0 then
+      N.Children[1] := R.NodeWater
+    else
+      N.Children[1] := NodeFloor;
     SetNodeBounds(N, Mins, Maxs);
     Nodes[NodeCeil] := N;
 
+    if R.NodeWater >= 0 then
+    begin
+      N := Default(TBSPNode);
+      N.PlaneNum := AxialPlane(2, C^.Water);
+      N.Children[0] := -(R.Leaf + 1);
+      N.Children[1] := NodeFloor;
+      SetNodeBounds(N, Mins, Vector3(Maxs.X, Maxs.Y, C^.Ceil));
+      Nodes[R.NodeWater] := N;
+    end;
+
     N := Default(TBSPNode);
     N.PlaneNum := AxialPlane(2, C^.Floor);
-    N.Children[0] := -(R.Leaf + 1);
+    if R.WaterLeaf >= 0 then
+      N.Children[0] := -(R.WaterLeaf + 1)
+    else
+      N.Children[0] := -(R.Leaf + 1);
     N.Children[1] := -(NewLeaf(True, Mins, Vector3(Maxs.X, Maxs.Y, C^.Floor)) + 1);
     SetNodeBounds(N, Mins, Vector3(Maxs.X, Maxs.Y, C^.Ceil));
     Nodes[NodeFloor] := N;
@@ -451,9 +540,9 @@ begin
 end;
 
 function TBuilder.AddFace(const FA: TFaceAxis; const Dist: Single; const AMin, AMax: TVector3;
-  const Tex: String; const Sky: Boolean): Integer;
+  const Tex: String; const Flags: Integer): Integer;
 var
-  A1, A2, I, Flags: Integer;
+  A1, A2, I: Integer;
   Corners: array[0..3] of TVector3;
   Normal, Cross: TVector3;
   Tmp: TVector3;
@@ -496,9 +585,6 @@ begin
     E.V1 := Idx[(I + 1) mod 4];
     SurfEdges.Add(Edges.Add(E));
   end;
-  Flags := 0;
-  if Sky then
-    Flags := SURF_SKY;
   F.TexInfoId := TexInfo(Tex, FA.Axis, Flags);
   F.Styles[0] := 255;
   F.Styles[1] := 255;
@@ -531,7 +617,7 @@ var
       ZTop := Min(Z1, Z + MaxWall);
       AMin := Vector3(X * LevelCellSize, Y * LevelCellSize, Z);
       AMax := Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, ZTop);
-      FaceIdx := AddFace(FA, Dist, AMin, AMax, Tex, False);
+      FaceIdx := AddFace(FA, Dist, AMin, AMax, Tex, 0);
       LightFace(FaceIdx, FA, Dist, C^.Sky);
       Z := ZTop;
     end;
@@ -604,7 +690,7 @@ begin
       for X := R.X0 to R.X1 - 1 do
       begin
         FaceIdx := AddFace(FA, C^.Floor, Vector3(X * LevelCellSize, Y * LevelCellSize, 0),
-          Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, 0), Theme.Floor, False);
+          Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, 0), Theme.Floor, 0);
         LightFace(FaceIdx, FA, C^.Floor, C^.Sky);
       end;
     N.NumFaces := Faces.Count - N.FirstFace;
@@ -632,7 +718,8 @@ begin
         else
           CeilTex := Theme.Ceil;
         FaceIdx := AddFace(FA, C^.Ceil, Vector3(X * LevelCellSize, Y * LevelCellSize, 0),
-          Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, 0), CeilTex, C^.Sky);
+          Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, 0), CeilTex,
+          IfThen(C^.Sky, SURF_SKY, 0));
         if not C^.Sky then
           LightFace(FaceIdx, FA, C^.Ceil, False);
       end;
@@ -644,12 +731,217 @@ begin
       for X := R.X0 to R.X1 - 1 do
         AddWalls(X, Y);
 
+    { The water surface, seen from above and from below (warped, no
+      lightmap) }
+    if R.NodeWater >= 0 then
+      for Y := R.Y0 to R.Y1 - 1 do
+        for X := R.X0 to R.X1 - 1 do
+        begin
+          FA.Axis := 2;
+          FA.Positive := True;
+          AddFace(FA, C^.Water, Vector3(X * LevelCellSize, Y * LevelCellSize, 0),
+            Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, 0), LevelWaterTexture,
+            SURF_WARP or SURF_TRANS33);
+          FA.Positive := False;
+          AddFace(FA, C^.Water, Vector3(X * LevelCellSize, Y * LevelCellSize, 0),
+            Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, 0), LevelWaterTexture,
+            SURF_WARP or SURF_TRANS33);
+        end;
+
+    { Both the air and the water leaf see the region's faces }
     L := Leafs[R.Leaf];
     L.FirstLeafFace := LeafFaces.Count;
     L.NumLeafFaces := Faces.Count - FirstLeafFace;
     for FaceIdx := FirstLeafFace to Faces.Count - 1 do
       LeafFaces.Add(FaceIdx);
     Leafs[R.Leaf] := L;
+    if R.WaterLeaf >= 0 then
+    begin
+      L := Leafs[R.WaterLeaf];
+      L.FirstLeafFace := Leafs[R.Leaf].FirstLeafFace;
+      L.NumLeafFaces := Leafs[R.Leaf].NumLeafFaces;
+      Leafs[R.WaterLeaf] := L;
+    end;
+  end;
+end;
+
+function TBuilder.DoorKey(const X, Y: Integer): String;
+var
+  C: PLevelCell;
+begin
+  if (not Level.InGrid(X, Y)) or (DoorComp[Y * Level.Width + X] <> CurrentDoor) then
+    Exit('-');
+  C := Level.Cell(X, Y);
+  Result := Format('%d,%d', [C^.Floor, C^.Ceil]);
+end;
+
+function TBuilder.BuildDoorRegion(const X0, Y0, X1, Y1: Integer): Integer;
+var
+  K: String;
+  X, Y, Mid, NodeCeil, NodeFloor: Integer;
+  Same: Boolean;
+  C: PLevelCell;
+  Mins, Maxs: TVector3;
+  N: TBSPNode;
+  Front, Back: Integer;
+begin
+  Mins := Vector3(X0 * LevelCellSize, Y0 * LevelCellSize, ZMin);
+  Maxs := Vector3(X1 * LevelCellSize, Y1 * LevelCellSize, ZMax);
+  K := DoorKey(X0, Y0);
+  Same := True;
+  for Y := Y0 to Y1 - 1 do
+    for X := X0 to X1 - 1 do
+      if DoorKey(X, Y) <> K then
+        Same := False;
+  if Same then
+  begin
+    if K = '-' then
+      Exit(-(NewModelEmptyLeaf(Mins, Maxs) + 1));
+    { The door: solid from its floor to its ceiling, empty around }
+    C := Level.Cell(X0, Y0);
+    NodeCeil := NewNode;
+    NodeFloor := NewNode;
+    N := Default(TBSPNode);
+    N.PlaneNum := AxialPlane(2, C^.Ceil);
+    N.Children[0] := -(NewModelEmptyLeaf(Vector3(Mins.X, Mins.Y, C^.Ceil), Maxs) + 1);
+    N.Children[1] := NodeFloor;
+    SetNodeBounds(N, Mins, Maxs);
+    Nodes[NodeCeil] := N;
+    N := Default(TBSPNode);
+    N.PlaneNum := AxialPlane(2, C^.Floor);
+    N.Children[0] := -(NewLeaf(True, Vector3(Mins.X, Mins.Y, C^.Floor), Vector3(Maxs.X, Maxs.Y, C^.Ceil)) + 1);
+    N.Children[1] := -(NewModelEmptyLeaf(Mins, Vector3(Maxs.X, Maxs.Y, C^.Floor)) + 1);
+    SetNodeBounds(N, Mins, Vector3(Maxs.X, Maxs.Y, C^.Ceil));
+    Nodes[NodeFloor] := N;
+    Exit(NodeCeil);
+  end;
+  Result := NewNode;
+  N := Default(TBSPNode);
+  if X1 - X0 >= Y1 - Y0 then
+  begin
+    Mid := (X0 + X1) div 2;
+    N.PlaneNum := AxialPlane(0, Mid * LevelCellSize);
+    Front := BuildDoorRegion(Mid, Y0, X1, Y1);
+    Back := BuildDoorRegion(X0, Y0, Mid, Y1);
+  end else
+  begin
+    Mid := (Y0 + Y1) div 2;
+    N.PlaneNum := AxialPlane(1, Mid * LevelCellSize);
+    Front := BuildDoorRegion(X0, Mid, X1, Y1);
+    Back := BuildDoorRegion(X0, Y0, X1, Mid);
+  end;
+  N.Children[0] := Front;
+  N.Children[1] := Back;
+  SetNodeBounds(N, Mins, Maxs);
+  Nodes[Result] := N;
+end;
+
+procedure TBuilder.BuildDoors;
+const
+  DX: array[0..3] of Integer = (1, -1, 0, 0);
+  DY: array[0..3] of Integer = (0, 0, 1, -1);
+var
+  X, Y, I, D, CX, CY, NX, NY, X0, Y0, X1, Y1, Z, ZTop, FaceIdx, Head: Integer;
+  Queue: specialize TList<Integer>;
+  C, N, Start: PLevelCell;
+  M: TBSPModel;
+  FA: TFaceAxis;
+  Dist: Single;
+begin
+  SetLength(DoorComp, Level.Width * Level.Height);
+  for I := 0 to High(DoorComp) do
+    DoorComp[I] := -1;
+  CurrentDoor := 0;
+  Queue := specialize TList<Integer>.Create;
+  try
+    for Y := 0 to Level.Height - 1 do
+      for X := 0 to Level.Width - 1 do
+      begin
+        Start := Level.Cell(X, Y);
+        if Start^.Solid or not Start^.Door or (DoorComp[Y * Level.Width + X] >= 0) then
+          Continue;
+        { One door: the touching door cells with the same heights }
+        Queue.Clear;
+        Queue.Add(Y * Level.Width + X);
+        DoorComp[Y * Level.Width + X] := CurrentDoor;
+        X0 := X; Y0 := Y; X1 := X + 1; Y1 := Y + 1;
+        Head := 0;
+        while Head < Queue.Count do
+        begin
+          CX := Queue[Head] mod Level.Width;
+          CY := Queue[Head] div Level.Width;
+          Inc(Head);
+          X0 := Min(X0, CX); Y0 := Min(Y0, CY); X1 := Max(X1, CX + 1); Y1 := Max(Y1, CY + 1);
+          for D := 0 to 3 do
+          begin
+            NX := CX + DX[D];
+            NY := CY + DY[D];
+            if not Level.InGrid(NX, NY) or (DoorComp[NY * Level.Width + NX] >= 0) then
+              Continue;
+            N := Level.Cell(NX, NY);
+            if (not N^.Solid) and N^.Door and (N^.Floor = Start^.Floor) and (N^.Ceil = Start^.Ceil) then
+            begin
+              DoorComp[NY * Level.Width + NX] := CurrentDoor;
+              Queue.Add(NY * Level.Width + NX);
+            end;
+          end;
+        end;
+
+        M := Default(TBSPModel);
+        M.HeadNode := BuildDoorRegion(X0, Y0, X1, Y1);
+        M.FirstFace := Faces.Count;
+        { Its sides towards open cells, and its bottom (seen when it is up) }
+        for I := 0 to Queue.Count - 1 do
+        begin
+          CX := Queue[I] mod Level.Width;
+          CY := Queue[I] div Level.Width;
+          C := Level.Cell(CX, CY);
+          for D := 0 to 3 do
+          begin
+            NX := CX + DX[D];
+            NY := CY + DY[D];
+            N := Level.Cell(NX, NY);
+            if N^.Solid or (Level.InGrid(NX, NY) and (DoorComp[NY * Level.Width + NX] = CurrentDoor)) then
+              Continue;
+            if DX[D] <> 0 then
+            begin
+              FA.Axis := 0;
+              FA.Positive := DX[D] > 0;
+              Dist := IfThen(DX[D] > 0, (CX + 1) * LevelCellSize, CX * LevelCellSize);
+            end else
+            begin
+              FA.Axis := 1;
+              FA.Positive := DY[D] > 0;
+              Dist := IfThen(DY[D] > 0, (CY + 1) * LevelCellSize, CY * LevelCellSize);
+            end;
+            Z := C^.Floor;
+            while Z < C^.Ceil do
+            begin
+              ZTop := Min(C^.Ceil, Z + 256);
+              FaceIdx := AddFace(FA, Dist, Vector3(CX * LevelCellSize, CY * LevelCellSize, Z),
+                Vector3((CX + 1) * LevelCellSize, (CY + 1) * LevelCellSize, ZTop), LevelDoorTexture, 0);
+              LightFace(FaceIdx, FA, Dist, False);
+              Z := ZTop;
+            end;
+          end;
+          FA.Axis := 2;
+          FA.Positive := False;
+          FaceIdx := AddFace(FA, C^.Floor, Vector3(CX * LevelCellSize, CY * LevelCellSize, 0),
+            Vector3((CX + 1) * LevelCellSize, (CY + 1) * LevelCellSize, 0), LevelDoorTexture, 0);
+          LightFace(FaceIdx, FA, C^.Floor, False);
+        end;
+        M.NumFaces := Faces.Count - M.FirstFace;
+        M.Mins := Vector3(X0 * LevelCellSize, Y0 * LevelCellSize, Start^.Floor);
+        M.Maxs := Vector3(X1 * LevelCellSize, Y1 * LevelCellSize, Start^.Ceil);
+        DoorEntities := DoorEntities + Format(
+          '{' + LineEnding + '"classname" "func_door"' + LineEnding + '"model" "*%d"' + LineEnding +
+          '"angle" "-1"' + LineEnding + '"speed" "100"' + LineEnding + '"wait" "3"' + LineEnding +
+          '"lip" "8"' + LineEnding + '}' + LineEnding, [Models.Count]);
+        Models.Add(M);
+        Inc(CurrentDoor);
+      end;
+  finally
+    Queue.Free;
   end;
 end;
 
@@ -804,7 +1096,6 @@ var
   Ents: String;
   Vis: TMemoryStream;
   I, RowBytes, Ofs: Integer;
-  Model: TBSPModel;
   Areas: array[0..1] of TBSPArea;
   Portal: TBSPAreaPortal;
   Zero: Byte;
@@ -831,7 +1122,7 @@ begin
   Hdr.Version := 38;
   Result.WriteBuffer(Hdr, SizeOf(Hdr));
 
-  Ents := Level.EntityText + #0;
+  Ents := Level.EntityText + DoorEntities + #0;
   Lump(LUMP_ENTITIES, @Ents[1], Length(Ents));
   BytesLump(LUMP_PLANES, specialize ListBytes<TBSPPlane>(Planes));
   BytesLump(LUMP_VERTICES, specialize ListBytes<TVector3>(Vertices));
@@ -870,13 +1161,7 @@ begin
   BytesLump(LUMP_EDGES, specialize ListBytes<TBSPEdge>(Edges));
   BytesLump(LUMP_SURFEDGES, specialize ListBytes<LongInt>(SurfEdges));
 
-  Model := Default(TBSPModel);
-  Model.Mins := Vector3(0, 0, ZMin);
-  Model.Maxs := Vector3(Level.Width * LevelCellSize, Level.Height * LevelCellSize, ZMax);
-  Model.HeadNode := 0;
-  Model.FirstFace := 0;
-  Model.NumFaces := Faces.Count;
-  Lump(LUMP_MODELS, @Model, SizeOf(Model));
+  BytesLump(LUMP_MODELS, specialize ListBytes<TBSPModel>(Models));
   BytesLump(LUMP_BRUSHES, specialize ListBytes<TBSPBrush>(Brushes));
   BytesLump(LUMP_BRUSHSIDES, specialize ListBytes<TBSPBrushSide>(BrushSides));
   Lump(LUMP_POP, nil, 0);
@@ -902,6 +1187,7 @@ function BuildLevelBsp(const Level: TQuakeLevel; out Stats: TBspBuildStats): TMe
 var
   B: TBuilder;
   Root: Integer;
+  WorldModel: TBSPModel;
 begin
   Stats := Default(TBspBuildStats);
   Level.Normalize;
@@ -918,12 +1204,22 @@ begin
     if Root <> 0 then
       raise Exception.Create('The level BSP has no root node');
     B.BuildFaces;
+    { Model 0: the world; then a model per door }
+    WorldModel := Default(TBSPModel);
+    WorldModel.Mins := Vector3(0, 0, B.ZMin);
+    WorldModel.Maxs := Vector3(Level.Width * LevelCellSize, Level.Height * LevelCellSize, B.ZMax);
+    WorldModel.HeadNode := 0;
+    WorldModel.FirstFace := 0;
+    WorldModel.NumFaces := B.Faces.Count;
+    B.Models.Add(WorldModel);
+    B.BuildDoors;
     Result := B.Write(Stats);
+    Stats.Models := B.Models.Count;
   finally
     B.Free;
   end;
-  WritelnLog('QuakeBspBuilder', 'Built "%s": %d nodes, %d leafs, %d clusters, %d faces, %d brushes, %d lightmap bytes',
-    [Level.Name, Stats.Nodes, Stats.Leafs, Stats.Clusters, Stats.Faces, Stats.Brushes, Stats.LightBytes]);
+  WritelnLog('QuakeBspBuilder', 'Built "%s": %d nodes, %d leafs, %d clusters, %d faces, %d brushes, %d models, %d lightmap bytes',
+    [Level.Name, Stats.Nodes, Stats.Leafs, Stats.Clusters, Stats.Faces, Stats.Brushes, Stats.Models, Stats.LightBytes]);
 end;
 
 function RegisterLevelMap(const Level: TQuakeLevel): String;

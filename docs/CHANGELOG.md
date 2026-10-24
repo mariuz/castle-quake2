@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Doors and water in levels. The level editor has **Door** (O) and **Water** (U) tools: door cells become Quake 2 doors (`func_door`, touching cells are one door) that slide up when you come near, and water cells fill up to a depth (V / B change it) to wade or swim in, with the warping water surface. Random levels put doors at some corridor entrances and sunken pools in some rooms; the generator counts swimming up out of a pool as a way out.
+- Monsters open doors too, like Quake 2's door trigger field (not doors with the "no monsters" spawnflag).
+
 ## v0.9.0 — 2026-10-24
 
 Random levels and a level editor, compiled into Quake 2 maps while the game runs; monsters walk and run at their Quake 2 pace. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.

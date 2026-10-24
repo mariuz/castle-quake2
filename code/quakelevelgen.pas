@@ -43,7 +43,7 @@ type
   end;
 
   TLevelGenReport = record
-    Rooms, Links, Loops, OpenCells, FixedCells, WalledCells, Monsters, Items: Integer;
+    Rooms, Links, Loops, OpenCells, FixedCells, WalledCells, Monsters, Items, Doors, Pools: Integer;
     StartRoom, ExitRoom, SecretRoom: Integer;
   end;
 
@@ -148,9 +148,27 @@ begin
 end;
 
 function CanStep(const A, B: PLevelCell): Boolean;
+var
+  Lo, Hi: PLevelCell;
 begin
-  Result := (not A^.Solid) and (not B^.Solid) and (Abs(A^.Floor - B^.Floor) <= LevelHeightStep) and
-    (Min(A^.Ceil, B^.Ceil) - Max(A^.Floor, B^.Floor) >= LevelMinHeadroom);
+  Result := False;
+  if A^.Solid or B^.Solid or (Min(A^.Ceil, B^.Ceil) - Max(A^.Floor, B^.Floor) < LevelMinHeadroom) then
+    Exit;
+  if Abs(A^.Floor - B^.Floor) <= LevelHeightStep then
+    Exit(True);
+  { Out of water the player swims up to the surface and climbs out
+    (PM_CheckWaterJump): a ledge at most a step above the water }
+  if A^.Floor < B^.Floor then
+  begin
+    Lo := A;
+    Hi := B;
+  end else
+  begin
+    Lo := B;
+    Hi := A;
+  end;
+  Result := CellHasWater(Lo) and (Hi^.Floor <= Lo^.Water + LevelHeightStep) and
+    (not CellHasWater(Hi) or (Hi^.Water >= Lo^.Water));
 end;
 
 const
@@ -406,9 +424,9 @@ var
   var
     Path: specialize TList<TPoint>;
     X, Y, TX, TY, I, Floor, Remaining, CellsLeft, Step, OutCount, Theme, Headroom: Integer;
-    XFirst: Boolean;
-    P: TPoint;
-    C: PLevelCell;
+    XFirst, DoorPlaced: Boolean;
+    P, Lane: TPoint;
+    C, D2: PLevelCell;
 
     procedure Add(const PX, PY: Integer);
     begin
@@ -455,6 +473,7 @@ var
       Headroom := 112 + 16 * Rnd.Int(2);
       Floor := Rooms[A].Floor;
       CellsLeft := OutCount + 1;
+      DoorPlaced := not Rnd.Chance(0.4);
       for I := 0 to Path.Count - 1 do
       begin
         P := Path[I];
@@ -467,9 +486,26 @@ var
         OpenCorridorCell(P.X, P.Y, Floor);
         { Second lane: beside the path (also at the corner, both sides) }
         if (I > 0) and (Path[I - 1].Y = P.Y) then
-          OpenCorridorCell(P.X, P.Y + 1, Floor)
+          Lane := Point(P.X, P.Y + 1)
         else
-          OpenCorridorCell(P.X + 1, P.Y, Floor);
+          Lane := Point(P.X + 1, P.Y);
+        OpenCorridorCell(Lane.X, Lane.Y, Floor);
+        { A door where the corridor leaves room A: both lanes, the same
+          heights, straight on (not at a corner) }
+        if (not DoorPlaced) and (I > 0) and (CellRoom(Path[I - 1].X, Path[I - 1].Y) = A) and
+           (I + 1 < Path.Count) and ((Path[I - 1].X = Path[I + 1].X) or (Path[I - 1].Y = Path[I + 1].Y)) then
+        begin
+          DoorPlaced := True;
+          C := Level.Cell(P.X, P.Y);
+          D2 := Level.Cell(Lane.X, Lane.Y);
+          if (not C^.Solid) and (not D2^.Solid) and (C^.Floor = D2^.Floor) and (C^.Ceil = D2^.Ceil) and
+             (CellRoom(Lane.X, Lane.Y) < 0) then
+          begin
+            C^.Door := True;
+            D2^.Door := True;
+            Inc(Report.Doors);
+          end;
+        end;
       end;
     finally
       Path.Free;
@@ -507,6 +543,25 @@ var
             else
               C^.Floor := Rooms[I].Floor + LevelHeightStep;
           end;
+      end else
+      { Or a sunken pool to swim in (its edge a step above the water) }
+      if (not Rooms[I].Sky) and (Rooms[I].W >= 5) and (Rooms[I].H >= 5) and Rnd.Chance(0.3) then
+      begin
+        PW := Rnd.Range(2, Rooms[I].W - 3);
+        PH := Rnd.Range(2, Rooms[I].H - 3);
+        PX := Rooms[I].X + Rnd.Range(1, Rooms[I].W - PW - 1);
+        PY := Rooms[I].Y + Rnd.Range(1, Rooms[I].H - PH - 1);
+        for Y := PY to PY + PH - 1 do
+          for X := PX to PX + PW - 1 do
+          begin
+            C := Level.Cell(X, Y);
+            if C^.Solid or (CellRoom(X, Y) <> I) then
+              Continue;
+            C^.Floor := Rooms[I].Floor - 64;
+            C^.Wet := True;
+            C^.Water := Rooms[I].Floor - 8;
+          end;
+        Inc(Report.Pools);
       end;
     end;
   end;
@@ -569,7 +624,8 @@ var
     begin
       CX := Rooms[R].X + Rnd.Range(Min(Margin, Rooms[R].W div 2), Max(Min(Margin, Rooms[R].W div 2), Rooms[R].W - 1 - Margin));
       CY := Rooms[R].Y + Rnd.Range(Min(Margin, Rooms[R].H div 2), Max(Min(Margin, Rooms[R].H div 2), Rooms[R].H - 1 - Margin));
-      if Level.Cell(CX, CY)^.Solid or not Reached[CY * Level.Width + CX] then
+      if Level.Cell(CX, CY)^.Solid or not Reached[CY * Level.Width + CX] or CellHasWater(Level.Cell(CX, CY)) or
+         Level.Cell(CX, CY)^.Door then
         Continue;
       if Level.EntityAtCell(CX, CY) >= 0 then
         Continue;
@@ -964,9 +1020,9 @@ begin
     if IsRandomMapName(Name, Seed) then
     begin
       Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
-      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d monsters, %d items, secret room %d',
+      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools, %d monsters, %d items, secret room %d',
         [Name, Report.Rooms, Report.Links, Report.Loops, Report.OpenCells, Report.FixedCells,
-         Report.WalledCells, Report.Monsters, Report.Items, Report.SecretRoom]);
+         Report.WalledCells, Report.Doors, Report.Pools, Report.Monsters, Report.Items, Report.SecretRoom]);
     end else
     if UriExists(LevelFileUrl(Name)) = ueFile then
     begin

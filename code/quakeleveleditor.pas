@@ -28,7 +28,7 @@ uses
 
 type
   TLevelEditTool = (etFloor, etWall, etRaise, etLower, etCeilUp, etCeilDown, etSky, etTheme,
-    etEntity, etErase);
+    etEntity, etErase, etDoor, etWater);
   TLevelEditCommand = (ecNew, ecGenerate, ecSave, ecLoad, ecPlay, ecExport, ecClose);
 
   TLevelEditorEvent = procedure(const Level: TQuakeLevel) of object;
@@ -37,7 +37,7 @@ type
   strict private
     FLevel: TQuakeLevel;
     FTool: TLevelEditTool;
-    FBrushFloor, FBrushCeil, FBrushTheme: Integer;
+    FBrushFloor, FBrushCeil, FBrushTheme, FBrushWater: Integer;
     FEntityIndex: Integer;
     FEntityAngle: Single;
     FZoom: Single;
@@ -87,6 +87,8 @@ type
     function LoadLevel(const AName: String): Boolean;
     function ExportBsp: String;
     procedure ShowStatus(const Text: String);
+    { Apply the current tool to every cell of a rectangle (scripts) }
+    procedure FillRect(const X0, Y0, X1, Y1: Integer);
     { Saved level names (castle-config:/levels) }
     function SavedLevels: TStringList;
     property Level: TQuakeLevel read FLevel;
@@ -104,7 +106,8 @@ type
 
 const
   ToolNames: array[TLevelEditTool] of String = ('Floor', 'Wall', 'Raise', 'Lower', 'Ceil+', 'Ceil-',
-    'Sky', 'Theme', 'Entity', 'Erase');
+    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water');
+  ToolKeys: array[TLevelEditTool] of String = ('1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'O', 'U');
   CommandNames: array[TLevelEditCommand] of String = ('New', 'Generate', 'Save', 'Load', 'Play',
     'Export', 'Close');
   { What the Entity tool places; "exit" is a trigger with a changelevel }
@@ -236,6 +239,7 @@ begin
   FUndo := TStringList.Create;
   FBrushFloor := 0;
   FBrushCeil := 160;
+  FBrushWater := 48;
   FZoom := 20;
   FHover := Point(-1, -1);
   FLoadIndex := -1;
@@ -584,6 +588,18 @@ begin
   end;
 end;
 
+procedure TQuakeLevelEditor.FillRect(const X0, Y0, X1, Y1: Integer);
+var
+  X, Y: Integer;
+begin
+  PushUndo;
+  FStrokeCells.Clear;
+  for Y := Min(Y0, Y1) to Max(Y0, Y1) do
+    for X := Min(X0, X1) to Max(X0, X1) do
+      ApplyTool(X, Y, False);
+  FStrokeCells.Clear;
+end;
+
 procedure TQuakeLevelEditor.PickCell(const X, Y: Integer);
 var
   C: PLevelCell;
@@ -654,6 +670,29 @@ begin
       PlaceEditorEntity(FLevel, EditorEntityClasses[FEntityIndex], X, Y, FEntityAngle);
     etErase:
       RemoveCellEntities(FLevel, X, Y);
+    etDoor:
+      if not C^.Solid then
+      begin
+        C^.Door := not C^.Door;
+        if C^.Door then
+        begin
+          C^.Sky := False;
+          C^.Wet := False;
+        end;
+      end;
+    etWater:
+      if not C^.Solid then
+      begin
+        { Water FBrushWater deep (or none again) }
+        if CellHasWater(C) then
+          C^.Wet := False
+        else
+        begin
+          C^.Wet := True;
+          C^.Water := Min(C^.Floor + FBrushWater, C^.Ceil - 8);
+          C^.Door := False;
+        end;
+      end;
   end;
 end;
 
@@ -773,6 +812,18 @@ begin
   else
   if Event.IsKey(keyT) then
     FBrushTheme := (FBrushTheme + 1) mod Length(LevelThemes)
+  else
+  if Event.IsKey(keyO) then
+    FTool := etDoor
+  else
+  if Event.IsKey(keyU) then
+    FTool := etWater
+  else
+  if Event.IsKey(keyV) then
+    FBrushWater := FBrushWater + 8
+  else
+  if Event.IsKey(keyB) then
+    FBrushWater := Max(8, FBrushWater - 8)
   else
   if Event.IsKey(keyQ) then
     FEntityAngle := Round(FEntityAngle + 45) mod 360
@@ -916,6 +967,14 @@ begin
           Col := Vector4(Col.XYZ * 0.6 + Vector3(0.1, 0.2, 0.45), 1);
       end;
       DrawRectangle(R, Col);
+      if CellHasWater(C) then
+        DrawRectangle(R, Vector4(0.1, 0.35, 0.9, 0.45));
+      if C^.Door and not C^.Solid then
+      begin
+        DrawRectangle(FloatRectangle(R.Left + R.Width * 0.2, R.Bottom, R.Width * 0.6, R.Height),
+          Vector4(0.75, 0.5, 0.2, 0.85));
+        DrawRectangleOutline(R, Vector4(1, 0.7, 0.3, 1));
+      end;
       if FZoom >= 10 then
         DrawRectangleOutline(R, Vector4(0, 0, 0, 0.35));
       if (not C^.Solid) and (FZoom >= 30) then
@@ -960,7 +1019,7 @@ begin
     { Toolbar }
     DrawRectangle(ToolbarRect, Vector4(0.09, 0.09, 0.1, 1));
     for T := Low(TLevelEditTool) to High(TLevelEditTool) do
-      Button(ToolButtonRect(Ord(T)), Format('%d %s', [(Ord(T) + 1) mod 10, ToolNames[T]]), T = FTool);
+      Button(ToolButtonRect(Ord(T)), ToolKeys[T] + ' ' + ToolNames[T], T = FTool);
     for Cmd := Low(TLevelEditCommand) to High(TLevelEditCommand) do
       Button(CommandButtonRect(Ord(Cmd)), CommandNames[Cmd], False);
 
@@ -985,8 +1044,10 @@ begin
       if C^.Solid then
         HoverInfo := Format('(%d,%d) wall', [FHover.X, FHover.Y])
       else
-        HoverInfo := Format('(%d,%d) floor %d ceiling %d %s%s', [FHover.X, FHover.Y, C^.Floor, C^.Ceil,
-          LevelThemes[Min(C^.Theme, High(LevelThemes))].Name, StrUtils.IfThen(C^.Sky, ' sky', '')]);
+        HoverInfo := Format('(%d,%d) floor %d ceiling %d %s%s%s%s', [FHover.X, FHover.Y, C^.Floor, C^.Ceil,
+          LevelThemes[Min(C^.Theme, High(LevelThemes))].Name, StrUtils.IfThen(C^.Sky, ' sky', ''),
+          StrUtils.IfThen(C^.Door, ' door', ''),
+          StrUtils.IfThen(CellHasWater(C), ' water ' + IntToStr(C^.Water), '')]);
       I := FLevel.EntityAtCell(FHover.X, FHover.Y);
       if I >= 0 then
         HoverInfo := HoverInfo + ' - ' + FLevel.Entities[I].EntClass;
@@ -994,8 +1055,8 @@ begin
     if FStatusTime > 0 then
       Txt := FStatus
     else
-      Txt := Format('%s | %s | brush floor %d ceiling %d theme %s | entity %s %d° | %s',
-        [FLevel.Name, ToolNames[FTool], FBrushFloor, FBrushCeil, LevelThemes[FBrushTheme].Name,
+      Txt := Format('%s | %s | brush floor %d ceiling %d water %d theme %s | entity %s %d° | %s',
+        [FLevel.Name, ToolNames[FTool], FBrushFloor, FBrushCeil, FBrushWater, LevelThemes[FBrushTheme].Name,
          EditorEntityClasses[FEntityIndex], Round(FEntityAngle), HoverInfo]);
     UIFont.Print(StatusRect.Left + 8 * S, StatusRect.Bottom + (StatusRect.Height - UIFont.Height) / 2, White, Txt);
   finally

@@ -1270,6 +1270,75 @@ begin
   end;
 end;
 
+procedure TestLevelDoorsWater;
+const
+  Mins: TVector3 = (X: -16; Y: -16; Z: -24);
+  Maxs: TVector3 = (X: 16; Y: 16; Z: 32);
+var
+  Level: TQuakeLevel;
+  Bsp: TQuakeBsp;
+  Col: TQuakeCollision;
+  T: TQuakeTrace;
+  Door: TQuakeEntity;
+  X, Y: Integer;
+begin
+  { Room A (x 1..4) and room B (x 6..11) joined at x 5 by a 2-cell door
+    (y 3..4); a pool (floor -64, water up to -8) in room B }
+  Level := TQuakeLevel.Create(14, 8);
+  try
+    Level.Name := 'unittest_doors';
+    for Y := 1 to 6 do
+    begin
+      for X := 1 to 4 do
+        Level.SetOpen(X, Y, 0, 128);
+      for X := 6 to 11 do
+        Level.SetOpen(X, Y, 0, 128);
+    end;
+    for Y := 3 to 4 do
+    begin
+      Level.SetOpen(5, Y, 0, 128);
+      Level.Cell(5, Y)^.Door := True;
+    end;
+    for Y := 2 to 4 do
+      for X := 8 to 10 do
+      begin
+        Level.Cell(X, Y)^.Floor := -64;
+        Level.Cell(X, Y)^.Wet := True;
+        Level.Cell(X, Y)^.Water := -8;
+      end;
+    Level.AddEntityAtCell('info_player_start', 2, 3);
+    Level.AddEntityAtCell('light', 3, 3);
+    RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Check(Bsp.LoadFromPak('maps/unittest_doors.bsp'), 'a level with a door and water builds and loads');
+      Check(Bsp.ModelCount = 2, 'the door is a brush model (*1)');
+      Door := Bsp.FindEntity('func_door');
+      Check((Door <> nil) and (Door.Model = '*1') and SameValue(Door.Angle, -1), 'the door is a func_door moving up');
+      Check((Bsp.PointContents(Vector3(9 * 64 + 32, 3 * 64 + 32, -20)) and CONTENTS_WATER) <> 0,
+        'the pool is water');
+      Check((Bsp.PointContents(Vector3(9 * 64 + 32, 3 * 64 + 32, 40)) and CONTENTS_WATER) = 0,
+        'above the pool is air');
+      Col := TQuakeCollision.Create(Bsp);
+      try
+        T := Col.BoxTrace(Vector3(160, 224, 25), Vector3(450, 224, 25), Mins, Maxs, 0, MASK_PLAYERSOLID);
+        Check(T.Fraction = 1, 'the world is open where the door is');
+        T := Col.BoxTrace(Vector3(160, 224, 25), Vector3(450, 224, 25), Mins, Maxs,
+          Bsp.Models[1].HeadNode, MASK_PLAYERSOLID);
+        Check((T.Fraction < 1) and SameValue(T.EndPos.X, 5 * 64 - 16, 0.2), 'the closed door blocks the doorway');
+        Check((Col.PointContents(Vector3(9 * 64 + 32, 3 * 64 + 32, -20), 0) and CONTENTS_WATER) <> 0,
+          'the pool has a water brush');
+      finally
+        Col.Free;
+      end;
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+end;
+
 procedure TestLevelGen;
 const
   Mins: TVector3 = (X: -16; Y: -16; Z: -24);
@@ -1659,6 +1728,7 @@ begin
   TestModelLightStyles;
   TestTurret;
   TestLevelBsp;
+  TestLevelDoorsWater;
   TestLevelGen;
   TestMapLevelUrl;
   TestRecord;

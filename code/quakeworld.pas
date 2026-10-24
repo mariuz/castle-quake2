@@ -2052,9 +2052,26 @@ begin
 end;
 
 procedure TQuakeWorld.CheckMovers;
+const
+  DOOR_NOMONSTER = 8;
 var
   Mover: TQuakeMover;
   Box, PBox: TBox3D;
+
+  { touch_DoorTrigger: monsters open doors too (not DOOR_NOMONSTER ones) }
+  function MonsterInField(const Field: TBox3D): Boolean;
+  var
+    M: TQuakeMonster;
+  begin
+    Result := False;
+    if (Mover.Entity.SpawnFlags and DOOR_NOMONSTER) <> 0 then
+      Exit;
+    for M in FMonsters do
+      if M.IsAlive and (not M.Dormant) and (M.Transform <> nil) and M.Transform.Exists and
+         Field.Collision(QuakeBoxToCge(M.Origin + M.BoxMins, M.Origin + M.BoxMaxs)) then
+        Exit(True);
+  end;
+
 begin
   PBox := PlayerBox;
   for Mover in FGeometry.Movers do
@@ -2071,14 +2088,14 @@ begin
           { Quake 2 door trigger field: the door box expanded by 60 horizontally }
           Box.Data[0] := Box.Data[0] - Vector3(60, 0, 60);
           Box.Data[1] := Box.Data[1] + Vector3(60, 0, 60);
-          if Box.Collision(PBox) then
+          if Box.Collision(PBox) or MonsterInField(Box) then
             Mover.Use;
         end else
         if Mover.AutoOpen and (Mover.State = msAtEnd) then
         begin
           Box.Data[0] := Box.Data[0] - Vector3(60, 0, 60);
           Box.Data[1] := Box.Data[1] + Vector3(60, 0, 60);
-          if Box.Collision(PBox) then
+          if Box.Collision(PBox) or MonsterInField(Box) then
             Mover.StateTimer := Mover.WaitTime;
         end;
       mkPlat:

@@ -365,13 +365,17 @@ begin
           FEditor.Tool := etEntity;
         end;
     end else
+    if (Cmd = 'fill') and (Words.Count > 4) then
+      FEditor.FillRect(StrToIntDef(Words[1], 0), StrToIntDef(Words[2], 0), StrToIntDef(Words[3], 0),
+        StrToIntDef(Words[4], 0))
+    else
     if (Cmd = 'brush') and (Words.Count > 3) then
     begin
       FEditor.BrushFloor := StrToIntDef(Words[1], 0);
       FEditor.BrushCeil := StrToIntDef(Words[2], 160);
       FEditor.BrushTheme := EnsureRange(StrToIntDef(Words[3], 0), 0, High(LevelThemes));
     end else
-      Console.Print('editor [new|generate [seed]|save [name]|load <name>|play|export|close|name <n>|tool <t>|entity <class>|brush <floor> <ceil> <theme>]');
+      Console.Print('editor [new|generate [seed]|save [name]|load <name>|play|export|close|name <n>|tool <t>|entity <class>|brush <floor> <ceil> <theme>|fill <x0> <y0> <x1> <y1>]');
   finally
     Words.Free;
   end;
