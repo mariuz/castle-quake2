@@ -12,7 +12,7 @@ uses
 
 type
   TMenuAction = (
-    maNone, maNewGame, maWarpMap, maToggleCamera, maSettingsChanged, maQuit
+    maNone, maNewGame, maWarpMap, maToggleCamera, maSettingsChanged, maLevelEditor, maQuit
   );
 
   TMenuPage = (smMain, smSkill, smMaps, smOptions, smControls, smShowcase);
@@ -139,6 +139,7 @@ begin
         FItems.Add('Map Warp');
         FItems.Add('Options');
         FItems.Add('Random Level');
+        FItems.Add('Level Editor');
         FItems.Add('CGE Features Showcase');
         FItems.Add('Quit');
       end;
@@ -267,8 +268,9 @@ begin
               FRandomGame := True;
               ShowPage(smSkill);
             end;
-          4: ShowPage(smShowcase);
-          5: if Assigned(FOnMenuAction) then FOnMenuAction(maQuit, '');
+          4: if Assigned(FOnMenuAction) then FOnMenuAction(maLevelEditor, '');
+          5: ShowPage(smShowcase);
+          6: if Assigned(FOnMenuAction) then FOnMenuAction(maQuit, '');
         end;
       end;
     smSkill:

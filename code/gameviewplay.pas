@@ -15,7 +15,7 @@ uses
   CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound,
   QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad, QuakeTouch,
-  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevelGen, fpjson, jsonparser, CastleDownload, CastleUriUtils;
+  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevel, QuakeLevelGen, QuakeLevelEditor, QuakeBspBuilder, fpjson, jsonparser, CastleDownload, CastleUriUtils;
 
 type
   TCameraMode = (cmFirstPerson, cmNoclip);
@@ -38,6 +38,9 @@ type
     Hud: TQuakeHud;
     Console: TQuakeConsole;
     Menu: TQuakeMenu;
+  private
+    FEditor: TQuakeLevelEditor;
+  published
     LabelFps: TCastleLabel;
   private
     FWorld: TQuakeWorld;
@@ -99,6 +102,12 @@ type
     procedure TouchUse(Sender: TObject);
     procedure TouchNextWeapon(Sender: TObject);
     procedure TouchMenu(Sender: TObject);
+    { The level editor (created when first opened) }
+    procedure OpenEditor;
+    function EditorOpen: Boolean;
+    procedure EditorPlay(const Level: TQuakeLevel);
+    procedure EditorClose(const Level: TQuakeLevel);
+    procedure EditorCommand(const Args: String);
     procedure UpdateMovementInput(const SecondsPassed: Single);
     procedure BeginIntermission;
     procedure EndIntermission;
@@ -212,6 +221,162 @@ begin
     CycleWeapon(1);
 end;
 
+function SplitArgs(const Args: String): TStringList;
+var
+  I: Integer;
+  Word: String;
+  Quoted, HasWord: Boolean;
+begin
+  Result := TStringList.Create;
+  Word := '';
+  Quoted := False;
+  HasWord := False;
+  for I := 1 to Length(Args) do
+    if Args[I] = '"' then
+    begin
+      Quoted := not Quoted;
+      HasWord := True;
+    end else
+    if (Args[I] = ' ') and not Quoted then
+    begin
+      if HasWord then
+        Result.Add(Word);
+      Word := '';
+      HasWord := False;
+    end else
+    begin
+      Word := Word + Args[I];
+      HasWord := True;
+    end;
+  if HasWord then
+    Result.Add(Word);
+end;
+
+procedure TViewPlay.OpenEditor;
+begin
+  if FEditor = nil then
+  begin
+    FEditor := TQuakeLevelEditor.Create(FreeAtStop);
+    FEditor.Name := 'LevelEditor';
+    FEditor.OnPlay := @EditorPlay;
+    FEditor.OnClose := @EditorClose;
+    InsertFront(FEditor);
+    { The console stays usable over the editor }
+    Console.Parent.InsertFront(Console);
+  end;
+  Menu.Exists := False;
+  FEditor.Exists := True;
+  WalkNavigation.MouseLook := False;
+  WritelnLog('GameViewPlay', 'Level editor opened');
+end;
+
+function TViewPlay.EditorOpen: Boolean;
+begin
+  Result := (FEditor <> nil) and FEditor.Exists;
+end;
+
+procedure TViewPlay.EditorPlay(const Level: TQuakeLevel);
+var
+  BuiltMap: String;
+begin
+  { Saved too, so restarts and savegames can build it again (MissingMapHook) }
+  try
+    Level.SaveToFile(LevelFileUrl(Level.Name));
+  except
+    on E: Exception do
+      WritelnWarning('GameViewPlay', 'Cannot save level "%s": %s', [Level.Name, E.Message]);
+  end;
+  try
+    BuiltMap := RegisterLevelMap(Level);
+  except
+    on E: Exception do
+    begin
+      FEditor.ShowStatus('Cannot build the level: ' + E.Message);
+      Exit;
+    end;
+  end;
+  FEditor.Exists := False;
+  WalkNavigation.MouseLook := WantMouseLook;
+  { A new unit: no remembered state of an older build of this level }
+  LoadLevel('*' + BuiltMap);
+end;
+
+procedure TViewPlay.EditorClose(const Level: TQuakeLevel);
+begin
+  FEditor.Exists := False;
+  Menu.Exists := True;
+end;
+
+procedure TViewPlay.EditorCommand(const Args: String);
+var
+  Words: TStringList;
+  Cmd: String;
+  T: TLevelEditTool;
+  I: Integer;
+begin
+  OpenEditor;
+  Words := SplitArgs(Args);
+  try
+    if Words.Count = 0 then
+      Exit;
+    Cmd := LowerCase(Words[0]);
+    if Cmd = 'new' then
+      FEditor.RunCommand(ecNew)
+    else
+    if (Cmd = 'generate') and (Words.Count > 1) then
+      FEditor.Generate(StrToIntDef(Words[1], 1))
+    else
+    if Cmd = 'generate' then
+      FEditor.RunCommand(ecGenerate)
+    else
+    if Cmd = 'save' then
+    begin
+      if Words.Count > 1 then
+        FEditor.Level.Name := Words[1];
+      FEditor.SaveLevel;
+    end else
+    if (Cmd = 'load') and (Words.Count > 1) then
+      FEditor.LoadLevel(Words[1])
+    else
+    if Cmd = 'play' then
+      FEditor.RunCommand(ecPlay)
+    else
+    if Cmd = 'export' then
+      FEditor.RunCommand(ecExport)
+    else
+    if Cmd = 'close' then
+      FEditor.RunCommand(ecClose)
+    else
+    if (Cmd = 'name') and (Words.Count > 1) then
+      FEditor.Level.Name := Words[1]
+    else
+    if (Cmd = 'tool') and (Words.Count > 1) then
+    begin
+      for T := Low(TLevelEditTool) to High(TLevelEditTool) do
+        if SameText(ToolNames[T], Words[1]) then
+          FEditor.Tool := T;
+    end else
+    if (Cmd = 'entity') and (Words.Count > 1) then
+    begin
+      for I := 0 to High(EditorEntityClasses) do
+        if SameText(EditorEntityClasses[I], Words[1]) then
+        begin
+          FEditor.EntityIndex := I;
+          FEditor.Tool := etEntity;
+        end;
+    end else
+    if (Cmd = 'brush') and (Words.Count > 3) then
+    begin
+      FEditor.BrushFloor := StrToIntDef(Words[1], 0);
+      FEditor.BrushCeil := StrToIntDef(Words[2], 160);
+      FEditor.BrushTheme := EnsureRange(StrToIntDef(Words[3], 0), 0, High(LevelThemes));
+    end else
+      Console.Print('editor [new|generate [seed]|save [name]|load <name>|play|export|close|name <n>|tool <t>|entity <class>|brush <floor> <ceil> <theme>]');
+  finally
+    Words.Free;
+  end;
+end;
+
 procedure TViewPlay.TouchMenu(Sender: TObject);
 begin
   Menu.Exists := True;
@@ -305,7 +470,7 @@ var
   Pad: TGamepadInput;
   Look: TVector2;
 begin
-  Typing := Console.IsOpen or Menu.Exists or FIntermission or FWorld.Dead;
+  Typing := Console.IsOpen or Menu.Exists or FIntermission or FWorld.Dead or EditorOpen;
   FGamepadFire := False;
   PlayerMovement.InputYaw := 0;
   PlayerMovement.InputPitch := 0;
@@ -1259,6 +1424,10 @@ begin
   if LabelFps.Exists then
     LabelFps.Caption := 'FPS: ' + Container.Fps.ToString;
 
+  { The level editor covers the game: the world waits }
+  if EditorOpen then
+    Exit;
+
   { Intermission: world frozen until a key press (or 8 seconds) }
   if FIntermission then
   begin
@@ -1322,6 +1491,16 @@ begin
 
   if Console.IsOpen then
     Exit(Console.Press(Event));
+
+  if EditorOpen then
+  begin
+    if Event.IsKey(keyBackQuote) or (Event.KeyString = '~') or (Event.KeyString = '`') then
+    begin
+      Console.Toggle;
+      Exit(True);
+    end;
+    Exit(FEditor.Press(Event));
+  end;
 
   if Menu.Exists then
   begin
@@ -1423,36 +1602,6 @@ begin
 end;
 
 { Words of a console line; "double quotes" keep spaces }
-function SplitArgs(const Args: String): TStringList;
-var
-  I: Integer;
-  Word: String;
-  Quoted, HasWord: Boolean;
-begin
-  Result := TStringList.Create;
-  Word := '';
-  Quoted := False;
-  HasWord := False;
-  for I := 1 to Length(Args) do
-    if Args[I] = '"' then
-    begin
-      Quoted := not Quoted;
-      HasWord := True;
-    end else
-    if (Args[I] = ' ') and not Quoted then
-    begin
-      if HasWord then
-        Result.Add(Word);
-      Word := '';
-      HasWord := False;
-    end else
-    begin
-      Word := Word + Args[I];
-      HasWord := True;
-    end;
-  if HasWord then
-    Result.Add(Word);
-end;
 
 procedure TViewPlay.SpawnFromConsole(const Args: String);
 var
@@ -1548,6 +1697,9 @@ begin
     else
       Console.Print('Usage: map <mapname>');
   end else
+  if Cmd = 'editor' then
+    EditorCommand(Args)
+  else
   if Cmd = 'randmap' then
   begin
     { A random level (QuakeLevelGen): the given seed, else a new one }
@@ -1681,6 +1833,8 @@ begin
         SetCameraMode(cmNoclip)
       else
         SetCameraMode(cmFirstPerson);
+    maLevelEditor:
+      OpenEditor;
     maQuit:
       Application.Terminate;
   end;
