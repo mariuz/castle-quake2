@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.8.1 — 2026-10-24
+
+Flyers fight up close and the tank picks its attacks like Quake 2. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - Flyers slash with their wing blades when the player is close (`flyer_melee`: 5 damage a wing, repeated most of the time while he stays in reach), and the tank picks its attack by distance like `tank_attack` (rockets only beyond 250 units, blaster or machinegun closer).
 - Fixed: a monster with a gun swinging at the player up close (the infantry's gun butt, now the flyer's blades) could hit from as far as its gun reaches; melee hits now reach 80 units like Quake 2's `fire_hit`.

@@ -35,7 +35,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 
 ## Next: suggested improvements (Phase 6, prioritised)
 
-Phase 5 is complete; v0.3.0 to v0.8.0 are released. What would help most now, roughly in order of value for effort:
+Phase 5 is complete; v0.3.0 to v0.8.1 are released. What would help most now, roughly in order of value for effort:
 
 1. **Try it on real hardware** (small effort, removes the biggest unknowns). Gamepad, Android touch and GPU performance were only tested headless. Install the APK on a phone, play with a controller, and run on a real GPU with `fps` on. Expected follow-ups: touch button sizes and look speed, ~~menu and HUD scaling on phone screens~~ (done: *Options → Interface Size*, Auto = 1.75× on touch screens, on top of CGE's UI scaling; the menu shows as many rows as fit and taps whole rows), an `AndroidSigningProperties.txt` release key and a proper launcher icon.
 2. ~~**Monsters and shots on the BSP traces**~~ — done (monsters move with `SV_movestep` / `M_CheckBottom`, shots / projectiles / sight / lasers trace `MASK_SHOT` / `MASK_OPAQUE`). The player now collides with the real brushes, but monsters still move with CGE mesh collisions and the `PlayerBlockBox` workaround, and hitscan / projectiles / line of sight use `WorldRayCast` against render meshes. Porting `SV_movestep` / `M_CheckBottom` (step up 18, don't walk off ledges) and using `TQuakeCollision` for shots and sight would make monsters respect player-clip / monster-clip brushes, ride and be pushed by movers, and make sight checks much cheaper.
