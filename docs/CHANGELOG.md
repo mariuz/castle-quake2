@@ -6,6 +6,7 @@
 - Random levels lock the exit with the blue key on even seeds (with the switch on odd ones), turn a third of the pools into shallow slime pits, and put a teleporter in the secret room that takes you back to the start.
 - Teleporters show their pad (the `dmspot` model), as in Quake 2.
 - Autotest scripts can now stand next to things in parts of the level that are not drawn at the moment.
+- Fixed parts of the sky showing as a dark blue patch: the sides of the skybox were sometimes partly transparent.
 
 ## v0.12.0 — 2026-10-24
 

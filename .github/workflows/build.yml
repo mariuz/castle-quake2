@@ -237,16 +237,16 @@ jobs:
           # (after demo1's opening explosions, whose lights would differ in time)
           # Random effects (demo1's func_timer sparks) can land in one run only,
           # so a differing pair is taken again once; culling bugs differ twice.
-          # (Items 3, 8 and 11: placements that work; I:0, I:12 and I:24 never
-          # found a spot, so these shots used to be taken at the start)
-          views="I:3,W:0.3,S,T:120,W:0.2,S,T:120,W:0.2,S,I:8,W:0.3,S,T:120,W:0.2,S,I:11,W:0.3,S,T:180,W:0.2,S"
+          # (Items 0, 3, 8 and 11: placements that work; I:0 looks up at the
+          # sky of the courtyard; I:12 and I:24 never found a spot)
+          views="I:0,W:0.3,S,T:120,W:0.2,S,T:120,W:0.2,S,I:3,W:0.3,S,T:120,W:0.2,S,T:120,W:0.2,S,I:8,W:0.3,S,T:120,W:0.2,S,I:11,W:0.3,S,T:180,W:0.2,S"
           for attempt in 1 2; do
             for mode in vis novis; do
               pre="O:notarget,O:god"; [ "$mode" = novis ] && pre="$pre,O:novis"
               timeout 300 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 "test_output/compare/pvs_$mode" --demo "$pre,W:4,$views,Q" > "test_output/compare/pvs_$mode.log" 2>&1
             done
             pvs_status=0
-            for k in 1 2 3 4 5 6 7; do
+            for k in 1 2 3 4 5 6 7 8 9 10; do
               (cd tests && ./castle-quake2-tests --compare "../test_output/compare/pvs_novis_$k.png" "../test_output/compare/pvs_vis_$k.png" "../test_output/compare/pvs_diff_$k.png" 2) || pvs_status=1
             done
             [ "$pvs_status" -eq 0 ] && break

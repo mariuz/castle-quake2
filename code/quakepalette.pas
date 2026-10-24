@@ -422,6 +422,10 @@ begin
   else
   begin
     RgbAlpha := TRGBAlphaImage.Create(Img.Width, Img.Height);
+    { DrawFrom copies only the colours of an image without alpha (e.g. a
+      sky side from a TGA), so make it opaque first: uninitialized alpha
+      made such textures randomly transparent }
+    RgbAlpha.Clear(Vector4Byte(0, 0, 0, 255));
     RgbAlpha.DrawFrom(Img, 0, 0);
   end;
 
