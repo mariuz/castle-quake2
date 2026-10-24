@@ -128,7 +128,7 @@ type
     procedure AddDummySolidLeaf;
     function NewLeaf(const Solid: Boolean; const Mins, Maxs: TVector3): Integer;
     { A leaf of water (CONTENTS_WATER, its own cluster, a water brush) }
-    function NewWaterLeaf(const Mins, Maxs: TVector3): Integer;
+    function NewWaterLeaf(const Mins, Maxs: TVector3; const Contents: Integer): Integer;
     { An empty leaf of a brush model (no cluster) }
     function NewModelEmptyLeaf(const Mins, Maxs: TVector3): Integer;
     function AddBoxBrush(const Mins, Maxs: TVector3; const Contents: Integer): Integer;
@@ -261,8 +261,8 @@ begin
   if C^.Solid then
     Result := '#'
   else
-    Result := Format('%d,%d,%d,%d,%d,%d', [C^.Floor, C^.Ceil, Ord(C^.Sky), C^.Theme, Ord(C^.Door),
-      IfThen(CellHasWater(C), C^.Water, 0)]);
+    Result := Format('%d,%d,%d,%d,%d,%d,%d', [C^.Floor, C^.Ceil, Ord(C^.Sky), C^.Theme, Ord(C^.Door),
+      IfThen(CellHasWater(C), C^.Water, 0), Ord(CellHasWater(C) and C^.Slime)]);
 end;
 
 function TBuilder.Uniform(const X0, Y0, X1, Y1: Integer): Boolean;
@@ -348,7 +348,7 @@ begin
   Result := Brushes.Add(B);
 end;
 
-function TBuilder.NewWaterLeaf(const Mins, Maxs: TVector3): Integer;
+function TBuilder.NewWaterLeaf(const Mins, Maxs: TVector3; const Contents: Integer): Integer;
 var
   L: TBSPLeaf;
   I: Integer;
@@ -359,13 +359,13 @@ begin
     L.Mins[I] := ClampShort(Mins.Data[I]);
     L.Maxs[I] := ClampShort(Maxs.Data[I]);
   end;
-  L.Contents := CONTENTS_WATER;
+  L.Contents := Contents;
   L.Cluster := Clusters;
   Inc(Clusters);
   L.Area := 1;
   L.FirstLeafBrush := LeafBrushes.Count;
   L.NumLeafBrushes := 1;
-  LeafBrushes.Add(AddBoxBrush(Mins, Maxs, CONTENTS_WATER));
+  LeafBrushes.Add(AddBoxBrush(Mins, Maxs, Contents));
   Result := Leafs.Add(L);
 end;
 
@@ -455,7 +455,8 @@ begin
     if R.NodeWater >= 0 then
     begin
       R.Leaf := NewLeaf(False, Vector3(Mins.X, Mins.Y, C^.Water), Vector3(Maxs.X, Maxs.Y, C^.Ceil));
-      R.WaterLeaf := NewWaterLeaf(Vector3(Mins.X, Mins.Y, C^.Floor), Vector3(Maxs.X, Maxs.Y, C^.Water));
+      R.WaterLeaf := NewWaterLeaf(Vector3(Mins.X, Mins.Y, C^.Floor), Vector3(Maxs.X, Maxs.Y, C^.Water),
+        IfThen(C^.Slime, CONTENTS_SLIME, CONTENTS_WATER));
     end else
       R.Leaf := NewLeaf(False, Vector3(Mins.X, Mins.Y, C^.Floor), Vector3(Maxs.X, Maxs.Y, C^.Ceil));
     Regions.Add(R);
@@ -693,7 +694,8 @@ var
   N: TBSPNode;
   L: TBSPLeaf;
   Theme: TLevelTheme;
-  CeilTex: String;
+  CeilTex, LiquidTex: String;
+  LiquidFlags: Integer;
   HasLight: Boolean;
   LX, LY: Integer;
 begin
@@ -757,19 +759,29 @@ begin
     { The water surface, seen from above and from below (warped, no
       lightmap) }
     if R.NodeWater >= 0 then
+    begin
+      { Water is translucent; slime (sewage) is opaque }
+      if C^.Slime then
+      begin
+        LiquidTex := LevelSlimeTexture;
+        LiquidFlags := SURF_WARP;
+      end else
+      begin
+        LiquidTex := LevelWaterTexture;
+        LiquidFlags := SURF_WARP or SURF_TRANS33;
+      end;
       for Y := R.Y0 to R.Y1 - 1 do
         for X := R.X0 to R.X1 - 1 do
         begin
           FA.Axis := 2;
           FA.Positive := True;
           AddFace(FA, C^.Water, Vector3(X * LevelCellSize, Y * LevelCellSize, 0),
-            Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, 0), LevelWaterTexture,
-            SURF_WARP or SURF_TRANS33);
+            Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, 0), LiquidTex, LiquidFlags);
           FA.Positive := False;
           AddFace(FA, C^.Water, Vector3(X * LevelCellSize, Y * LevelCellSize, 0),
-            Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, 0), LevelWaterTexture,
-            SURF_WARP or SURF_TRANS33);
+            Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, 0), LiquidTex, LiquidFlags);
         end;
+    end;
 
     { Both the air and the water leaf see the region's faces }
     L := Leafs[R.Leaf];
@@ -919,6 +931,8 @@ var
   FA: TFaceAxis;
   Dist: Single;
   Tex, Ent: String;
+  KeyModel: TBSPModel;
+  KeyLocks: set of Byte;
 
   function Member(const C: PLevelCell): Boolean;
   begin
@@ -928,7 +942,7 @@ var
       Result := C^.Lift and (C^.Floor = Start^.Floor) and (C^.LiftTop = Start^.LiftTop)
     else
       Result := C^.Door and (C^.Floor = Start^.Floor) and (C^.Ceil = Start^.Ceil) and
-        (C^.Channel = Start^.Channel);
+        (C^.Channel = Start^.Channel) and (C^.Key = Start^.Key);
   end;
 
 begin
@@ -936,10 +950,7 @@ begin
   for I := 0 to High(DoorComp) do
     DoorComp[I] := -1;
   CurrentDoor := 0;
-  if Lifts then
-    Tex := LevelLiftTexture
-  else
-    Tex := LevelDoorTexture;
+  KeyLocks := [];
   Queue := specialize TList<Integer>.Create;
   try
     for Y := 0 to Level.Height - 1 do
@@ -976,6 +987,13 @@ begin
           end;
         end;
 
+        if Lifts then
+          Tex := LevelLiftTexture
+        else
+        if Start^.Key > 0 then
+          Tex := LevelKeyDoorTexture
+        else
+          Tex := LevelDoorTexture;
         { Doors fill floor to ceiling; a lift is a slab with its top at
           LiftTop (built up, it starts down at the floor) }
         if Lifts then
@@ -1046,6 +1064,13 @@ begin
             '"height" "%d"' + LineEnding + '"speed" "150"' + LineEnding,
             [Models.Count, Start^.LiftTop - Start^.Floor + 2])
         else
+        if Start^.Key > 0 then
+          { Locked: opened by the trigger_key of its key, then stays open }
+          Ent := Format('"classname" "func_door"' + LineEnding + '"model" "*%d"' + LineEnding +
+            '"angle" "-1"' + LineEnding + '"speed" "100"' + LineEnding + '"wait" "-1"' + LineEnding +
+            '"lip" "8"' + LineEnding + '"targetname" "keydoor%d"' + LineEnding,
+            [Models.Count, Start^.Key])
+        else
         if Start^.Channel > 0 then
           { Opened by the channel's buttons, then stays open }
           Ent := Format('"classname" "func_door"' + LineEnding + '"model" "*%d"' + LineEnding +
@@ -1059,6 +1084,32 @@ begin
         DoorEntities := DoorEntities + '{' + LineEnding + Ent + '}' + LineEnding;
         Models.Add(M);
         Inc(CurrentDoor);
+        if (not Lifts) and (Start^.Key > 0) then
+        begin
+          { Quake 2's locked door: a trigger_multiple around the door fires
+            a trigger_key, which opens the doors of that key when the player
+            has it ("You need the Blue Key" otherwise). One trigger_key per
+            key (it takes the key), so one key opens all its doors. }
+          KeyModel := Default(TBSPModel);
+          KeyModel.Mins := M.Mins - Vector3(40, 40, 0);
+          KeyModel.Maxs := M.Maxs + Vector3(40, 40, 0);
+          KeyModel.HeadNode := BuildBoxModel(KeyModel.Mins, KeyModel.Maxs);
+          KeyModel.FirstFace := Faces.Count;
+          KeyModel.NumFaces := 0;
+          DoorEntities := DoorEntities + Format('{' + LineEnding + '"classname" "trigger_multiple"' + LineEnding +
+            '"model" "*%d"' + LineEnding + '"target" "keylock%d"' + LineEnding + '"wait" "2"' + LineEnding +
+            '}' + LineEnding, [Models.Count, Start^.Key]);
+          if not (Start^.Key in KeyLocks) then
+          begin
+            Include(KeyLocks, Start^.Key);
+            DoorEntities := DoorEntities + Format('{' + LineEnding + '"classname" "trigger_key"' + LineEnding +
+              '"origin" "%d %d %d"' + LineEnding + '"targetname" "keylock%d"' + LineEnding +
+              '"target" "keydoor%d"' + LineEnding + '"item" "%s"' + LineEnding + '}' + LineEnding,
+              [Round((M.Mins.X + M.Maxs.X) / 2), Round((M.Mins.Y + M.Maxs.Y) / 2), Round(M.Mins.Z + 32),
+               Start^.Key, Start^.Key, LevelKeyClasses[Start^.Key]]);
+          end;
+          Models.Add(KeyModel);
+        end;
       end;
   finally
     Queue.Free;

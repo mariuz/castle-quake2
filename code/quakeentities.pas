@@ -385,7 +385,8 @@ type
   TQuakeSpeakerList = specialize TObjectList<TQuakeSpeaker>;
 
   TPropKind = (pkExplobox, pkBanner, pkDeadSoldier, pkSatelliteDish, pkStroggShip, pkGibHead,
-    pkViper, pkBigViper, pkViperBomb, pkBlackHole, pkEasterTank, pkEasterChick, pkEasterChick2);
+    pkViper, pkBigViper, pkViperBomb, pkBlackHole, pkEasterTank, pkEasterChick, pkEasterChick2,
+    pkTeleporter);
 
   { misc_* decorations: exploding barrels, banners, corpses, the satellite dish,
     flying Strogg ships and vipers (follow path_corners when triggered), gib
@@ -2271,7 +2272,7 @@ const
     'models/ships/viper/tris.md2', 'models/ships/bigviper/tris.md2',
     'models/objects/bomb/tris.md2', 'models/objects/black/tris.md2',
     'models/monsters/tank/tris.md2', 'models/monsters/bitch/tris.md2',
-    'models/monsters/bitch/tris.md2');
+    'models/monsters/bitch/tris.md2', 'models/objects/dmspot/tris.md2');
 var
   Pos: TVector3;
   Flags, Frame: Integer;
@@ -2286,7 +2287,8 @@ begin
   Transform.Name := Format('Prop%.3d_%s', [NextEntityNumber, AEntity.ClassName]);
   Transform.Translation := Pos;
   Transform.Rotation := Vector4(0, 1, 0, DegToRad(AEntity.Angle));
-  Model := Md2Manager.CreateInstance(Models[AKind]);
+  { SP_misc_teleporter: the dmspot pad with its second skin }
+  Model := Md2Manager.CreateInstance(Models[AKind], IfThen(AKind = pkTeleporter, 1, 0));
   if Model <> nil then
   begin
     Model.Scene.Name := Transform.Name + '_Model';

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Keys, slime and teleporters in levels. The level editor has a **Key** tool (K; Y switches between the blue and red key): those doors stay shut ("You need the Blue Key") until you bring the key, which then opens all doors of its colour. It also has a **Slime** tool (M): a damaging green pool. Keys and teleporters are in the entity palette; each teleporter takes you to the teleporter destination of the same number.
+- Random levels lock the exit with the blue key on even seeds (with the switch on odd ones), turn a third of the pools into shallow slime pits, and put a teleporter in the secret room that takes you back to the start.
+- Teleporters show their pad (the `dmspot` model), as in Quake 2.
+- Autotest scripts can now stand next to things in parts of the level that are not drawn at the moment.
+
 ## v0.12.0 — 2026-10-24
 
 Real visibility in random and edited levels: only what you can see is drawn. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.

@@ -15,7 +15,7 @@ uses
   CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound,
   QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad, QuakeTouch,
-  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevel, QuakeLevelGen, QuakeLevelEditor, QuakeBspBuilder, fpjson, jsonparser, CastleDownload, CastleUriUtils;
+  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevel, QuakeLevelGen, QuakeLevelEditor, QuakeBspBuilder, QuakeTrace, fpjson, jsonparser, CastleDownload, CastleUriUtils;
 
 type
   TCameraMode = (cmFirstPerson, cmNoclip);
@@ -126,6 +126,7 @@ type
     procedure LoadGame(const SaveName: String);
     { Autotest helper: stand on a floor near Target, looking at it }
     procedure GoNear(const Target: TVector3);
+    function GoNearByTraces(const Target: TVector3): Boolean;
     procedure QuitNow;
     procedure RunMapReport;
   public
@@ -372,6 +373,14 @@ begin
     if (Cmd = 'channel') and (Words.Count > 1) then
       FEditor.BrushChannel := EnsureRange(StrToIntDef(Words[1], 0), 0, 9)
     else
+    if (Cmd = 'key') and (Words.Count > 1) then
+    begin
+      { editor key blue|red|1|2 }
+      if SameText(Words[1], 'red') or (Words[1] = '2') then
+        FEditor.BrushKey := 2
+      else
+        FEditor.BrushKey := 1;
+    end else
     if (Cmd = 'lift') and (Words.Count > 1) then
       FEditor.BrushLift := Max(32, StrToIntDef(Words[1], 96))
     else
@@ -385,7 +394,7 @@ begin
       FEditor.BrushCeil := StrToIntDef(Words[2], 160);
       FEditor.BrushTheme := EnsureRange(StrToIntDef(Words[3], 0), 0, High(LevelThemes));
     end else
-      Console.Print('editor [new|generate [seed]|save [name]|load <name>|play|export|close|name <n>|tool <t>|entity <class>|brush <floor> <ceil> <theme>|channel <0-9>|lift <height>|fill <x0> <y0> <x1> <y1>]');
+      Console.Print('editor [new|generate [seed]|save [name]|load <name>|play|export|close|name <n>|tool <t>|entity <class>|brush <floor> <ceil> <theme>|channel <0-9>|lift <height>|key <blue|red>|fill <x0> <y0> <x1> <y1>]');
   finally
     Words.Free;
   end;
@@ -1111,7 +1120,44 @@ begin
       WritelnLog('GameViewPlay', 'GoNear %s -> %s', [Target.ToString, Spot.ToString]);
       Exit;
     end;
+  { Render meshes outside the PVS are hidden and missed by the probes above:
+    try again with Quake traces (brushes and movers, any culling) }
+  if GoNearByTraces(Target) then
+    Exit;
   WritelnWarning('GameViewPlay', 'GoNear %s: no free spot found', [Target.ToString]);
+end;
+
+function TViewPlay.GoNearByTraces(const Target: TVector3): Boolean;
+const
+  BoxMins: TVector3 = (X: -16; Y: -16; Z: -24);
+  BoxMaxs: TVector3 = (X: 16; Y: 16; Z: 32);
+var
+  J, Dist: Integer;
+  T, Spot, Eye: TVector3;
+  Tr: TQuakeTrace;
+begin
+  T := CgeToQuake(Target);
+  for Dist in [160, 110, 220, 70] do
+    for J := 0 to 7 do
+    begin
+      Spot := T + Vector3(Cos(J * Pi / 4), Sin(J * Pi / 4), 0) * Dist;
+      { A free spot, in sight of the target (up to 48 units: a door's face) }
+      Tr := FWorld.WorldTrace(Spot, Spot, BoxMins, BoxMaxs, MASK_PLAYERSOLID, nil);
+      if Tr.StartSolid then
+        Continue;
+      Tr := FWorld.WorldTrace(Spot, T, TVector3.Zero, TVector3.Zero, CONTENTS_SOLID or CONTENTS_WINDOW, nil);
+      if Tr.StartSolid or (Tr.Fraction * Dist < Dist - 48) then
+        Continue;
+      { A floor less than 160 units below }
+      Tr := FWorld.WorldTrace(Spot, Spot - Vector3(0, 0, 160), BoxMins, BoxMaxs, MASK_PLAYERSOLID, nil);
+      if Tr.StartSolid or (Tr.Fraction >= 1) or (Tr.Normal.Z < 0.7) then
+        Continue;
+      Eye := QuakeToCge(Tr.EndPos) + Vector3(0, PlayerEyeHeight - 24, 0);
+      MainViewport.Camera.SetWorldView(Eye, (Target - Eye).Normalize, Vector3(0, 1, 0));
+      WritelnLog('GameViewPlay', 'GoNear %s -> %s (traces)', [Target.ToString, Eye.ToString]);
+      Exit(True);
+    end;
+  Result := False;
 end;
 
 procedure TViewPlay.BeginIntermission;

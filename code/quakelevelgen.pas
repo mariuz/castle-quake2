@@ -44,6 +44,7 @@ type
 
   TLevelGenReport = record
     Rooms, Links, Loops, OpenCells, FixedCells, WalledCells, Monsters, Items, Doors, Pools, Lifts, Switches: Integer;
+    SlimePools, KeyDoors, Teleporters: Integer;
     StartRoom, ExitRoom, SecretRoom: Integer;
   end;
 
@@ -61,6 +62,9 @@ function IsRandomMapName(const MapName: String; out Seed: Cardinal): Boolean;
 { Open cells that can't be reached on foot from (X, Y) (steps <= 16,
   headroom >= 64) }
 function UnreachableCells(const Level: TQuakeLevel; const X, Y: Integer): Integer;
+
+{ Can (TX, TY) be reached on foot from (X, Y) with the locked doors shut? }
+function ReachableWithLockedDoors(const Level: TQuakeLevel; const X, Y, TX, TY: Integer): Boolean;
 
 { Where the level editor saves the level of this name }
 function LevelFileUrl(const Name: String): String;
@@ -256,6 +260,33 @@ begin
   for I := 0 to High(Reached) do
     if (not Reached[I]) and not Level.Cell(I mod Level.Width, I div Level.Width)^.Solid then
       Inc(Result);
+end;
+
+function ReachableWithLockedDoors(const Level: TQuakeLevel; const X, Y, TX, TY: Integer): Boolean;
+var
+  Reached: array of Boolean;
+  Locked: specialize TList<Integer>;
+  I: Integer;
+begin
+  Locked := specialize TList<Integer>.Create;
+  try
+    for I := 0 to Level.Width * Level.Height - 1 do
+      if (not Level.Cell(I mod Level.Width, I div Level.Width)^.Solid) and
+         ((Level.Cell(I mod Level.Width, I div Level.Width)^.Key > 0) or
+          (Level.Cell(I mod Level.Width, I div Level.Width)^.Channel > 0) and
+          Level.Cell(I mod Level.Width, I div Level.Width)^.Door) then
+      begin
+        Locked.Add(I);
+        Level.Cell(I mod Level.Width, I div Level.Width)^.Solid := True;
+      end;
+    SetLength(Reached, Level.Width * Level.Height);
+    FloodReach(Level, X, Y, Reached);
+    Result := Reached[TY * Level.Width + TX];
+  finally
+    for I in Locked do
+      Level.Cell(I mod Level.Width, I div Level.Width)^.Solid := False;
+    Locked.Free;
+  end;
 end;
 
 function Round16(const V: Single): Integer;
@@ -642,10 +673,22 @@ var
             C := Level.Cell(X, Y);
             if C^.Solid or (CellRoom(X, Y) <> I) then
               Continue;
-            C^.Floor := Rooms[I].Floor - 64;
-            C^.Wet := True;
-            C^.Water := Rooms[I].Floor - 8;
+            if (Seed + Cardinal(I)) mod 3 = 0 then
+            begin
+              { A third of the pools: a shallow slime pit (hurts) }
+              C^.Floor := Rooms[I].Floor - 2 * LevelHeightStep;
+              C^.Wet := True;
+              C^.Slime := True;
+              C^.Water := Rooms[I].Floor - 16;
+            end else
+            begin
+              C^.Floor := Rooms[I].Floor - 64;
+              C^.Wet := True;
+              C^.Water := Rooms[I].Floor - 8;
+            end;
           end;
+        if (Seed + Cardinal(I)) mod 3 = 0 then
+          Inc(Report.SlimePools);
         Inc(Report.Pools);
       end;
     end;
@@ -1053,16 +1096,31 @@ var
         R := Cands[Rnd.Int(Length(Cands))];
         if not FreeCell(R, BX, BY) then
           Continue;
-        C := Level.Cell(BX, BY);
-        C^.Button := True;
-        C^.Channel := 1;
-        for I in Entrances do
+        if Seed mod 2 = 0 then
         begin
-          C := Level.Cell(I mod Level.Width, I div Level.Width);
-          C^.Door := True;
+          { Even seeds: the exit is locked, its key lies where the button
+            would stand }
+          Level.AddEntityAtCell(LevelKeyClasses[1], BX, BY);
+          for I in Entrances do
+          begin
+            C := Level.Cell(I mod Level.Width, I div Level.Width);
+            C^.Door := True;
+            C^.Key := 1;
+          end;
+          Report.KeyDoors := 1;
+        end else
+        begin
+          C := Level.Cell(BX, BY);
+          C^.Button := True;
           C^.Channel := 1;
+          for I in Entrances do
+          begin
+            C := Level.Cell(I mod Level.Width, I div Level.Width);
+            C^.Door := True;
+            C^.Channel := 1;
+          end;
+          Report.Switches := 1;
         end;
-        Report.Switches := 1;
         Break;
       end;
     finally
@@ -1070,6 +1128,44 @@ var
       { Back to the reach with the doors open }
       FloodReach(Level, SX, SY, Reached);
     end;
+  end;
+
+  { A teleporter in a corner of the secret room back to the start room }
+  procedure AddSecretTeleporter(const SecretRoom, StartRoom: Integer);
+  var
+    S: TGenRoom;
+    X, Y, BX, BY, Dist, BestDist: Integer;
+  begin
+    if SecretRoom < 0 then
+      Exit;
+    S := Rooms[SecretRoom];
+    if Level.EntityAtCell(S.X, S.Y) >= 0 then
+      Exit;
+    { The destination: the free cell of the start room nearest its middle }
+    BestDist := MaxInt;
+    BX := -1;
+    BY := -1;
+    for Y := Rooms[StartRoom].Y to Rooms[StartRoom].Y + Rooms[StartRoom].H - 1 do
+      for X := Rooms[StartRoom].X to Rooms[StartRoom].X + Rooms[StartRoom].W - 1 do
+      begin
+        if Level.Cell(X, Y)^.Solid or CellHasWater(Level.Cell(X, Y)) or Level.Cell(X, Y)^.Lift or
+           Level.Cell(X, Y)^.Button or Level.Cell(X, Y)^.Door or not Reached[Y * Level.Width + X] or
+           (Level.EntityAtCell(X, Y) >= 0) then
+          Continue;
+        Dist := Sqr(X - RoomCenterX(StartRoom)) + Sqr(Y - RoomCenterY(StartRoom));
+        if (Dist > 0) and (Dist < BestDist) then
+        begin
+          BestDist := Dist;
+          BX := X;
+          BY := Y;
+        end;
+      end;
+    if BX < 0 then
+      Exit;
+    Level.AddEntityAtCell('misc_teleporter', S.X, S.Y);
+    Level.AddEntityAtCell('misc_teleporter_dest', BX, BY,
+      AngleTo(BX, BY, RoomCenterX(StartRoom), RoomCenterY(StartRoom)));
+    Report.Teleporters := 1;
   end;
 
   procedure AddExit(const ExitRoom: Integer);
@@ -1143,6 +1239,7 @@ begin
 
   AddLights;
   Populate(StartRoom, ExitRoom);
+  AddSecretTeleporter(Report.SecretRoom, StartRoom);
   AddExit(ExitRoom);
 
   Report.Rooms := Length(Rooms);
@@ -1180,9 +1277,10 @@ begin
     if IsRandomMapName(Name, Seed) then
     begin
       Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
-      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools, %d lifts, %d switches, %d monsters, %d items, secret room %d',
+      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools (%d slime), %d lifts, %d switches, %d key doors, %d teleporters, %d monsters, %d items, secret room %d',
         [Name, Report.Rooms, Report.Links, Report.Loops, Report.OpenCells, Report.FixedCells,
-         Report.WalledCells, Report.Doors, Report.Pools, Report.Lifts, Report.Switches, Report.Monsters,
+         Report.WalledCells, Report.Doors, Report.Pools, Report.SlimePools, Report.Lifts, Report.Switches,
+         Report.KeyDoors, Report.Teleporters, Report.Monsters,
          Report.Items, Report.SecretRoom]);
     end else
     if UriExists(LevelFileUrl(Name)) = ueFile then

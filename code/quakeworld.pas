@@ -726,6 +726,8 @@ begin
     { Teleporter pad trigger, around its origin }
     Trig := TQuakeTrigger.Create(Ent, Box3D(Pos - Vector3(24, 24, 24), Pos + Vector3(24, 32, 24)));
     FTriggers.Add(Trig);
+    { and the pad model }
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkTeleporter, Ent));
     Exit;
   end;
 
@@ -1165,20 +1167,26 @@ begin
     Exit;
   end;
 
-  { trigger_key: needs an item }
+  { trigger_key: needs an item; used once (Quake 2 clears its use), which
+    is kept in FCounters as -1 so savegames keep it }
   if CName = 'trigger_key' then
   begin
+    if FCounters.TryGetValue(Ent, Count) and (Count < 0) then
+      Exit;
     ItemDef := FindItemDef(LowerCase(Ent.GetField('item')));
     if (ItemDef <> nil) and ((FStats.Keys and Cardinal(ItemDef^.Amount)) = 0) then
     begin
       if FHud <> nil then
         FHud.ShowMessage('You need the ' + ItemDef^.Name);
+      WritelnLog('QuakeWorld', 'trigger_key "%s": you need the %s', [Ent.TargetName, ItemDef^.Name]);
       Sounds.Play('sound/misc/keytry.wav');
       Exit;
     end;
     Sounds.Play('sound/misc/keyuse.wav');
     if ItemDef <> nil then
       FStats.Keys := FStats.Keys and not Cardinal(ItemDef^.Amount);
+    FCounters.AddOrSetValue(Ent, -1);
+    WritelnLog('QuakeWorld', 'trigger_key "%s" unlocks "%s"', [Ent.TargetName, Ent.Target]);
     UseTargets(Ent.Target);
     Exit;
   end;

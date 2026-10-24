@@ -33,6 +33,8 @@ type
     { Water in the cell, its surface at height Water (above Floor) }
     Wet: Boolean;
     Water: SmallInt;
+    { The liquid is slime (CONTENTS_SLIME, hurts) instead of water }
+    Slime: Boolean;
     { A lift (func_plat): a slab moving between Floor and LiftTop; touching
       lift cells with the same heights are one lift }
     Lift: Boolean;
@@ -42,6 +44,9 @@ type
     { Switch channel 1..9: the buttons of a channel open its doors (which
       then stay open); 0 = a door that opens by itself }
     Channel: Byte;
+    { A locked door: 1 = blue key, 2 = red key opens it (then it stays
+      open); 0 = not locked }
+    Key: Byte;
   end;
   PLevelCell = ^TLevelCell;
 
@@ -122,6 +127,11 @@ const
   );
   LevelSkyTexture = 'e1u1/sky1';
   LevelWaterTexture = 'e1u1/bluwter';
+  { The demo has no slime texture: its warping sewage stands in }
+  LevelSlimeTexture = 'e1u1/sewer1';
+  LevelKeyDoorTexture = 'e1u1/keydr1_1';
+  { Key items of Key = 1, 2 }
+  LevelKeyClasses: array[1..2] of String = ('key_blue_key', 'key_red_key');
   LevelDoorTexture = 'e1u1/dr02_1';
   LevelLiftTexture = 'e1u1/wplat1_1';
   LevelButtonTexture = 'e1u1/btactmach0';
@@ -154,7 +164,7 @@ end;
 function EntityFloorOffset(const AClassName: String): Single;
 begin
   if (Copy(AClassName, 1, 8) = 'monster_') or (Copy(AClassName, 1, 12) = 'info_player_') or
-     (AClassName = 'misc_explobox') then
+     (AClassName = 'misc_explobox') or (Copy(AClassName, 1, 15) = 'misc_teleporter') then
     Result := 25
   else
   if (Copy(AClassName, 1, 5) = 'item_') or (Copy(AClassName, 1, 7) = 'weapon_') or
@@ -299,6 +309,8 @@ begin
         C^.Water := EnsureRange(Round(C^.Water / 8) * 8, C^.Floor + 8, C^.Ceil - 8)
       else
         C^.Wet := False;
+      if not C^.Wet then
+        C^.Slime := False;
       { A door under the sky or over water isn't supported }
       if C^.Door and (C^.Sky or C^.Wet) then
         C^.Door := False;
@@ -319,6 +331,11 @@ begin
       if C^.Button and (C^.Channel = 0) then
         C^.Channel := 1;
       C^.Channel := Min(C^.Channel, 9);
+      if (not C^.Door) or (C^.Key > High(LevelKeyClasses)) then
+        C^.Key := 0;
+      { A locked door opens with its key, not a switch }
+      if C^.Key > 0 then
+        C^.Channel := 0;
     end;
 end;
 
@@ -376,7 +393,7 @@ end;
 function TQuakeLevel.EntityText: String;
 var
   E: TLevelEntity;
-  I: Integer;
+  I, Teleporters, Dests: Integer;
   SB: TStringBuilder;
 
   procedure Pair(const K, V: String);
@@ -385,6 +402,8 @@ var
   end;
 
 begin
+  Teleporters := 0;
+  Dests := 0;
   SB := TStringBuilder.Create;
   try
     SB.Append('{').Append(LineEnding);
@@ -403,6 +422,18 @@ begin
         Pair('angle', FormatNum(E.Angle));
       for I := 0 to E.Keys.Count - 1 do
         Pair(E.Keys.Names[I], E.Keys.ValueFromIndex[I]);
+      { Teleporters without a target go to the destination of the same
+        number (the n-th misc_teleporter to the n-th misc_teleporter_dest) }
+      if (E.EntClass = 'misc_teleporter') and (E.Key('target') = '') then
+      begin
+        Inc(Teleporters);
+        Pair('target', 'teleport' + IntToStr(Teleporters));
+      end;
+      if (E.EntClass = 'misc_teleporter_dest') and (E.Key('targetname') = '') then
+      begin
+        Inc(Dests);
+        Pair('targetname', 'teleport' + IntToStr(Dests));
+      end;
       SB.Append('}').Append(LineEnding);
     end;
     Result := SB.ToString;
@@ -454,6 +485,10 @@ begin
             Row := Row + ',d';
           if CellHasWater(C) then
             Row := Row + ',w' + IntToStr(C^.Water);
+          if CellHasWater(C) and C^.Slime then
+            Row := Row + ',m';
+          if C^.Door and (C^.Key > 0) then
+            Row := Row + ',k' + IntToStr(C^.Key);
           if C^.Lift then
             Row := Row + ',l' + IntToStr(C^.LiftTop);
           if C^.Button then
@@ -553,6 +588,12 @@ begin
             end else
             if Vals[I] = 'b' then
               C^.Button := True
+            else
+            if Vals[I] = 'm' then
+              C^.Slime := True
+            else
+            if Copy(Vals[I], 1, 1) = 'k' then
+              C^.Key := StrToIntDef(Copy(Vals[I], 2, MaxInt), 0)
             else
             if Copy(Vals[I], 1, 1) = 'c' then
               C^.Channel := StrToIntDef(Copy(Vals[I], 2, MaxInt), 0);

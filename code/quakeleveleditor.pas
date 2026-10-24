@@ -28,7 +28,7 @@ uses
 
 type
   TLevelEditTool = (etFloor, etWall, etRaise, etLower, etCeilUp, etCeilDown, etSky, etTheme,
-    etEntity, etErase, etDoor, etWater, etLift, etButton);
+    etEntity, etErase, etDoor, etWater, etLift, etButton, etSlime, etKeyDoor);
   TLevelEditCommand = (ecNew, ecGenerate, ecSave, ecLoad, ecPlay, ecExport, ecClose);
 
   TLevelEditorEvent = procedure(const Level: TQuakeLevel) of object;
@@ -38,6 +38,8 @@ type
     FLevel: TQuakeLevel;
     FTool: TLevelEditTool;
     FBrushFloor, FBrushCeil, FBrushTheme, FBrushWater, FBrushLift, FBrushChannel: Integer;
+    { Key of the Key tool's doors: 1 blue, 2 red }
+    FBrushKey: Integer;
     FEntityIndex: Integer;
     FEntityAngle: Single;
     FZoom: Single;
@@ -99,6 +101,7 @@ type
     property EntityIndex: Integer read FEntityIndex write FEntityIndex;
     property BrushLift: Integer read FBrushLift write FBrushLift;
     property BrushChannel: Integer read FBrushChannel write FBrushChannel;
+    property BrushKey: Integer read FBrushKey write FBrushKey;
     property OnPlay: TLevelEditorEvent read FOnPlay write FOnPlay;
     property OnClose: TLevelEditorEvent read FOnClose write FOnClose;
   published
@@ -108,13 +111,13 @@ type
 
 const
   ToolNames: array[TLevelEditTool] of String = ('Floor', 'Wall', 'Raise', 'Lower', 'Ceil+', 'Ceil-',
-    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water', 'Lift', 'Button');
+    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water', 'Lift', 'Button', 'Slime', 'Key');
   ToolKeys: array[TLevelEditTool] of String = ('1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'O', 'U',
-    'H', 'J');
+    'H', 'J', 'M', 'K');
   CommandNames: array[TLevelEditCommand] of String = ('New', 'Generate', 'Save', 'Load', 'Play',
     'Export', 'Close');
   { What the Entity tool places; "exit" is a trigger with a changelevel }
-  EditorEntityClasses: array[0..31] of String = (
+  EditorEntityClasses: array[0..35] of String = (
     'info_player_start', 'light', 'exit',
     'monster_soldier_light', 'monster_soldier', 'monster_soldier_ss', 'monster_infantry',
     'monster_gunner', 'monster_berserk', 'monster_flyer', 'monster_parasite', 'monster_tank',
@@ -122,7 +125,7 @@ const
     'weapon_grenadelauncher', 'weapon_rocketlauncher', 'weapon_hyperblaster', 'weapon_railgun',
     'ammo_shells', 'ammo_bullets', 'ammo_grenades', 'ammo_rockets', 'ammo_cells', 'ammo_slugs',
     'item_health', 'item_health_large', 'item_health_mega', 'item_armor_jacket', 'item_armor_combat',
-    'misc_explobox');
+    'misc_explobox', 'key_blue_key', 'key_red_key', 'misc_teleporter', 'misc_teleporter_dest');
 
 { Place an editor entity class at a cell (the exit adds its trigger and
   changelevel) }
@@ -244,6 +247,7 @@ begin
   FBrushCeil := 160;
   FBrushWater := 48;
   FBrushLift := 96;
+  FBrushKey := 1;
   FZoom := 20;
   FHover := Point(-1, -1);
   FLoadIndex := -1;
@@ -686,8 +690,42 @@ begin
           C^.Lift := False;
           C^.Button := False;
           C^.Channel := FBrushChannel;
+          C^.Key := 0;
         end else
           C^.Channel := 0;
+      end;
+    etKeyDoor:
+      if not C^.Solid then
+      begin
+        { A door locked with the brush key (Y switches blue / red) or none }
+        if C^.Door and (C^.Key > 0) then
+        begin
+          C^.Door := False;
+          C^.Key := 0;
+        end else
+        begin
+          C^.Door := True;
+          C^.Key := EnsureRange(FBrushKey, 1, High(LevelKeyClasses));
+          C^.Channel := 0;
+          C^.Sky := False;
+          C^.Wet := False;
+          C^.Lift := False;
+          C^.Button := False;
+        end;
+      end;
+    etSlime:
+      if not C^.Solid then
+      begin
+        { Slime FBrushWater deep (or none again) }
+        if CellHasWater(C) then
+          C^.Wet := False
+        else
+        begin
+          C^.Wet := True;
+          C^.Slime := True;
+          C^.Water := Min(C^.Floor + FBrushWater, C^.Ceil - 8);
+          C^.Door := False;
+        end;
       end;
     etLift:
       if not C^.Solid then
@@ -727,6 +765,7 @@ begin
         else
         begin
           C^.Wet := True;
+          C^.Slime := False;
           C^.Water := Min(C^.Floor + FBrushWater, C^.Ceil - 8);
           C^.Door := False;
         end;
@@ -863,6 +902,15 @@ begin
   if Event.IsKey(keyJ) then
     FTool := etButton
   else
+  if Event.IsKey(keyM) then
+    FTool := etSlime
+  else
+  if Event.IsKey(keyK) then
+    FTool := etKeyDoor
+  else
+  if Event.IsKey(keyY) then
+    FBrushKey := FBrushKey mod High(LevelKeyClasses) + 1
+  else
   if Event.IsKey(keyC) then
     FBrushChannel := (FBrushChannel + 1) mod 10
   else
@@ -970,7 +1018,7 @@ var
   G, R, B: TFloatRectangle;
   X, Y, I, CX, CY: Integer;
   C: PLevelCell;
-  Col: TCastleColor;
+  Col, KeyCol: TCastleColor;
   Tint: TVector3;
   E: TLevelEntity;
   Txt, HoverInfo: String;
@@ -1020,13 +1068,24 @@ begin
           Col := Vector4(Col.XYZ * 0.6 + Vector3(0.1, 0.2, 0.45), 1);
       end;
       DrawRectangle(R, Col);
+      if CellHasWater(C) and C^.Slime then
+        DrawRectangle(R, Vector4(0.45, 0.75, 0.1, 0.55))
+      else
       if CellHasWater(C) then
         DrawRectangle(R, Vector4(0.1, 0.35, 0.9, 0.45));
       if C^.Door and not C^.Solid then
       begin
+        { Locked doors in the colour of their key }
+        if C^.Key = 1 then
+          KeyCol := Vector4(0.25, 0.45, 1, 1)
+        else
+        if C^.Key = 2 then
+          KeyCol := Vector4(1, 0.25, 0.2, 1)
+        else
+          KeyCol := Vector4(1, 0.7, 0.3, 1);
         DrawRectangle(FloatRectangle(R.Left + R.Width * 0.2, R.Bottom, R.Width * 0.6, R.Height),
-          Vector4(0.75, 0.5, 0.2, 0.85));
-        DrawRectangleOutline(R, Vector4(1, 0.7, 0.3, 1));
+          Vector4(KeyCol.XYZ * 0.75, 0.85));
+        DrawRectangleOutline(R, KeyCol);
       end;
       if C^.Lift and not C^.Solid then
       begin
@@ -1112,8 +1171,9 @@ begin
         HoverInfo := Format('(%d,%d) floor %d ceiling %d %s%s%s%s', [FHover.X, FHover.Y, C^.Floor, C^.Ceil,
           LevelThemes[Min(C^.Theme, High(LevelThemes))].Name, StrUtils.IfThen(C^.Sky, ' sky', ''),
           StrUtils.IfThen(C^.Door, ' door', '') + StrUtils.IfThen(C^.Lift, ' lift to ' + IntToStr(C^.LiftTop), '') +
-            StrUtils.IfThen(C^.Button, ' button', '') + StrUtils.IfThen(C^.Channel > 0, ' channel ' + IntToStr(C^.Channel), ''),
-          StrUtils.IfThen(CellHasWater(C), ' water ' + IntToStr(C^.Water), '')]);
+            StrUtils.IfThen(C^.Button, ' button', '') + StrUtils.IfThen(C^.Channel > 0, ' channel ' + IntToStr(C^.Channel), '') +
+            StrUtils.IfThen(C^.Key = 1, ' blue key', '') + StrUtils.IfThen(C^.Key = 2, ' red key', ''),
+          StrUtils.IfThen(CellHasWater(C), StrUtils.IfThen(C^.Slime, ' slime ', ' water ') + IntToStr(C^.Water), '')]);
       I := FLevel.EntityAtCell(FHover.X, FHover.Y);
       if I >= 0 then
         HoverInfo := HoverInfo + ' - ' + FLevel.Entities[I].EntClass;
@@ -1121,8 +1181,9 @@ begin
     if FStatusTime > 0 then
       Txt := FStatus
     else
-      Txt := Format('%s | %s | floor %d ceiling %d water %d lift %d channel %d theme %s | entity %s %d° | %s',
+      Txt := Format('%s | %s | floor %d ceiling %d water %d lift %d channel %d key %s theme %s | entity %s %d° | %s',
         [FLevel.Name, ToolNames[FTool], FBrushFloor, FBrushCeil, FBrushWater, FBrushLift, FBrushChannel,
+         StrUtils.IfThen(FBrushKey = 2, 'red', 'blue'),
          LevelThemes[FBrushTheme].Name,
          EditorEntityClasses[FEntityIndex], Round(FEntityAngle), HoverInfo]);
     UIFont.Print(StatusRect.Left + 8 * S, StatusRect.Bottom + (StatusRect.Height - UIFont.Height) / 2, White, Txt);

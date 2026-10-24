@@ -1420,6 +1420,100 @@ begin
   end;
 end;
 
+{ Slime, key doors (a lock per key: one trigger_key opens all its doors)
+  and teleporters linked in order }
+procedure TestLevelKeysSlime;
+var
+  Level, Loaded: TQuakeLevel;
+  Bsp: TQuakeBsp;
+  E: TQuakeEntity;
+  X, Y, KeyTriggers, Touchers, KeyDoorCount: Integer;
+  Stream: TMemoryStream;
+  TeleOk: Boolean;
+  Dests: TQuakeEntityList;
+begin
+  { Room A (1..4), a blue key door at x 5 (rows 1-2 and 4-5: two doors),
+    room B (6..10); slime in A; a teleporter in A to B }
+  Level := TQuakeLevel.Create(12, 8);
+  try
+    Level.Name := 'unittest_keys';
+    for Y := 1 to 6 do
+      for X := 1 to 10 do
+        Level.SetOpen(X, Y, 0, 160);
+    for Y := 1 to 6 do
+      if Y <> 3 then
+      begin
+        Level.Cell(5, Y)^.Door := True;
+        Level.Cell(5, Y)^.Key := 1;
+      end
+      else
+        Level.Cell(5, Y)^.Solid := True;
+    for Y := 5 to 6 do
+      for X := 2 to 3 do
+      begin
+        Level.Cell(X, Y)^.Floor := -32;
+        Level.Cell(X, Y)^.Wet := True;
+        Level.Cell(X, Y)^.Slime := True;
+        Level.Cell(X, Y)^.Water := -16;
+      end;
+    Level.AddEntityAtCell('info_player_start', 2, 2);
+    Level.AddEntityAtCell('misc_teleporter', 3, 3);
+    Level.AddEntityAtCell('misc_teleporter_dest', 8, 3);
+
+    Stream := TMemoryStream.Create;
+    Loaded := TQuakeLevel.Create(3, 3);
+    try
+      Level.SaveToStream(Stream);
+      Stream.Position := 0;
+      Loaded.LoadFromStream(Stream);
+      Check(Loaded.Cell(2, 5)^.Slime and CellHasWater(Loaded.Cell(2, 5)) and Loaded.Cell(5, 1)^.Door and
+        (Loaded.Cell(5, 1)^.Key = 1) and (Loaded.Cell(5, 1)^.Channel = 0) and not Loaded.Cell(4, 1)^.Slime,
+        'slime and key doors save and load');
+    finally
+      Loaded.Free;
+      Stream.Free;
+    end;
+
+    RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Check(Bsp.LoadFromPak('maps/unittest_keys.bsp'), 'the key / slime level loads');
+      Check((Bsp.PointContents(Vector3(2.5 * 64, 5.5 * 64, -24)) and CONTENTS_SLIME) <> 0,
+        'slime cells are CONTENTS_SLIME');
+      KeyTriggers := 0;
+      Touchers := 0;
+      KeyDoorCount := 0;
+      TeleOk := False;
+      for E in Bsp.Entities do
+      begin
+        if E.ClassName = 'trigger_key' then
+        begin
+          Inc(KeyTriggers);
+          Check((E.GetField('item') = 'key_blue_key') and (E.Target = 'keydoor1') and (E.TargetName = 'keylock1'),
+            'the blue key''s trigger_key opens the blue doors');
+        end;
+        if (E.ClassName = 'trigger_multiple') and (E.Target = 'keylock1') and (Copy(E.Model, 1, 1) = '*') then
+          Inc(Touchers);
+        if (E.ClassName = 'func_door') and (E.TargetName = 'keydoor1') then
+          Inc(KeyDoorCount);
+        if (E.ClassName = 'misc_teleporter') and (E.Target = 'teleport1') then
+        begin
+          Dests := Bsp.FindByTargetName('teleport1');
+          TeleOk := (Dests.Count = 1) and (Dests[0].ClassName = 'misc_teleporter_dest');
+          Dests.Free;
+        end;
+      end;
+      Check((KeyDoorCount = 2) and (Touchers = 2) and (KeyTriggers = 1),
+        'two locked doors, a touch trigger each, one trigger_key for their key');
+      Check(TeleOk, 'a teleporter without a target goes to the destination of its number');
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+end;
+
 procedure TestLevelLiftsSwitches;
 const
   Mins: TVector3 = (X: -16; Y: -16; Z: -24);
@@ -1530,7 +1624,8 @@ var
   AllOk, Same: Boolean;
   Start: TLevelEntity;
   E: TLevelEntity;
-  SX, SY, Monsters, Lifts, Switches, Doors, Pools: Integer;
+  SX, SY, KX, KY, Monsters, Lifts, Switches, Doors, Pools, KeyDoors, Slime, Teleporters: Integer;
+  KeyOk: Boolean;
   A, B: TMemoryStream;
   Bsp: TQuakeBsp;
   Col: TQuakeCollision;
@@ -1542,6 +1637,10 @@ begin
   Switches := 0;
   Doors := 0;
   Pools := 0;
+  KeyDoors := 0;
+  Slime := 0;
+  Teleporters := 0;
+  KeyOk := True;
   for Seed := 1 to 12 do
   begin
     Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
@@ -1549,6 +1648,9 @@ begin
     Inc(Switches, Report.Switches);
     Inc(Doors, Report.Doors);
     Inc(Pools, Report.Pools);
+    Inc(KeyDoors, Report.KeyDoors);
+    Inc(Slime, Report.SlimePools);
+    Inc(Teleporters, Report.Teleporters);
     try
       Start := nil;
       Monsters := 0;
@@ -1566,6 +1668,19 @@ begin
         Continue;
       end;
       Level.CellAt(Start.Origin, SX, SY);
+      { The key of a locked exit lies on the near side of its doors }
+      if Report.KeyDoors > 0 then
+      begin
+        KX := -1;
+        for E in Level.Entities do
+          if E.EntClass = 'key_blue_key' then
+            Level.CellAt(E.Origin, KX, KY);
+        if (KX < 0) or not ReachableWithLockedDoors(Level, SX, SY, KX, KY) or (Seed mod 2 <> 0) then
+        begin
+          KeyOk := False;
+          Writeln('  seed ', Seed, ': key at ', KX, ' ', KY, ' not reachable with the doors shut');
+        end;
+      end;
       if (Report.Rooms < 6) or (Monsters < 5) or (UnreachableCells(Level, SX, SY) > 0) or
          (Level.Entities.Count < 20) then
       begin
@@ -1580,6 +1695,8 @@ begin
   Check(AllOk, 'random levels: 6+ rooms, monsters, every open cell reachable from the start');
   Check((Lifts > 0) and (Switches > 0) and (Doors > 0) and (Pools > 0),
     'random levels have lifts, exit switches, doors and pools');
+  Check((KeyDoors > 0) and KeyOk, 'even seeds lock the exit with a blue key reachable with the doors shut');
+  Check((Slime > 0) and (Teleporters > 0), 'random levels have slime pits and secret room teleporters');
 
   { The same seed makes the same level }
   A := TMemoryStream.Create;
@@ -1920,6 +2037,7 @@ begin
   TestLevelBsp;
   TestLevelVis;
   TestLevelDoorsWater;
+  TestLevelKeysSlime;
   TestLevelLiftsSwitches;
   TestLevelGen;
   TestMapLevelUrl;
