@@ -1910,7 +1910,12 @@ begin
   AttackKind := Seq.Kind;
   AttackDamage := FAttack.ShotDamage(ShotIndex);
   AttackBullets := 1;
-  AttackReach := Max(Def^.AttackRange, MeleeDistance) + 24;
+  { fire_hit reaches MELEE_DISTANCE; melee monsters (berserk, parasite)
+    keep their own reach, ranged ones swinging up close don't get theirs }
+  if (Seq.Kind = akMelee) and (Def^.Attack <> akMelee) then
+    AttackReach := MeleeDistance + 24
+  else
+    AttackReach := Max(Def^.AttackRange, MeleeDistance) + 24;
   FAttackFired := True;
   if Assigned(OnAttack) then
     OnAttack(Self);

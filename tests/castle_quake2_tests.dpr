@@ -873,6 +873,14 @@ begin
   CheckEquals(0, ChooseAttackSeq(Seqs, 400, 0.9), 'infantry fires its machinegun further away');
   Seqs := MonsterAttackSeqs('monster_gunner');
   CheckEquals(1, ChooseAttackSeq(Seqs, 50, 0.0), 'gunner uses the chaingun in melee range');
+  Seqs := MonsterAttackSeqs('monster_flyer');
+  CheckEquals(1, ChooseAttackSeq(Seqs, 50, 0.0), 'flyer slashes in melee range');
+  CheckEquals(0, ChooseAttackSeq(Seqs, 400, 0.9), 'flyer shoots further away');
+  { tank_attack: rockets only beyond 250 }
+  Seqs := MonsterAttackSeqs('monster_tank');
+  Check((ChooseAttackSeq(Seqs, 200, 0.5) <> 1) and (ChooseAttackSeq(Seqs, 100, 0.99) <> 1) and
+    (ChooseAttackSeq(Seqs, 50, 0.6) <> 1), 'tank fires no rockets within 250 units');
+  CheckEquals(1, ChooseAttackSeq(Seqs, 400, 0.5), 'tank fires rockets further away');
 
   P := TAttackProbe.Create;
   P.Attack := TMonsterAttack.Create;
@@ -890,6 +898,16 @@ begin
     P.Attack.Melee := False;
     Check((Length(P.Times) > 10) and SameValue(P.Times[1] - P.Times[0], 0.5, 0.011),
       'light soldier refires every 0.5 s in melee range');
+    { Flyer melee: slashes on attak109 and attak114, 2.1 s; in melee
+      range it keeps slashing (80 % a loop) }
+    P.Run(MonsterAttackSeqs('monster_flyer')[1], True);
+    Check((Length(P.Times) = 2) and SameValue(P.Times[0], 0.8, 0.011) and SameValue(P.Times[1], 1.3, 0.011) and
+      SameValue(P.Clock, 2.1, 0.02), 'flyer slashes left and right once out of melee range');
+    P.Attack.Melee := True;
+    RandSeed := 1;
+    P.Run(MonsterAttackSeqs('monster_flyer')[1], True);
+    P.Attack.Melee := False;
+    Check(Length(P.Times) > 2, 'flyer keeps slashing in melee range');
     { Machinegun soldier: only attack4 (+ attack3 for dodges, never chosen by range) }
     Seqs := MonsterAttackSeqs('monster_soldier_ss');
     Check((Length(Seqs) = 2) and (Seqs[0].FirstFrame = 'attak401') and (ChooseAttackSeq(Seqs, 400, 0.99) = 0) and

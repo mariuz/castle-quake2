@@ -29,8 +29,9 @@ type
     lcRefire: soldier_attack*_refire: in melee range, or half the time on
       nightmare (else on to SkipFrame, if any);
     lcPause: soldier_attack3_refire: while the dodge pause has more than
-      0.4 s left }
-  TLoopCondition = (lcSeen, lcRefire, lcPause);
+      0.4 s left;
+    lcMelee: flyer_check_melee: in melee range, with LoopChance }
+  TLoopCondition = (lcSeen, lcRefire, lcPause, lcMelee);
 
   TMonsterAttackSeq = record
     { Model frame where the sequence starts (e.g. 'attak101') and its length }
@@ -60,6 +61,8 @@ type
       is 32 lower (-1: never) }
     DuckFrom, DuckTo: Integer;
     Use: TAttackUse;
+    { Only chosen farther than this (tank rockets: beyond 250) }
+    MinDist: Single;
   end;
   PMonsterAttackSeq = ^TMonsterAttackSeq;
 
@@ -276,9 +279,19 @@ begin
     AddSeq(Result, S);
   end else
   if MonsterClass = 'monster_flyer' then
+  begin
     { attack2: blaster bolts of 1 from alternating guns on attak205 .. 213 }
-    AddSeq(Result, MakeSeq('attak201', 17, Frames(4, 12).FireFrames, akBlaster, 1, 'flyatck3'))
-  else
+    AddSeq(Result, MakeSeq('attak201', 17, Frames(4, 12).FireFrames, akBlaster, 1, 'flyatck3'));
+    { melee: pop the blades (attak101 .. 106), slash left on attak109 and
+      right on attak114 (5 each), loop attak107 .. 118 again 80 % of the
+      time while in melee range (flyer_check_melee), then attak119 .. 121 }
+    S := MakeSeq('attak101', 21, [8, 13], akMelee, 5, 'flyatck2', auMelee);
+    S.LoopStart := 6;
+    S.LoopEnd := 17;
+    S.LoopChance := 0.8;
+    S.LoopCondition := lcMelee;
+    AddSeq(Result, S);
+  end else
   if MonsterClass = 'monster_parasite' then
   begin
     { drain: launch the proboscis, drain on drain03 .. drain13 (5, then 2) }
@@ -293,7 +306,10 @@ begin
       rockets: lean in, three rockets of 50 (attak322, 325, 328);
       attack_chain: TankMachineGun on attak406 .. 424, 19 bullets of 20 }
     AddSeq(Result, MakeSeq('attak101', 22, [9, 12, 15], akBlaster, 30, 'tnkatck3'));
-    AddSeq(Result, MakeSeq('attak301', 53, [21, 24, 27], akRocket, 50, 'tnkatck1'));
+    { tank_attack: rockets only beyond 250 units (closer: blast or chain) }
+    S := MakeSeq('attak301', 53, [21, 24, 27], akRocket, 50, 'tnkatck1');
+    S.MinDist := 250;
+    AddSeq(Result, S);
     AddSeq(Result, MakeSeq('attak401', 29, Frames(5, 23).FireFrames, akHitscan, 20, 'tnkatk2a'));
   end;
 end;
@@ -311,6 +327,8 @@ var
       auDodge: Result := False;
       else Result := True;
     end;
+    if Dist <= S.MinDist then
+      Result := False;
   end;
 
 begin
@@ -324,13 +342,13 @@ begin
     { Nothing for this range (e.g. a ranged monster up close): any but
       the dodge-only ones }
     for I := 0 to High(Seqs) do
-      if Seqs[I].Use <> auDodge then
+      if (Seqs[I].Use <> auDodge) and (Dist > Seqs[I].MinDist) then
         Inc(N);
     if N = 0 then
       Exit(-1);
     Pick := Min(N - 1, Trunc(R * N));
     for I := 0 to High(Seqs) do
-      if Seqs[I].Use <> auDodge then
+      if (Seqs[I].Use <> auDodge) and (Dist > Seqs[I].MinDist) then
       begin
         if Pick = 0 then
           Exit(I);
@@ -411,6 +429,7 @@ begin
     lcRefire: Result := Melee or (Nightmare and (Random < 0.5));
     { Quake 2 checks on entering LoopEnd, a frame before leaving it }
     lcPause: Result := PauseLeft + MonsterFrameTime > 0.4;
+    lcMelee: Result := Melee and (Random < FSeq.LoopChance);
     else Result := CanSee and (Random < FSeq.LoopChance);
   end;
 end;
