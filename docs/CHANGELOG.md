@@ -1,8 +1,11 @@
 # Changelog
 
-## Unreleased
+## v0.12.0 — 2026-10-24
+
+Real visibility in random and edited levels: only what you can see is drawn. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - Random and edited levels now have real visibility: the level compiler works out which parts of the level can see each other (like Quake 2's `qvis`, on the level grid), so only what you can see is drawn and monsters only hear you through open space, as in the original maps. On a typical random level about a quarter of it is drawn at a time.
+- CI: the lift test accepts small differences in where the player rests on the lift.
 
 ## v0.11.0 — 2026-10-24
 
