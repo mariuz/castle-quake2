@@ -237,7 +237,9 @@ jobs:
           # (after demo1's opening explosions, whose lights would differ in time)
           # Random effects (demo1's func_timer sparks) can land in one run only,
           # so a differing pair is taken again once; culling bugs differ twice.
-          views="I:0,W:0.3,S,T:120,W:0.2,S,T:120,W:0.2,S,I:12,W:0.3,S,T:120,W:0.2,S,I:24,W:0.3,S,T:180,W:0.2,S"
+          # (Items 3, 8 and 11: placements that work; I:0, I:12 and I:24 never
+          # found a spot, so these shots used to be taken at the start)
+          views="I:3,W:0.3,S,T:120,W:0.2,S,T:120,W:0.2,S,I:8,W:0.3,S,T:120,W:0.2,S,I:11,W:0.3,S,T:180,W:0.2,S"
           for attempt in 1 2; do
             for mode in vis novis; do
               pre="O:notarget,O:god"; [ "$mode" = novis ] && pre="$pre,O:novis"
