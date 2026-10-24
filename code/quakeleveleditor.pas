@@ -28,7 +28,7 @@ uses
 
 type
   TLevelEditTool = (etFloor, etWall, etRaise, etLower, etCeilUp, etCeilDown, etSky, etTheme,
-    etEntity, etErase, etDoor, etWater);
+    etEntity, etErase, etDoor, etWater, etLift, etButton);
   TLevelEditCommand = (ecNew, ecGenerate, ecSave, ecLoad, ecPlay, ecExport, ecClose);
 
   TLevelEditorEvent = procedure(const Level: TQuakeLevel) of object;
@@ -37,7 +37,7 @@ type
   strict private
     FLevel: TQuakeLevel;
     FTool: TLevelEditTool;
-    FBrushFloor, FBrushCeil, FBrushTheme, FBrushWater: Integer;
+    FBrushFloor, FBrushCeil, FBrushTheme, FBrushWater, FBrushLift, FBrushChannel: Integer;
     FEntityIndex: Integer;
     FEntityAngle: Single;
     FZoom: Single;
@@ -97,6 +97,8 @@ type
     property BrushCeil: Integer read FBrushCeil write FBrushCeil;
     property BrushTheme: Integer read FBrushTheme write FBrushTheme;
     property EntityIndex: Integer read FEntityIndex write FEntityIndex;
+    property BrushLift: Integer read FBrushLift write FBrushLift;
+    property BrushChannel: Integer read FBrushChannel write FBrushChannel;
     property OnPlay: TLevelEditorEvent read FOnPlay write FOnPlay;
     property OnClose: TLevelEditorEvent read FOnClose write FOnClose;
   published
@@ -106,8 +108,9 @@ type
 
 const
   ToolNames: array[TLevelEditTool] of String = ('Floor', 'Wall', 'Raise', 'Lower', 'Ceil+', 'Ceil-',
-    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water');
-  ToolKeys: array[TLevelEditTool] of String = ('1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'O', 'U');
+    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water', 'Lift', 'Button');
+  ToolKeys: array[TLevelEditTool] of String = ('1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'O', 'U',
+    'H', 'J');
   CommandNames: array[TLevelEditCommand] of String = ('New', 'Generate', 'Save', 'Load', 'Play',
     'Export', 'Close');
   { What the Entity tool places; "exit" is a trigger with a changelevel }
@@ -240,6 +243,7 @@ begin
   FBrushFloor := 0;
   FBrushCeil := 160;
   FBrushWater := 48;
+  FBrushLift := 96;
   FZoom := 20;
   FHover := Point(-1, -1);
   FLoadIndex := -1;
@@ -673,12 +677,46 @@ begin
     etDoor:
       if not C^.Solid then
       begin
+        { A door (of the brush channel: 0 opens by itself) or none again }
         C^.Door := not C^.Door;
         if C^.Door then
         begin
           C^.Sky := False;
           C^.Wet := False;
+          C^.Lift := False;
+          C^.Button := False;
+          C^.Channel := FBrushChannel;
+        end else
+          C^.Channel := 0;
+      end;
+    etLift:
+      if not C^.Solid then
+      begin
+        { A lift from the floor up FBrushLift (or none again) }
+        C^.Lift := not C^.Lift;
+        if C^.Lift then
+        begin
+          C^.LiftTop := C^.Floor + FBrushLift;
+          C^.Ceil := Max(C^.Ceil, C^.LiftTop + LevelMinHeadroom);
+          C^.Door := False;
+          C^.Wet := False;
+          C^.Button := False;
         end;
+      end;
+    etButton:
+      if not C^.Solid then
+      begin
+        { A button of the brush channel (1 when 0) or none again }
+        C^.Button := not C^.Button;
+        if C^.Button then
+        begin
+          C^.Channel := Max(1, FBrushChannel);
+          C^.Door := False;
+          C^.Lift := False;
+          C^.Wet := False;
+          RemoveCellEntities(FLevel, X, Y);
+        end else
+          C^.Channel := 0;
       end;
     etWater:
       if not C^.Solid then
@@ -818,6 +856,21 @@ begin
   else
   if Event.IsKey(keyU) then
     FTool := etWater
+  else
+  if Event.IsKey(keyH) then
+    FTool := etLift
+  else
+  if Event.IsKey(keyJ) then
+    FTool := etButton
+  else
+  if Event.IsKey(keyC) then
+    FBrushChannel := (FBrushChannel + 1) mod 10
+  else
+  if Event.IsKey(keyPeriod) then
+    FBrushLift := FBrushLift + LevelHeightStep
+  else
+  if Event.IsKey(keyComma) then
+    FBrushLift := Max(LevelHeightStep * 2, FBrushLift - LevelHeightStep)
   else
   if Event.IsKey(keyV) then
     FBrushWater := FBrushWater + 8
@@ -975,6 +1028,18 @@ begin
           Vector4(0.75, 0.5, 0.2, 0.85));
         DrawRectangleOutline(R, Vector4(1, 0.7, 0.3, 1));
       end;
+      if C^.Lift and not C^.Solid then
+      begin
+        DrawRectangle(FloatRectangle(R.Left + R.Width * 0.1, R.Bottom + R.Height * 0.1, R.Width * 0.8, R.Height * 0.8),
+          Vector4(0.3, 0.8, 0.4, 0.6));
+        DrawRectangleOutline(R, Vector4(0.4, 1, 0.5, 1));
+      end;
+      if C^.Button and not C^.Solid then
+        DrawRectangle(FloatRectangle(R.Left + R.Width * 0.3, R.Bottom + R.Height * 0.3, R.Width * 0.4, R.Height * 0.4),
+          Vector4(1, 0.2, 0.6, 1));
+      if (C^.Channel > 0) and (not C^.Solid) and (FZoom >= 14) then
+        UIFont.Print(R.Right - UIFont.TextWidth(IntToStr(C^.Channel)) - 2 * S, R.Top - UIFont.Height - 2 * S,
+          Vector4(1, 1, 1, 0.9), IntToStr(C^.Channel));
       if FZoom >= 10 then
         DrawRectangleOutline(R, Vector4(0, 0, 0, 0.35));
       if (not C^.Solid) and (FZoom >= 30) then
@@ -1046,7 +1111,8 @@ begin
       else
         HoverInfo := Format('(%d,%d) floor %d ceiling %d %s%s%s%s', [FHover.X, FHover.Y, C^.Floor, C^.Ceil,
           LevelThemes[Min(C^.Theme, High(LevelThemes))].Name, StrUtils.IfThen(C^.Sky, ' sky', ''),
-          StrUtils.IfThen(C^.Door, ' door', ''),
+          StrUtils.IfThen(C^.Door, ' door', '') + StrUtils.IfThen(C^.Lift, ' lift to ' + IntToStr(C^.LiftTop), '') +
+            StrUtils.IfThen(C^.Button, ' button', '') + StrUtils.IfThen(C^.Channel > 0, ' channel ' + IntToStr(C^.Channel), ''),
           StrUtils.IfThen(CellHasWater(C), ' water ' + IntToStr(C^.Water), '')]);
       I := FLevel.EntityAtCell(FHover.X, FHover.Y);
       if I >= 0 then
@@ -1055,8 +1121,9 @@ begin
     if FStatusTime > 0 then
       Txt := FStatus
     else
-      Txt := Format('%s | %s | brush floor %d ceiling %d water %d theme %s | entity %s %d° | %s',
-        [FLevel.Name, ToolNames[FTool], FBrushFloor, FBrushCeil, FBrushWater, LevelThemes[FBrushTheme].Name,
+      Txt := Format('%s | %s | floor %d ceiling %d water %d lift %d channel %d theme %s | entity %s %d° | %s',
+        [FLevel.Name, ToolNames[FTool], FBrushFloor, FBrushCeil, FBrushWater, FBrushLift, FBrushChannel,
+         LevelThemes[FBrushTheme].Name,
          EditorEntityClasses[FEntityIndex], Round(FEntityAngle), HoverInfo]);
     UIFont.Print(StatusRect.Left + 8 * S, StatusRect.Bottom + (StatusRect.Height - UIFont.Height) / 2, White, Txt);
   finally

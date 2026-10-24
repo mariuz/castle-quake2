@@ -106,6 +106,8 @@ type
     { Door building: cells of the current door (component id per cell) }
     DoorComp: array of Integer;
     CurrentDoor: Integer;
+    { Height range of the current door / lift model }
+    CurZLo, CurZHi: Integer;
     constructor Create(const ALevel: TQuakeLevel);
     destructor Destroy; override;
     function CellKey(const X, Y: Integer): String;
@@ -122,7 +124,13 @@ type
     function AddBoxBrush(const Mins, Maxs: TVector3; const Contents: Integer): Integer;
     function DoorKey(const X, Y: Integer): String;
     function BuildDoorRegion(const X0, Y0, X1, Y1: Integer): Integer;
-    procedure BuildDoors;
+    { A brush model of one box (buttons) }
+    function BuildBoxModel(const Mins, Maxs: TVector3): Integer;
+    procedure AddBoxFace(const FA: TFaceAxis; const Mins, Maxs: TVector3; const Tex: String);
+    { func_door models (Lifts False) or func_plat models (Lifts True) of
+      the groups of touching door / lift cells }
+    procedure BuildMoverGroups(const Lifts: Boolean);
+    procedure BuildButtons;
     function BuildRegion(const X0, Y0, X1, Y1: Integer): Integer;
     function TexInfo(const Tex: String; const Axis: Integer; const Flags: Integer): Integer;
     function AddVertex(const V: TVector3): Integer;
@@ -766,21 +774,18 @@ begin
 end;
 
 function TBuilder.DoorKey(const X, Y: Integer): String;
-var
-  C: PLevelCell;
 begin
   if (not Level.InGrid(X, Y)) or (DoorComp[Y * Level.Width + X] <> CurrentDoor) then
-    Exit('-');
-  C := Level.Cell(X, Y);
-  Result := Format('%d,%d', [C^.Floor, C^.Ceil]);
+    Result := '-'
+  else
+    Result := 'M';
 end;
 
 function TBuilder.BuildDoorRegion(const X0, Y0, X1, Y1: Integer): Integer;
 var
   K: String;
-  X, Y, Mid, NodeCeil, NodeFloor: Integer;
+  X, Y, Mid, NodeTop, NodeBottom: Integer;
   Same: Boolean;
-  C: PLevelCell;
   Mins, Maxs: TVector3;
   N: TBSPNode;
   Front, Back: Integer;
@@ -797,23 +802,22 @@ begin
   begin
     if K = '-' then
       Exit(-(NewModelEmptyLeaf(Mins, Maxs) + 1));
-    { The door: solid from its floor to its ceiling, empty around }
-    C := Level.Cell(X0, Y0);
-    NodeCeil := NewNode;
-    NodeFloor := NewNode;
+    { The mover: solid from CurZLo to CurZHi, empty around }
+    NodeTop := NewNode;
+    NodeBottom := NewNode;
     N := Default(TBSPNode);
-    N.PlaneNum := AxialPlane(2, C^.Ceil);
-    N.Children[0] := -(NewModelEmptyLeaf(Vector3(Mins.X, Mins.Y, C^.Ceil), Maxs) + 1);
-    N.Children[1] := NodeFloor;
+    N.PlaneNum := AxialPlane(2, CurZHi);
+    N.Children[0] := -(NewModelEmptyLeaf(Vector3(Mins.X, Mins.Y, CurZHi), Maxs) + 1);
+    N.Children[1] := NodeBottom;
     SetNodeBounds(N, Mins, Maxs);
-    Nodes[NodeCeil] := N;
+    Nodes[NodeTop] := N;
     N := Default(TBSPNode);
-    N.PlaneNum := AxialPlane(2, C^.Floor);
-    N.Children[0] := -(NewLeaf(True, Vector3(Mins.X, Mins.Y, C^.Floor), Vector3(Maxs.X, Maxs.Y, C^.Ceil)) + 1);
-    N.Children[1] := -(NewModelEmptyLeaf(Mins, Vector3(Maxs.X, Maxs.Y, C^.Floor)) + 1);
-    SetNodeBounds(N, Mins, Vector3(Maxs.X, Maxs.Y, C^.Ceil));
-    Nodes[NodeFloor] := N;
-    Exit(NodeCeil);
+    N.PlaneNum := AxialPlane(2, CurZLo);
+    N.Children[0] := -(NewLeaf(True, Vector3(Mins.X, Mins.Y, CurZLo), Vector3(Maxs.X, Maxs.Y, CurZHi)) + 1);
+    N.Children[1] := -(NewModelEmptyLeaf(Mins, Vector3(Maxs.X, Maxs.Y, CurZLo)) + 1);
+    SetNodeBounds(N, Mins, Vector3(Maxs.X, Maxs.Y, CurZHi));
+    Nodes[NodeBottom] := N;
+    Exit(NodeTop);
   end;
   Result := NewNode;
   N := Default(TBSPNode);
@@ -836,31 +840,102 @@ begin
   Nodes[Result] := N;
 end;
 
-procedure TBuilder.BuildDoors;
+function TBuilder.BuildBoxModel(const Mins, Maxs: TVector3): Integer;
+var
+  Axis, Side, Node, Next: Integer;
+  N: TBSPNode;
+  Lo, Hi: TVector3;
+begin
+  { Six nodes, one per side: outside each plane is empty, inside all of
+    them is the solid box }
+  Result := NewNode;
+  Node := Result;
+  Lo := Vector3(-32768, -32768, -32768);
+  Hi := Vector3(32767, 32767, 32767);
+  for Axis := 0 to 2 do
+    for Side := 0 to 1 do
+    begin
+      N := Default(TBSPNode);
+      SetNodeBounds(N, Mins, Maxs);
+      if (Axis = 2) and (Side = 1) then
+        Next := -(NewLeaf(True, Mins, Maxs) + 1)
+      else
+        Next := NewNode;
+      if Side = 0 then
+      begin
+        { Above the max plane: empty }
+        N.PlaneNum := AxialPlane(Axis, Maxs.Data[Axis]);
+        N.Children[0] := -(NewModelEmptyLeaf(Lo, Hi) + 1);
+        N.Children[1] := Next;
+      end else
+      begin
+        { Below the min plane: empty }
+        N.PlaneNum := AxialPlane(Axis, Mins.Data[Axis]);
+        N.Children[0] := Next;
+        N.Children[1] := -(NewModelEmptyLeaf(Lo, Hi) + 1);
+      end;
+      Nodes[Node] := N;
+      Node := Next;
+    end;
+end;
+
+procedure TBuilder.AddBoxFace(const FA: TFaceAxis; const Mins, Maxs: TVector3; const Tex: String);
+var
+  FaceIdx: Integer;
+  Dist: Single;
+begin
+  if FA.Positive then
+    Dist := Maxs.Data[FA.Axis]
+  else
+    Dist := Mins.Data[FA.Axis];
+  FaceIdx := AddFace(FA, Dist, Mins, Maxs, Tex, 0);
+  LightFace(FaceIdx, FA, Dist, False);
+end;
+
+procedure TBuilder.BuildMoverGroups(const Lifts: Boolean);
 const
   DX: array[0..3] of Integer = (1, -1, 0, 0);
   DY: array[0..3] of Integer = (0, 0, 1, -1);
 var
   X, Y, I, D, CX, CY, NX, NY, X0, Y0, X1, Y1, Z, ZTop, FaceIdx, Head: Integer;
   Queue: specialize TList<Integer>;
-  C, N, Start: PLevelCell;
+  N, Start: PLevelCell;
   M: TBSPModel;
   FA: TFaceAxis;
   Dist: Single;
+  Tex, Ent: String;
+
+  function Member(const C: PLevelCell): Boolean;
+  begin
+    if C^.Solid then
+      Exit(False);
+    if Lifts then
+      Result := C^.Lift and (C^.Floor = Start^.Floor) and (C^.LiftTop = Start^.LiftTop)
+    else
+      Result := C^.Door and (C^.Floor = Start^.Floor) and (C^.Ceil = Start^.Ceil) and
+        (C^.Channel = Start^.Channel);
+  end;
+
 begin
   SetLength(DoorComp, Level.Width * Level.Height);
   for I := 0 to High(DoorComp) do
     DoorComp[I] := -1;
   CurrentDoor := 0;
+  if Lifts then
+    Tex := LevelLiftTexture
+  else
+    Tex := LevelDoorTexture;
   Queue := specialize TList<Integer>.Create;
   try
     for Y := 0 to Level.Height - 1 do
       for X := 0 to Level.Width - 1 do
       begin
         Start := Level.Cell(X, Y);
-        if Start^.Solid or not Start^.Door or (DoorComp[Y * Level.Width + X] >= 0) then
+        if DoorComp[Y * Level.Width + X] >= 0 then
           Continue;
-        { One door: the touching door cells with the same heights }
+        if Start^.Solid or (Lifts and not Start^.Lift) or ((not Lifts) and not Start^.Door) then
+          Continue;
+        { One mover: the touching cells of its kind with the same heights }
         Queue.Clear;
         Queue.Add(Y * Level.Width + X);
         DoorComp[Y * Level.Width + X] := CurrentDoor;
@@ -878,8 +953,7 @@ begin
             NY := CY + DY[D];
             if not Level.InGrid(NX, NY) or (DoorComp[NY * Level.Width + NX] >= 0) then
               Continue;
-            N := Level.Cell(NX, NY);
-            if (not N^.Solid) and N^.Door and (N^.Floor = Start^.Floor) and (N^.Ceil = Start^.Ceil) then
+            if Member(Level.Cell(NX, NY)) then
             begin
               DoorComp[NY * Level.Width + NX] := CurrentDoor;
               Queue.Add(NY * Level.Width + NX);
@@ -887,15 +961,25 @@ begin
           end;
         end;
 
+        { Doors fill floor to ceiling; a lift is a slab with its top at
+          LiftTop (built up, it starts down at the floor) }
+        if Lifts then
+        begin
+          CurZHi := Start^.LiftTop;
+          CurZLo := Start^.LiftTop - LevelLiftThickness;
+        end else
+        begin
+          CurZLo := Start^.Floor;
+          CurZHi := Start^.Ceil;
+        end;
         M := Default(TBSPModel);
         M.HeadNode := BuildDoorRegion(X0, Y0, X1, Y1);
         M.FirstFace := Faces.Count;
-        { Its sides towards open cells, and its bottom (seen when it is up) }
+        { Its sides towards open cells, its bottom, a lift's top }
         for I := 0 to Queue.Count - 1 do
         begin
           CX := Queue[I] mod Level.Width;
           CY := Queue[I] div Level.Width;
-          C := Level.Cell(CX, CY);
           for D := 0 to 3 do
           begin
             NX := CX + DX[D];
@@ -914,35 +998,94 @@ begin
               FA.Positive := DY[D] > 0;
               Dist := IfThen(DY[D] > 0, (CY + 1) * LevelCellSize, CY * LevelCellSize);
             end;
-            Z := C^.Floor;
-            while Z < C^.Ceil do
+            Z := CurZLo;
+            while Z < CurZHi do
             begin
-              ZTop := Min(C^.Ceil, Z + 256);
+              ZTop := Min(CurZHi, Z + 256);
               FaceIdx := AddFace(FA, Dist, Vector3(CX * LevelCellSize, CY * LevelCellSize, Z),
-                Vector3((CX + 1) * LevelCellSize, (CY + 1) * LevelCellSize, ZTop), LevelDoorTexture, 0);
+                Vector3((CX + 1) * LevelCellSize, (CY + 1) * LevelCellSize, ZTop), Tex, 0);
               LightFace(FaceIdx, FA, Dist, False);
               Z := ZTop;
             end;
           end;
           FA.Axis := 2;
           FA.Positive := False;
-          FaceIdx := AddFace(FA, C^.Floor, Vector3(CX * LevelCellSize, CY * LevelCellSize, 0),
-            Vector3((CX + 1) * LevelCellSize, (CY + 1) * LevelCellSize, 0), LevelDoorTexture, 0);
-          LightFace(FaceIdx, FA, C^.Floor, False);
+          FaceIdx := AddFace(FA, CurZLo, Vector3(CX * LevelCellSize, CY * LevelCellSize, 0),
+            Vector3((CX + 1) * LevelCellSize, (CY + 1) * LevelCellSize, 0), Tex, 0);
+          LightFace(FaceIdx, FA, CurZLo, False);
+          if Lifts then
+          begin
+            FA.Positive := True;
+            FaceIdx := AddFace(FA, CurZHi, Vector3(CX * LevelCellSize, CY * LevelCellSize, 0),
+              Vector3((CX + 1) * LevelCellSize, (CY + 1) * LevelCellSize, 0), Tex, 0);
+            LightFace(FaceIdx, FA, CurZHi, False);
+          end;
         end;
         M.NumFaces := Faces.Count - M.FirstFace;
-        M.Mins := Vector3(X0 * LevelCellSize, Y0 * LevelCellSize, Start^.Floor);
-        M.Maxs := Vector3(X1 * LevelCellSize, Y1 * LevelCellSize, Start^.Ceil);
-        DoorEntities := DoorEntities + Format(
-          '{' + LineEnding + '"classname" "func_door"' + LineEnding + '"model" "*%d"' + LineEnding +
-          '"angle" "-1"' + LineEnding + '"speed" "100"' + LineEnding + '"wait" "3"' + LineEnding +
-          '"lip" "8"' + LineEnding + '}' + LineEnding, [Models.Count]);
+        M.Mins := Vector3(X0 * LevelCellSize, Y0 * LevelCellSize, CurZLo);
+        M.Maxs := Vector3(X1 * LevelCellSize, Y1 * LevelCellSize, CurZHi);
+        if Lifts then
+          { func_plat: "height" from the top down to 2 below the floor (its
+            top hidden in the floor, no z-fighting) }
+          Ent := Format('"classname" "func_plat"' + LineEnding + '"model" "*%d"' + LineEnding +
+            '"height" "%d"' + LineEnding + '"speed" "150"' + LineEnding,
+            [Models.Count, Start^.LiftTop - Start^.Floor + 2])
+        else
+        if Start^.Channel > 0 then
+          { Opened by the channel's buttons, then stays open }
+          Ent := Format('"classname" "func_door"' + LineEnding + '"model" "*%d"' + LineEnding +
+            '"angle" "-1"' + LineEnding + '"speed" "100"' + LineEnding + '"wait" "-1"' + LineEnding +
+            '"lip" "8"' + LineEnding + '"targetname" "switch%d"' + LineEnding,
+            [Models.Count, Start^.Channel])
+        else
+          Ent := Format('"classname" "func_door"' + LineEnding + '"model" "*%d"' + LineEnding +
+            '"angle" "-1"' + LineEnding + '"speed" "100"' + LineEnding + '"wait" "3"' + LineEnding +
+            '"lip" "8"' + LineEnding, [Models.Count]);
+        DoorEntities := DoorEntities + '{' + LineEnding + Ent + '}' + LineEnding;
         Models.Add(M);
         Inc(CurrentDoor);
       end;
   finally
     Queue.Free;
   end;
+end;
+
+procedure TBuilder.BuildButtons;
+var
+  X, Y: Integer;
+  C: PLevelCell;
+  Mins, Maxs: TVector3;
+  M: TBSPModel;
+  FA: TFaceAxis;
+begin
+  for Y := 0 to Level.Height - 1 do
+    for X := 0 to Level.Width - 1 do
+    begin
+      C := Level.Cell(X, Y);
+      if C^.Solid or not C^.Button then
+        Continue;
+      { A pedestal in the middle of the cell, pressed down into the floor }
+      Mins := Vector3((X + 0.5) * LevelCellSize - LevelButtonHalfWidth,
+        (Y + 0.5) * LevelCellSize - LevelButtonHalfWidth, C^.Floor);
+      Maxs := Vector3((X + 0.5) * LevelCellSize + LevelButtonHalfWidth,
+        (Y + 0.5) * LevelCellSize + LevelButtonHalfWidth, C^.Floor + LevelButtonHeight);
+      M := Default(TBSPModel);
+      M.HeadNode := BuildBoxModel(Mins, Maxs);
+      M.FirstFace := Faces.Count;
+      FA.Axis := 0; FA.Positive := True; AddBoxFace(FA, Mins, Maxs, LevelButtonTexture);
+      FA.Positive := False; AddBoxFace(FA, Mins, Maxs, LevelButtonTexture);
+      FA.Axis := 1; FA.Positive := True; AddBoxFace(FA, Mins, Maxs, LevelButtonTexture);
+      FA.Positive := False; AddBoxFace(FA, Mins, Maxs, LevelButtonTexture);
+      FA.Axis := 2; FA.Positive := True; AddBoxFace(FA, Mins, Maxs, LevelButtonTexture);
+      M.NumFaces := Faces.Count - M.FirstFace;
+      M.Mins := Mins;
+      M.Maxs := Maxs;
+      DoorEntities := DoorEntities + Format('{' + LineEnding + '"classname" "func_button"' + LineEnding +
+        '"model" "*%d"' + LineEnding + '"angle" "-2"' + LineEnding + '"lip" "4"' + LineEnding +
+        '"wait" "-1"' + LineEnding + '"target" "switch%d"' + LineEnding + '}' + LineEnding,
+        [Models.Count, C^.Channel]);
+      Models.Add(M);
+    end;
 end;
 
 function TBuilder.Blocked(const A, B: TVector3): Boolean;
@@ -1212,7 +1355,9 @@ begin
     WorldModel.FirstFace := 0;
     WorldModel.NumFaces := B.Faces.Count;
     B.Models.Add(WorldModel);
-    B.BuildDoors;
+    B.BuildMoverGroups(False);
+    B.BuildMoverGroups(True);
+    B.BuildButtons;
     Result := B.Write(Stats);
     Stats.Models := B.Models.Count;
   finally

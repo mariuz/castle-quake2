@@ -43,7 +43,7 @@ type
   end;
 
   TLevelGenReport = record
-    Rooms, Links, Loops, OpenCells, FixedCells, WalledCells, Monsters, Items, Doors, Pools: Integer;
+    Rooms, Links, Loops, OpenCells, FixedCells, WalledCells, Monsters, Items, Doors, Pools, Lifts, Switches: Integer;
     StartRoom, ExitRoom, SecretRoom: Integer;
   end;
 
@@ -147,7 +147,39 @@ begin
     Seed := V;
 end;
 
+function CanStepFloors(const A, B: PLevelCell): Boolean; forward;
+
 function CanStep(const A, B: PLevelCell): Boolean;
+var
+  LA, LB: TLevelCell;
+begin
+  if A^.Solid or B^.Solid then
+    Exit(False);
+  if CanStepFloors(A, B) then
+    Exit(True);
+  { A lift joins its floor and its top: try the cell as if at its top }
+  LA := A^;
+  LB := B^;
+  if A^.Lift then
+  begin
+    LA.Floor := A^.LiftTop;
+    LA.Wet := False;
+    if CanStepFloors(@LA, B) then
+      Exit(True);
+  end;
+  if B^.Lift then
+  begin
+    LB.Floor := B^.LiftTop;
+    LB.Wet := False;
+    if CanStepFloors(A, @LB) then
+      Exit(True);
+    if A^.Lift and CanStepFloors(@LA, @LB) then
+      Exit(True);
+  end;
+  Result := False;
+end;
+
+function CanStepFloors(const A, B: PLevelCell): Boolean;
 var
   Lo, Hi: PLevelCell;
 begin
@@ -363,7 +395,7 @@ var
   var
     Done: array of Boolean;
     Changed: Boolean;
-    I, K, Other: Integer;
+    I, K, Other, Climb: Integer;
   begin
     SetLength(Done, Length(Rooms));
     Rooms[0].Floor := 0;
@@ -374,19 +406,24 @@ var
       for K := 0 to High(Links) do
         for I := 0 to 1 do
         begin
+          { Mostly a few steps; now and then a big height, reached by a lift }
+          if Rnd.Chance(0.2) then
+            Climb := (2 * Rnd.Int(2) - 1) * Rnd.Range(6, 9) * LevelHeightStep
+          else
+            Climb := Rnd.Range(-3, 3) * LevelHeightStep;
           if I = 0 then
           begin
             if not (Done[Links[K].A] and not Done[Links[K].B]) then
               Continue;
             Other := Links[K].B;
-            Rooms[Other].Floor := EnsureRange(Rooms[Links[K].A].Floor + Rnd.Range(-3, 3) * LevelHeightStep, -96, 192);
+            Rooms[Other].Floor := EnsureRange(Rooms[Links[K].A].Floor + Climb, -128, 288);
             Rooms[Other].Depth := Rooms[Links[K].A].Depth + 1;
           end else
           begin
             if not (Done[Links[K].B] and not Done[Links[K].A]) then
               Continue;
             Other := Links[K].A;
-            Rooms[Other].Floor := EnsureRange(Rooms[Links[K].B].Floor + Rnd.Range(-3, 3) * LevelHeightStep, -96, 192);
+            Rooms[Other].Floor := EnsureRange(Rooms[Links[K].B].Floor + Climb, -128, 288);
             Rooms[Other].Depth := Rooms[Links[K].B].Depth + 1;
           end;
           Done[Other] := True;
@@ -424,7 +461,8 @@ var
   var
     Path: specialize TList<TPoint>;
     X, Y, TX, TY, I, Floor, Remaining, CellsLeft, Step, OutCount, Theme, Headroom: Integer;
-    XFirst, DoorPlaced: Boolean;
+    OutIndex, LiftIndex, LowFloor, HighFloor: Integer;
+    XFirst, DoorPlaced, NeedLift: Boolean;
     P, Lane: TPoint;
     C, D2: PLevelCell;
 
@@ -444,6 +482,20 @@ var
       if not C^.Solid then
         Exit; { another corridor was here first }
       Level.SetOpen(CX, CY, F, F + Headroom, Theme);
+    end;
+
+    { A lift cell: from the low floor up to the high one }
+    procedure OpenLiftCell(const CX, CY: Integer);
+    begin
+      if (not Level.InGrid(CX, CY)) or (CellRoom(CX, CY) >= 0) or not Level.Cell(CX, CY)^.Solid then
+        Exit;
+      OpenCorridorCell(CX, CY, LowFloor);
+      C := Level.Cell(CX, CY);
+      if C^.Solid then
+        Exit;
+      C^.Lift := True;
+      C^.LiftTop := HighFloor;
+      C^.Ceil := HighFloor + Headroom;
     end;
 
   begin
@@ -474,22 +526,55 @@ var
       Floor := Rooms[A].Floor;
       CellsLeft := OutCount + 1;
       DoorPlaced := not Rnd.Chance(0.4);
+      { A big height (80+), or too high to climb in steps: a lift beside the
+        lower room, the rest of the corridor at the higher floor }
+      NeedLift := (OutCount >= 2) and ((Abs(Rooms[B].Floor - Rooms[A].Floor) >= 80) or
+        (Abs(Rooms[B].Floor - Rooms[A].Floor) > LevelHeightStep * OutCount));
+      LowFloor := Min(Rooms[A].Floor, Rooms[B].Floor);
+      HighFloor := Max(Rooms[A].Floor, Rooms[B].Floor);
+      if Rooms[A].Floor < Rooms[B].Floor then
+        LiftIndex := 0
+      else
+        LiftIndex := OutCount - 1;
+      if NeedLift then
+      begin
+        Inc(Report.Lifts);
+        if LiftIndex = 0 then
+          DoorPlaced := True; { the lift is where the door would be }
+      end;
+      OutIndex := -1;
       for I := 0 to Path.Count - 1 do
       begin
         P := Path[I];
         if CellRoom(P.X, P.Y) >= 0 then
           Continue;
-        Remaining := Rooms[B].Floor - Floor;
-        Step := EnsureRange(Round16(Remaining / CellsLeft), -LevelHeightStep, LevelHeightStep);
-        Floor := Floor + Step;
-        Dec(CellsLeft);
-        OpenCorridorCell(P.X, P.Y, Floor);
+        Inc(OutIndex);
         { Second lane: beside the path (also at the corner, both sides) }
         if (I > 0) and (Path[I - 1].Y = P.Y) then
           Lane := Point(P.X, P.Y + 1)
         else
           Lane := Point(P.X + 1, P.Y);
-        OpenCorridorCell(Lane.X, Lane.Y, Floor);
+        if NeedLift then
+        begin
+          if OutIndex = LiftIndex then
+          begin
+            OpenLiftCell(P.X, P.Y);
+            OpenLiftCell(Lane.X, Lane.Y);
+          end else
+          begin
+            OpenCorridorCell(P.X, P.Y, HighFloor);
+            OpenCorridorCell(Lane.X, Lane.Y, HighFloor);
+          end;
+          Floor := HighFloor;
+        end else
+        begin
+          Remaining := Rooms[B].Floor - Floor;
+          Step := EnsureRange(Round16(Remaining / CellsLeft), -LevelHeightStep, LevelHeightStep);
+          Floor := Floor + Step;
+          Dec(CellsLeft);
+          OpenCorridorCell(P.X, P.Y, Floor);
+          OpenCorridorCell(Lane.X, Lane.Y, Floor);
+        end;
         { A door where the corridor leaves room A: both lanes, the same
           heights, straight on (not at a corner) }
         if (not DoorPlaced) and (I > 0) and (CellRoom(Path[I - 1].X, Path[I - 1].Y) = A) and
@@ -625,7 +710,7 @@ var
       CX := Rooms[R].X + Rnd.Range(Min(Margin, Rooms[R].W div 2), Max(Min(Margin, Rooms[R].W div 2), Rooms[R].W - 1 - Margin));
       CY := Rooms[R].Y + Rnd.Range(Min(Margin, Rooms[R].H div 2), Max(Min(Margin, Rooms[R].H div 2), Rooms[R].H - 1 - Margin));
       if Level.Cell(CX, CY)^.Solid or not Reached[CY * Level.Width + CX] or CellHasWater(Level.Cell(CX, CY)) or
-         Level.Cell(CX, CY)^.Door then
+         Level.Cell(CX, CY)^.Door or Level.Cell(CX, CY)^.Lift or Level.Cell(CX, CY)^.Button then
         Continue;
       if Level.EntityAtCell(CX, CY) >= 0 then
         Continue;
@@ -913,6 +998,80 @@ var
     end;
   end;
 
+  { The exit room locked: doors (channel 1) at its entrances, opened by a
+    button (channel 1) in a room on the way, reachable with the doors shut }
+  procedure AddExitSwitch(const StartRoom, ExitRoom, SX, SY: Integer);
+  var
+    Entrances: specialize TList<Integer>;
+    X, Y, D, R, BX, BY, MaxDepth, T, I: Integer;
+    C: PLevelCell;
+    Next: Boolean;
+    Cands: array of Integer;
+  begin
+    Entrances := specialize TList<Integer>.Create;
+    try
+      for Y := 1 to Level.Height - 2 do
+        for X := 1 to Level.Width - 2 do
+        begin
+          C := Level.Cell(X, Y);
+          if C^.Solid or (CellRoom(X, Y) >= 0) then
+            Continue;
+          Next := False;
+          for D := 0 to 3 do
+            if CellRoom(X + DX[D], Y + DY[D]) = ExitRoom then
+              Next := True;
+          if not Next then
+            Continue;
+          { Lifts, water and sky can't hold a door: then no switch }
+          if C^.Lift or C^.Wet or C^.Sky or C^.Button then
+            Exit;
+          Entrances.Add(Y * Level.Width + X);
+        end;
+      if Entrances.Count = 0 then
+        Exit;
+      MaxDepth := 1;
+      for R := 0 to High(Rooms) do
+        MaxDepth := Max(MaxDepth, Rooms[R].Depth);
+      Cands := nil;
+      for R := 0 to High(Rooms) do
+        if (R <> StartRoom) and (R <> ExitRoom) and not Rooms[R].Secret and
+           (Rooms[R].Depth / MaxDepth >= 0.25) and (Rooms[R].Depth / MaxDepth <= 0.85) then
+        begin
+          SetLength(Cands, Length(Cands) + 1);
+          Cands[High(Cands)] := R;
+        end;
+      if Length(Cands) = 0 then
+        Exit;
+      { With the entrances shut, find a reachable spot for the button }
+      for I in Entrances do
+        Level.Cell(I mod Level.Width, I div Level.Width)^.Solid := True;
+      FloodReach(Level, SX, SY, Reached);
+      for I in Entrances do
+        Level.Cell(I mod Level.Width, I div Level.Width)^.Solid := False;
+      for T := 1 to 10 do
+      begin
+        R := Cands[Rnd.Int(Length(Cands))];
+        if not FreeCell(R, BX, BY) then
+          Continue;
+        C := Level.Cell(BX, BY);
+        C^.Button := True;
+        C^.Channel := 1;
+        for I in Entrances do
+        begin
+          C := Level.Cell(I mod Level.Width, I div Level.Width);
+          C^.Door := True;
+          C^.Channel := 1;
+        end;
+        Report.Switches := 1;
+        Break;
+      end;
+    finally
+      Entrances.Free;
+      { Back to the reach with the doors open }
+      FloodReach(Level, SX, SY, Reached);
+    end;
+  end;
+
   procedure AddExit(const ExitRoom: Integer);
   var
     E: TLevelEntity;
@@ -980,6 +1139,7 @@ begin
   MakeReachable(CX, CY);
   Level.Normalize;
   FloodReach(Level, CX, CY, Reached);
+  AddExitSwitch(StartRoom, ExitRoom, CX, CY);
 
   AddLights;
   Populate(StartRoom, ExitRoom);
@@ -1020,9 +1180,10 @@ begin
     if IsRandomMapName(Name, Seed) then
     begin
       Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
-      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools, %d monsters, %d items, secret room %d',
+      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools, %d lifts, %d switches, %d monsters, %d items, secret room %d',
         [Name, Report.Rooms, Report.Links, Report.Loops, Report.OpenCells, Report.FixedCells,
-         Report.WalledCells, Report.Doors, Report.Pools, Report.Monsters, Report.Items, Report.SecretRoom]);
+         Report.WalledCells, Report.Doors, Report.Pools, Report.Lifts, Report.Switches, Report.Monsters,
+         Report.Items, Report.SecretRoom]);
     end else
     if UriExists(LevelFileUrl(Name)) = ueFile then
     begin

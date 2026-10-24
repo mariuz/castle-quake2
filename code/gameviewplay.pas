@@ -369,6 +369,12 @@ begin
           FEditor.Tool := etEntity;
         end;
     end else
+    if (Cmd = 'channel') and (Words.Count > 1) then
+      FEditor.BrushChannel := EnsureRange(StrToIntDef(Words[1], 0), 0, 9)
+    else
+    if (Cmd = 'lift') and (Words.Count > 1) then
+      FEditor.BrushLift := Max(32, StrToIntDef(Words[1], 96))
+    else
     if (Cmd = 'fill') and (Words.Count > 4) then
       FEditor.FillRect(StrToIntDef(Words[1], 0), StrToIntDef(Words[2], 0), StrToIntDef(Words[3], 0),
         StrToIntDef(Words[4], 0))
@@ -379,7 +385,7 @@ begin
       FEditor.BrushCeil := StrToIntDef(Words[2], 160);
       FEditor.BrushTheme := EnsureRange(StrToIntDef(Words[3], 0), 0, High(LevelThemes));
     end else
-      Console.Print('editor [new|generate [seed]|save [name]|load <name>|play|export|close|name <n>|tool <t>|entity <class>|brush <floor> <ceil> <theme>|fill <x0> <y0> <x1> <y1>]');
+      Console.Print('editor [new|generate [seed]|save [name]|load <name>|play|export|close|name <n>|tool <t>|entity <class>|brush <floor> <ceil> <theme>|channel <0-9>|lift <height>|fill <x0> <y0> <x1> <y1>]');
   finally
     Words.Free;
   end;

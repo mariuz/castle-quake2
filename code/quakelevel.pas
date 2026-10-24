@@ -33,6 +33,15 @@ type
     { Water in the cell, its surface at height Water (above Floor) }
     Wet: Boolean;
     Water: SmallInt;
+    { A lift (func_plat): a slab moving between Floor and LiftTop; touching
+      lift cells with the same heights are one lift }
+    Lift: Boolean;
+    LiftTop: SmallInt;
+    { A button (func_button) standing in the cell }
+    Button: Boolean;
+    { Switch channel 1..9: the buttons of a channel open its doors (which
+      then stay open); 0 = a door that opens by itself }
+    Channel: Byte;
   end;
   PLevelCell = ^TLevelCell;
 
@@ -114,6 +123,12 @@ const
   LevelSkyTexture = 'e1u1/sky1';
   LevelWaterTexture = 'e1u1/bluwter';
   LevelDoorTexture = 'e1u1/dr02_1';
+  LevelLiftTexture = 'e1u1/wplat1_1';
+  LevelButtonTexture = 'e1u1/btactmach0';
+  { Lift slab thickness, button size }
+  LevelLiftThickness = 16;
+  LevelButtonHalfWidth = 12;
+  LevelButtonHeight = 40;
 
 { Water in the cell (its surface above the floor) }
 function CellHasWater(const C: PLevelCell): Boolean;
@@ -287,6 +302,23 @@ begin
       { A door under the sky or over water isn't supported }
       if C^.Door and (C^.Sky or C^.Wet) then
         C^.Door := False;
+      { One mover per cell: door, lift or button }
+      if C^.Lift and (C^.Door or C^.Wet) then
+        C^.Lift := False;
+      if C^.Lift then
+      begin
+        C^.LiftTop := Round(C^.LiftTop / LevelHeightStep) * LevelHeightStep;
+        if C^.LiftTop <= C^.Floor then
+          C^.Lift := False
+        else
+        if C^.Ceil < C^.LiftTop + LevelMinHeadroom then
+          C^.Ceil := C^.LiftTop + LevelMinHeadroom;
+      end;
+      if C^.Button and (C^.Door or C^.Lift or C^.Wet) then
+        C^.Button := False;
+      if C^.Button and (C^.Channel = 0) then
+        C^.Channel := 1;
+      C^.Channel := Min(C^.Channel, 9);
     end;
 end;
 
@@ -399,8 +431,9 @@ begin
     Root.Add('seed', Int64(Seed));
     Root.Add('width', FWidth);
     Root.Add('height', FHeight);
-    { One string per row: "#" for walls, else floor,ceil,theme[,s][,d][,w<h>]
-      cells (sky, door, water surface) separated by spaces }
+    { One string per row: "#" for walls, else
+      floor,ceil,theme[,s][,d][,w<h>][,l<top>][,b][,c<n>] cells (sky, door,
+      water surface, lift top, button, switch channel) separated by spaces }
     Rows := TJSONArray.Create;
     for Y := 0 to FHeight - 1 do
     begin
@@ -421,6 +454,12 @@ begin
             Row := Row + ',d';
           if CellHasWater(C) then
             Row := Row + ',w' + IntToStr(C^.Water);
+          if C^.Lift then
+            Row := Row + ',l' + IntToStr(C^.LiftTop);
+          if C^.Button then
+            Row := Row + ',b';
+          if C^.Channel > 0 then
+            Row := Row + ',c' + IntToStr(C^.Channel);
         end;
       end;
       Rows.Add(Row);
@@ -506,7 +545,17 @@ begin
             begin
               C^.Wet := True;
               C^.Water := StrToIntDef(Copy(Vals[I], 2, MaxInt), 0);
-            end;
+            end else
+            if Copy(Vals[I], 1, 1) = 'l' then
+            begin
+              C^.Lift := True;
+              C^.LiftTop := StrToIntDef(Copy(Vals[I], 2, MaxInt), 0);
+            end else
+            if Vals[I] = 'b' then
+              C^.Button := True
+            else
+            if Copy(Vals[I], 1, 1) = 'c' then
+              C^.Channel := StrToIntDef(Copy(Vals[I], 2, MaxInt), 0);
         end;
       end;
     Ents := Root.Find('entities', jtArray) as TJSONArray;

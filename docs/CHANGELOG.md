@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Lifts and switches in levels. The level editor has a **Lift** tool (H; `,` / `.` set the height): lift cells become a Quake 2 platform (`func_plat`) that carries you up when you step on it and comes back down. It also has a **Button** tool (J): a button opens the doors of its channel (C cycles channel 1–9, and the Door tool uses the current channel), and those doors then stay open. Doors without a channel still open by themselves.
+- Random levels use lifts to reach rooms much higher or lower than their neighbours, and lock the exit room behind doors opened by a switch somewhere along the way (checked to be reachable with the exit shut), a classic Doom / Quake progression.
+- The roadmap is rewritten as a short, current priority list.
+
 ## v0.10.0 — 2026-10-24
 
 Doors and water in random and edited levels, monsters that open doors, and Random Level / Level Editor working from the first screen (and in the browser). Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.

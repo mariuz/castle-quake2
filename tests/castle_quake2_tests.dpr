@@ -1339,6 +1339,105 @@ begin
   end;
 end;
 
+procedure TestLevelLiftsSwitches;
+const
+  Mins: TVector3 = (X: -16; Y: -16; Z: -24);
+  Maxs: TVector3 = (X: 16; Y: 16; Z: 32);
+var
+  Level, Loaded: TQuakeLevel;
+  Bsp: TQuakeBsp;
+  Col: TQuakeCollision;
+  T: TQuakeTrace;
+  E: TQuakeEntity;
+  X, Y, Plat, Button, Door: Integer;
+  Stream: TMemoryStream;
+begin
+  { Room A (floor 0) with a 2-cell lift up to 128 and a button (channel 2);
+    a door of channel 2 at x 5 into room B }
+  Level := TQuakeLevel.Create(14, 8);
+  try
+    Level.Name := 'unittest_lifts';
+    for Y := 1 to 6 do
+    begin
+      for X := 1 to 4 do
+        Level.SetOpen(X, Y, 0, 256);
+      for X := 6 to 11 do
+        Level.SetOpen(X, Y, 0, 128);
+    end;
+    for Y := 3 to 4 do
+    begin
+      Level.SetOpen(5, Y, 0, 128);
+      Level.Cell(5, Y)^.Door := True;
+      Level.Cell(5, Y)^.Channel := 2;
+    end;
+    for Y := 1 to 2 do
+    begin
+      Level.Cell(1, Y)^.Lift := True;
+      Level.Cell(1, Y)^.LiftTop := 128;
+    end;
+    Level.Cell(3, 5)^.Button := True;
+    Level.Cell(3, 5)^.Channel := 2;
+    Level.AddEntityAtCell('info_player_start', 2, 3);
+
+    Stream := TMemoryStream.Create;
+    Loaded := TQuakeLevel.Create(3, 3);
+    try
+      Level.SaveToStream(Stream);
+      Stream.Position := 0;
+      Loaded.LoadFromStream(Stream);
+      Check(Loaded.Cell(1, 2)^.Lift and (Loaded.Cell(1, 2)^.LiftTop = 128) and Loaded.Cell(3, 5)^.Button and
+        (Loaded.Cell(3, 5)^.Channel = 2) and Loaded.Cell(5, 3)^.Door and (Loaded.Cell(5, 3)^.Channel = 2),
+        'lifts, buttons and switch channels save and load');
+    finally
+      Loaded.Free;
+      Stream.Free;
+    end;
+
+    RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Check(Bsp.LoadFromPak('maps/unittest_lifts.bsp') and (Bsp.ModelCount = 4),
+        'a door, a lift and a button: three brush models');
+      Plat := -1; Button := -1; Door := -1;
+      for E in Bsp.Entities do
+        if E.ClassName = 'func_plat' then
+          Plat := StrToIntDef(Copy(E.Model, 2, 9), -1)
+        else
+        if E.ClassName = 'func_button' then
+        begin
+          Button := StrToIntDef(Copy(E.Model, 2, 9), -1);
+          Check((E.Target = 'switch2') and SameValue(E.Angle, -2), 'the button fires its channel, pressed down');
+        end else
+        if E.ClassName = 'func_door' then
+        begin
+          Door := StrToIntDef(Copy(E.Model, 2, 9), -1);
+          Check((E.TargetName = 'switch2') and SameValue(E.GetFloat('wait', 0), -1),
+            'the channel''s door waits for its button and stays open');
+        end;
+      E := Bsp.FindEntity('func_plat');
+      Check((Plat > 0) and (Button > 0) and (Door > 0) and (E <> nil) and (E.GetInt('height', 0) = 130),
+        'the lift goes from 128 down to just under the floor');
+      Col := TQuakeCollision.Create(Bsp);
+      try
+        { The lift model is built up: a slab with its top at 128 }
+        T := Col.BoxTrace(Vector3(96, 96, 200), Vector3(96, 96, 0), Mins, Maxs, Bsp.Models[Plat].HeadNode,
+          MASK_PLAYERSOLID);
+        Check((T.Fraction < 1) and SameValue(T.EndPos.Z, 128 + 24, 0.2), 'the lift slab is solid at its top');
+        { The button pedestal (40 high) in the middle of its cell }
+        T := Col.BoxTrace(Vector3(160, 352, 25), Vector3(250, 352, 25), Mins, Maxs, Bsp.Models[Button].HeadNode,
+          MASK_PLAYERSOLID);
+        Check((T.Fraction < 1) and SameValue(T.EndPos.X, 224 - 12 - 16, 0.2), 'the button pedestal is solid');
+      finally
+        Col.Free;
+      end;
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+end;
+
 procedure TestLevelGen;
 const
   Mins: TVector3 = (X: -16; Y: -16; Z: -24);
@@ -1350,7 +1449,7 @@ var
   AllOk, Same: Boolean;
   Start: TLevelEntity;
   E: TLevelEntity;
-  SX, SY, Monsters: Integer;
+  SX, SY, Monsters, Lifts, Switches, Doors, Pools: Integer;
   A, B: TMemoryStream;
   Bsp: TQuakeBsp;
   Col: TQuakeCollision;
@@ -1358,9 +1457,17 @@ var
   P: TVector3;
 begin
   AllOk := True;
+  Lifts := 0;
+  Switches := 0;
+  Doors := 0;
+  Pools := 0;
   for Seed := 1 to 12 do
   begin
     Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
+    Inc(Lifts, Report.Lifts);
+    Inc(Switches, Report.Switches);
+    Inc(Doors, Report.Doors);
+    Inc(Pools, Report.Pools);
     try
       Start := nil;
       Monsters := 0;
@@ -1390,6 +1497,8 @@ begin
     end;
   end;
   Check(AllOk, 'random levels: 6+ rooms, monsters, every open cell reachable from the start');
+  Check((Lifts > 0) and (Switches > 0) and (Doors > 0) and (Pools > 0),
+    'random levels have lifts, exit switches, doors and pools');
 
   { The same seed makes the same level }
   A := TMemoryStream.Create;
@@ -1729,6 +1838,7 @@ begin
   TestTurret;
   TestLevelBsp;
   TestLevelDoorsWater;
+  TestLevelLiftsSwitches;
   TestLevelGen;
   TestMapLevelUrl;
   TestRecord;
