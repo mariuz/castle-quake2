@@ -15,7 +15,7 @@ uses
   CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound,
   QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad, QuakeTouch,
-  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, fpjson, jsonparser, CastleDownload, CastleUriUtils;
+  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevelGen, fpjson, jsonparser, CastleDownload, CastleUriUtils;
 
 type
   TCameraMode = (cmFirstPerson, cmNoclip);
@@ -1547,6 +1547,14 @@ begin
       LoadLevel(Args)
     else
       Console.Print('Usage: map <mapname>');
+  end else
+  if Cmd = 'randmap' then
+  begin
+    { A random level (QuakeLevelGen): the given seed, else a new one }
+    if Args <> '' then
+      LoadLevel(RandomMapName(StrToIntDef(Args, 1)))
+    else
+      LoadLevel(RandomMapName(1 + Random(999999)));
   end else
   if Cmd = 'maps' then
   begin

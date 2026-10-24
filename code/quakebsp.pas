@@ -378,6 +378,11 @@ type
     property TexInfos: TBSPTexInfoArray read FTexInfos;
   end;
 
+var
+  { Called when a map isn't in the PAKs (path "maps/<name>.bsp"): may add
+    it (e.g. a generated level, QuakeLevelGen) and return True }
+  MissingMapHook: function(const MapPath: String): Boolean = nil;
+
 implementation
 
 { TQuakeFaceExtents }
@@ -662,6 +667,8 @@ begin
   Result := False;
   FMapName := LowerCase(ChangeFileExt(ExtractFileName(AMapPath), ''));
   Data := Pak.GetData(AMapPath, Size);
+  if (Data = nil) and Assigned(MissingMapHook) and MissingMapHook(AMapPath) then
+    Data := Pak.GetData(AMapPath, Size);
   if Data = nil then
   begin
     WritelnWarning('QuakeBsp', 'Map "%s" not found in PAK', [AMapPath]);

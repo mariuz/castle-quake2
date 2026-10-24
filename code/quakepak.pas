@@ -35,6 +35,10 @@ type
     constructor Create;
     destructor Destroy; override;
 
+    { Add (or replace) a file made in memory, e.g. a generated map
+      (maps/<name>.bsp); takes ownership of Stream }
+    procedure AddMemoryFile(const APath: String; const Stream: TMemoryStream);
+
     { Add a PAK archive from file or castle-data URL. Returns true if successful. }
     function AddFile(const AUrlOrFilename: String): Boolean;
 
@@ -209,6 +213,36 @@ begin
   Result := True;
 end;
 
+procedure TQuakePak.AddMemoryFile(const APath: String; const Stream: TMemoryStream);
+var
+  Entry: TQuakePakEntry;
+  Idx: Integer;
+  Name: String;
+begin
+  Name := NormalizePath(APath);
+  Idx := FindEntryIndex(Name);
+  { A file added in memory before: its stream is only its own }
+  if (Idx >= 0) and (FFilenames[FEntries[Idx].PakIndex] = 'memory:' + Name) then
+  begin
+    FStreams[FEntries[Idx].PakIndex].Free;
+    FStreams[FEntries[Idx].PakIndex] := Stream;
+    Entry := FEntries[Idx];
+    Entry.Size := Stream.Size;
+    FEntries[Idx] := Entry;
+    Exit;
+  end;
+  Entry.Path := Name;
+  Entry.Offset := 0;
+  Entry.Size := Stream.Size;
+  Entry.PakIndex := FStreams.Add(Stream);
+  FFilenames.Add('memory:' + Name);
+  if Idx >= 0 then
+    FEntries[Idx] := Entry
+  else
+    FIndex.AddOrSetValue(Name, FEntries.Add(Entry));
+  WritelnLog('QuakePak', 'Added "%s" from memory (%d bytes)', [Name, Stream.Size]);
+end;
+
 function TQuakePak.PakList: String;
 var
   I: Integer;
@@ -216,6 +250,8 @@ begin
   Result := '';
   for I := 0 to FFilenames.Count - 1 do
   begin
+    if Copy(FFilenames[I], 1, 7) = 'memory:' then
+      Continue;
     if Result <> '' then
       Result := Result + ', ';
     Result := Result + ExtractFileName(FFilenames[I]);

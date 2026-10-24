@@ -1,0 +1,524 @@
+{ A level as the random generator and the level editor make it: a grid of
+  64-unit cells, each a wall or open space with its own floor and ceiling
+  height (Doom-style sectors on a grid), a texture theme and an optional
+  sky ceiling, plus Quake 2 entities (monsters, items, lights, triggers).
+  QuakeBspBuilder compiles it into a Quake 2 IBSP v38 map. Saved as JSON.
+  Positions are Quake coordinates; cell (X, Y) spans
+  X * LevelCellSize .. (X + 1) * LevelCellSize on Quake X / Y. }
+unit QuakeLevel;
+
+{$mode objfpc}{$H+}
+
+interface
+
+uses
+  Classes, SysUtils, Generics.Collections, CastleVectors;
+
+const
+  LevelCellSize = 64;
+  { Heights are kept on this step (Quake 2's player climbs 18) }
+  LevelHeightStep = 16;
+  { Lowest headroom the player fits in (his box is 56 high) }
+  LevelMinHeadroom = 64;
+
+type
+  TLevelCell = record
+    Solid: Boolean;
+    Floor, Ceil: SmallInt;
+    Sky: Boolean;
+    Theme: Byte;
+  end;
+  PLevelCell = ^TLevelCell;
+
+  { Texture set of a theme (WAL names in the PAK, without "textures/") }
+  TLevelTheme = record
+    Name, Floor, Wall, Ceil, Step, Light: String;
+  end;
+
+  { A Quake 2 entity: classname, origin and the other key / value pairs }
+  TLevelEntity = class
+  public
+    EntClass: String;
+    Origin: TVector3;
+    Angle: Single;
+    { Other keys as name=value (targetname, spawnflags, light, ...) }
+    Keys: TStringList;
+    constructor Create(const AClassName: String; const AOrigin: TVector3; const AAngle: Single = 0);
+    destructor Destroy; override;
+    function Key(const Name: String; const Default: String = ''): String;
+    procedure SetKey(const Name, Value: String);
+  end;
+  TLevelEntityList = specialize TObjectList<TLevelEntity>;
+
+  TQuakeLevel = class
+  strict private
+    FWidth, FHeight: Integer;
+    FCells: array of TLevelCell;
+    FOutside: TLevelCell;
+    FEntities: TLevelEntityList;
+  public
+    Name: String;
+    Message: String;
+    Sky: String;
+    Seed: Cardinal;
+    constructor Create(const AWidth, AHeight: Integer);
+    destructor Destroy; override;
+    procedure Resize(const AWidth, AHeight: Integer);
+    { All cells solid, no entities }
+    procedure Clear;
+    function InGrid(const X, Y: Integer): Boolean;
+    { The cell, or a solid one outside the grid (don't change that) }
+    function Cell(const X, Y: Integer): PLevelCell;
+    procedure SetOpen(const X, Y: Integer; const AFloor, ACeil: Integer; const ATheme: Integer = 0);
+    { Quake position of the middle of a cell's floor }
+    function CellFloorCenter(const X, Y: Integer): TVector3;
+    { The cell holding a Quake position (may be outside the grid) }
+    procedure CellAt(const P: TVector3; out X, Y: Integer);
+    { Border cells solid, heights on LevelHeightStep, enough headroom }
+    procedure Normalize;
+    function AddEntity(const AClassName: String; const AOrigin: TVector3; const AAngle: Single = 0): TLevelEntity;
+    { Entity standing on the floor of a cell: origin raised like Quake 2
+      maps (monsters and the player 24, items 16, lights near the ceiling) }
+    function AddEntityAtCell(const AClassName: String; const X, Y: Integer; const AAngle: Single = 0): TLevelEntity;
+    { Entities in a cell (index list order), -1 when none }
+    function EntityAtCell(const X, Y: Integer): Integer;
+    function OpenCellCount: Integer;
+    procedure SaveToStream(const Stream: TStream);
+    procedure LoadFromStream(const Stream: TStream);
+    procedure SaveToFile(const Url: String);
+    procedure LoadFromFile(const Url: String);
+    { The Quake 2 entity lump text (worldspawn first) }
+    function EntityText: String;
+    property Width: Integer read FWidth;
+    property Height: Integer read FHeight;
+    property Entities: TLevelEntityList read FEntities;
+  end;
+
+const
+  LevelThemes: array[0..3] of TLevelTheme = (
+    (Name: 'base'; Floor: 'e1u1/floor3_1'; Wall: 'e1u1/wslt1_1'; Ceil: 'e1u1/ceil1_1';
+      Step: 'e1u1/metal3_2'; Light: 'e1u1/plite1_1'),
+    (Name: 'metal'; Floor: 'e1u1/grate1_3'; Wall: 'e1u1/metal2_2'; Ceil: 'e1u1/ceil1_3';
+      Step: 'e1u1/metal1_1'; Light: 'e1u1/plite1_3'),
+    (Name: 'green'; Floor: 'e1u1/florr1_2'; Wall: 'e1u1/grnx2_1'; Ceil: 'e1u1/ceil1_4';
+      Step: 'e1u1/grnmt1_1'; Light: 'e1u1/plite1_1'),
+    (Name: 'tech'; Floor: 'e1u1/floor3_2'; Wall: 'e1u1/wbasic1_1'; Ceil: 'e1u1/ceil1_7';
+      Step: 'e1u1/metal3_5'; Light: 'e1u1/baselt_2')
+  );
+  LevelSkyTexture = 'e1u1/sky1';
+
+{ Height above the floor where an entity of this class has its origin:
+  its box 1 unit above the floor (an origin that makes the box touch the
+  floor starts its traces in solid) }
+function EntityFloorOffset(const AClassName: String): Single;
+
+implementation
+
+uses
+  Math, fpjson, jsonparser, CastleDownload, CastleFilesUtils, CastleUriUtils;
+
+var
+  DotFormat: TFormatSettings;
+
+function EntityFloorOffset(const AClassName: String): Single;
+begin
+  if (Copy(AClassName, 1, 8) = 'monster_') or (Copy(AClassName, 1, 12) = 'info_player_') or
+     (AClassName = 'misc_explobox') then
+    Result := 25
+  else
+  if (Copy(AClassName, 1, 5) = 'item_') or (Copy(AClassName, 1, 7) = 'weapon_') or
+     (Copy(AClassName, 1, 5) = 'ammo_') or (Copy(AClassName, 1, 4) = 'key_') then
+    Result := 17
+  else
+    Result := 0;
+end;
+
+{ TLevelEntity }
+
+constructor TLevelEntity.Create(const AClassName: String; const AOrigin: TVector3; const AAngle: Single);
+begin
+  inherited Create;
+  EntClass := AClassName;
+  Origin := AOrigin;
+  Angle := AAngle;
+  Keys := TStringList.Create;
+end;
+
+destructor TLevelEntity.Destroy;
+begin
+  Keys.Free;
+  inherited Destroy;
+end;
+
+function TLevelEntity.Key(const Name: String; const Default: String): String;
+var
+  I: Integer;
+begin
+  I := Keys.IndexOfName(Name);
+  if I < 0 then
+    Result := Default
+  else
+    Result := Keys.ValueFromIndex[I];
+end;
+
+procedure TLevelEntity.SetKey(const Name, Value: String);
+begin
+  Keys.Values[Name] := Value;
+end;
+
+{ TQuakeLevel }
+
+constructor TQuakeLevel.Create(const AWidth, AHeight: Integer);
+begin
+  inherited Create;
+  FEntities := TLevelEntityList.Create(True);
+  FOutside.Solid := True;
+  Name := 'level';
+  Sky := 'unit1_';
+  Resize(AWidth, AHeight);
+end;
+
+destructor TQuakeLevel.Destroy;
+begin
+  FEntities.Free;
+  inherited Destroy;
+end;
+
+procedure TQuakeLevel.Resize(const AWidth, AHeight: Integer);
+begin
+  FWidth := Max(3, AWidth);
+  FHeight := Max(3, AHeight);
+  SetLength(FCells, FWidth * FHeight);
+  Clear;
+end;
+
+procedure TQuakeLevel.Clear;
+var
+  I: Integer;
+begin
+  for I := 0 to High(FCells) do
+  begin
+    FCells[I] := Default(TLevelCell);
+    FCells[I].Solid := True;
+    FCells[I].Ceil := 128;
+  end;
+  FEntities.Clear;
+end;
+
+function TQuakeLevel.InGrid(const X, Y: Integer): Boolean;
+begin
+  Result := (X >= 0) and (Y >= 0) and (X < FWidth) and (Y < FHeight);
+end;
+
+function TQuakeLevel.Cell(const X, Y: Integer): PLevelCell;
+begin
+  if InGrid(X, Y) then
+    Result := @FCells[Y * FWidth + X]
+  else
+  begin
+    FOutside := Default(TLevelCell);
+    FOutside.Solid := True;
+    Result := @FOutside;
+  end;
+end;
+
+procedure TQuakeLevel.SetOpen(const X, Y: Integer; const AFloor, ACeil: Integer; const ATheme: Integer);
+var
+  C: PLevelCell;
+begin
+  if not InGrid(X, Y) then
+    Exit;
+  C := Cell(X, Y);
+  C^.Solid := False;
+  C^.Floor := AFloor;
+  C^.Ceil := ACeil;
+  C^.Theme := ATheme;
+end;
+
+function TQuakeLevel.CellFloorCenter(const X, Y: Integer): TVector3;
+begin
+  Result := Vector3((X + 0.5) * LevelCellSize, (Y + 0.5) * LevelCellSize, Cell(X, Y)^.Floor);
+end;
+
+procedure TQuakeLevel.CellAt(const P: TVector3; out X, Y: Integer);
+begin
+  X := Floor(P.X / LevelCellSize);
+  Y := Floor(P.Y / LevelCellSize);
+end;
+
+procedure TQuakeLevel.Normalize;
+var
+  X, Y: Integer;
+  C: PLevelCell;
+begin
+  for Y := 0 to FHeight - 1 do
+    for X := 0 to FWidth - 1 do
+    begin
+      C := Cell(X, Y);
+      if (X = 0) or (Y = 0) or (X = FWidth - 1) or (Y = FHeight - 1) then
+        C^.Solid := True;
+      if C^.Solid then
+        Continue;
+      C^.Floor := Round(C^.Floor / LevelHeightStep) * LevelHeightStep;
+      C^.Ceil := Round(C^.Ceil / LevelHeightStep) * LevelHeightStep;
+      if C^.Ceil < C^.Floor + LevelMinHeadroom then
+        C^.Ceil := C^.Floor + LevelMinHeadroom;
+      C^.Theme := Min(C^.Theme, High(LevelThemes));
+    end;
+end;
+
+function TQuakeLevel.AddEntity(const AClassName: String; const AOrigin: TVector3;
+  const AAngle: Single): TLevelEntity;
+begin
+  Result := TLevelEntity.Create(AClassName, AOrigin, AAngle);
+  FEntities.Add(Result);
+end;
+
+function TQuakeLevel.AddEntityAtCell(const AClassName: String; const X, Y: Integer;
+  const AAngle: Single): TLevelEntity;
+var
+  P: TVector3;
+begin
+  P := CellFloorCenter(X, Y);
+  if AClassName = 'light' then
+    P.Z := Cell(X, Y)^.Ceil - 16
+  else
+    P.Z := P.Z + EntityFloorOffset(AClassName);
+  Result := AddEntity(AClassName, P, AAngle);
+end;
+
+function TQuakeLevel.EntityAtCell(const X, Y: Integer): Integer;
+var
+  I, CX, CY: Integer;
+begin
+  for I := 0 to FEntities.Count - 1 do
+  begin
+    CellAt(FEntities[I].Origin, CX, CY);
+    if (CX = X) and (CY = Y) then
+      Exit(I);
+  end;
+  Result := -1;
+end;
+
+function TQuakeLevel.OpenCellCount: Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to High(FCells) do
+    if not FCells[I].Solid then
+      Inc(Result);
+end;
+
+function FormatNum(const V: Single): String;
+begin
+  if Frac(V) = 0 then
+    Result := IntToStr(Round(V))
+  else
+    Result := FormatFloat('0.##', V, DotFormat);
+end;
+
+function TQuakeLevel.EntityText: String;
+var
+  E: TLevelEntity;
+  I: Integer;
+  SB: TStringBuilder;
+
+  procedure Pair(const K, V: String);
+  begin
+    SB.Append('"').Append(K).Append('" "').Append(V).Append('"').Append(LineEnding);
+  end;
+
+begin
+  SB := TStringBuilder.Create;
+  try
+    SB.Append('{').Append(LineEnding);
+    Pair('classname', 'worldspawn');
+    if Message <> '' then
+      Pair('message', Message);
+    if Sky <> '' then
+      Pair('sky', Sky);
+    SB.Append('}').Append(LineEnding);
+    for E in FEntities do
+    begin
+      SB.Append('{').Append(LineEnding);
+      Pair('classname', E.EntClass);
+      Pair('origin', FormatNum(E.Origin.X) + ' ' + FormatNum(E.Origin.Y) + ' ' + FormatNum(E.Origin.Z));
+      if E.Angle <> 0 then
+        Pair('angle', FormatNum(E.Angle));
+      for I := 0 to E.Keys.Count - 1 do
+        Pair(E.Keys.Names[I], E.Keys.ValueFromIndex[I]);
+      SB.Append('}').Append(LineEnding);
+    end;
+    Result := SB.ToString;
+  finally
+    SB.Free;
+  end;
+end;
+
+procedure TQuakeLevel.SaveToStream(const Stream: TStream);
+var
+  Root, JE, JKeys: TJSONObject;
+  Rows, Ents: TJSONArray;
+  X, Y, I: Integer;
+  C: PLevelCell;
+  Row: String;
+  E: TLevelEntity;
+  S: String;
+begin
+  Root := TJSONObject.Create;
+  try
+    Root.Add('format', 'castle-quake2-level');
+    Root.Add('version', 1);
+    Root.Add('name', Name);
+    Root.Add('message', Message);
+    Root.Add('sky', Sky);
+    Root.Add('seed', Int64(Seed));
+    Root.Add('width', FWidth);
+    Root.Add('height', FHeight);
+    { One string per row: "#" for walls, else floor,ceil,theme[,s] cells
+      separated by spaces }
+    Rows := TJSONArray.Create;
+    for Y := 0 to FHeight - 1 do
+    begin
+      Row := '';
+      for X := 0 to FWidth - 1 do
+      begin
+        C := Cell(X, Y);
+        if X > 0 then
+          Row := Row + ' ';
+        if C^.Solid then
+          Row := Row + '#'
+        else
+        begin
+          Row := Row + Format('%d,%d,%d', [C^.Floor, C^.Ceil, C^.Theme]);
+          if C^.Sky then
+            Row := Row + ',s';
+        end;
+      end;
+      Rows.Add(Row);
+    end;
+    Root.Add('rows', Rows);
+    Ents := TJSONArray.Create;
+    for E in FEntities do
+    begin
+      JE := TJSONObject.Create;
+      JE.Add('classname', E.EntClass);
+      JE.Add('origin', TJSONArray.Create([E.Origin.X, E.Origin.Y, E.Origin.Z]));
+      if E.Angle <> 0 then
+        JE.Add('angle', E.Angle);
+      if E.Keys.Count > 0 then
+      begin
+        JKeys := TJSONObject.Create;
+        for I := 0 to E.Keys.Count - 1 do
+          JKeys.Add(E.Keys.Names[I], E.Keys.ValueFromIndex[I]);
+        JE.Add('keys', JKeys);
+      end;
+      Ents.Add(JE);
+    end;
+    Root.Add('entities', Ents);
+    S := Root.FormatJSON;
+    Stream.WriteBuffer(S[1], Length(S));
+  finally
+    Root.Free;
+  end;
+end;
+
+procedure TQuakeLevel.LoadFromStream(const Stream: TStream);
+var
+  Data: TJSONData;
+  Root, JE, JKeys: TJSONObject;
+  Rows, Ents, Org: TJSONArray;
+  X, Y, I: Integer;
+  Parts, Vals: TStringArray;
+  C: PLevelCell;
+  E: TLevelEntity;
+  S, RowText: String;
+begin
+  SetLength(S, Stream.Size - Stream.Position);
+  if Length(S) > 0 then
+    Stream.ReadBuffer(S[1], Length(S));
+  Data := GetJSON(S);
+  try
+    if not (Data is TJSONObject) then
+      raise Exception.Create('Level file is not a JSON object');
+    Root := TJSONObject(Data);
+    Resize(Root.Get('width', 32), Root.Get('height', 32));
+    Name := Root.Get('name', 'level');
+    Message := Root.Get('message', '');
+    Sky := Root.Get('sky', 'unit1_');
+    Seed := Cardinal(Root.Get('seed', Int64(0)));
+    Rows := Root.Find('rows', jtArray) as TJSONArray;
+    if Rows <> nil then
+      for Y := 0 to Min(Rows.Count, FHeight) - 1 do
+      begin
+        RowText := Rows.Strings[Y];
+        Parts := RowText.Split([' '], TStringSplitOptions.ExcludeEmpty);
+        for X := 0 to Min(Length(Parts), FWidth) - 1 do
+        begin
+          C := Cell(X, Y);
+          if Parts[X] = '#' then
+            Continue;
+          RowText := Parts[X];
+          Vals := RowText.Split([',']);
+          if Length(Vals) < 2 then
+            Continue;
+          C^.Solid := False;
+          C^.Floor := StrToIntDef(Vals[0], 0);
+          C^.Ceil := StrToIntDef(Vals[1], 128);
+          if Length(Vals) > 2 then
+            C^.Theme := StrToIntDef(Vals[2], 0);
+          C^.Sky := (Length(Vals) > 3) and (Vals[3] = 's');
+        end;
+      end;
+    Ents := Root.Find('entities', jtArray) as TJSONArray;
+    if Ents <> nil then
+      for I := 0 to Ents.Count - 1 do
+      begin
+        if not (Ents[I] is TJSONObject) then
+          Continue;
+        JE := TJSONObject(Ents[I]);
+        Org := JE.Find('origin', jtArray) as TJSONArray;
+        E := TLevelEntity.Create(JE.Get('classname', 'info_null'), TVector3.Zero, JE.Get('angle', 0.0));
+        if (Org <> nil) and (Org.Count >= 3) then
+          E.Origin := Vector3(Org.Floats[0], Org.Floats[1], Org.Floats[2]);
+        JKeys := JE.Find('keys', jtObject) as TJSONObject;
+        if JKeys <> nil then
+          for X := 0 to JKeys.Count - 1 do
+            E.SetKey(JKeys.Names[X], JKeys.Items[X].AsString);
+        FEntities.Add(E);
+      end;
+  finally
+    Data.Free;
+  end;
+  Normalize;
+end;
+
+procedure TQuakeLevel.SaveToFile(const Url: String);
+var
+  Stream: TStream;
+begin
+  Stream := UrlSaveStream(Url);
+  try
+    SaveToStream(Stream);
+  finally
+    Stream.Free;
+  end;
+end;
+
+procedure TQuakeLevel.LoadFromFile(const Url: String);
+var
+  Stream: TStream;
+begin
+  Stream := Download(Url);
+  try
+    LoadFromStream(Stream);
+  finally
+    Stream.Free;
+  end;
+end;
+
+initialization
+  DotFormat := DefaultFormatSettings;
+  DotFormat.DecimalSeparator := '.';
+end.

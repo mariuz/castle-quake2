@@ -888,6 +888,9 @@ begin
   if ExtractFileExt(MapPath) = '' then
     MapPath := MapPath + '.bsp';
 
+  { Generated / editor levels are made on demand (MissingMapHook) }
+  if (not Pak.FileExists(MapPath)) and Assigned(MissingMapHook) then
+    MissingMapHook(MapPath);
   if not Pak.FileExists(MapPath) then
   begin
     WritelnWarning('QuakeWorld', 'Map "%s" not found', [MapPath]);
@@ -908,6 +911,9 @@ begin
   RestoreRemembered := FLevelExited;
 
   ClearLevel;
+  { A new TQuakeBsp may reuse the old one's address: never keep the
+    collision of the previous map }
+  FreeAndNil(FCollision);
   FPlayerGibbed := False;
   FHasKiller := False;
   if FWeaponTransform <> nil then

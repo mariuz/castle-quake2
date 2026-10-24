@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeLevel, QuakeBspBuilder, QuakeLevelGen;
 
 var
   Passed, Failed: Integer;
@@ -1174,6 +1174,189 @@ begin
   end;
 end;
 
+{ A small level: room A (floor 0, ceiling 128) and room B east of it one
+  step up (floor 16, ceiling 192, part sky), a light in A }
+function MakeTestLevel: TQuakeLevel;
+var
+  X, Y: Integer;
+begin
+  Result := TQuakeLevel.Create(10, 8);
+  Result.Name := 'unittest_level';
+  for Y := 1 to 6 do
+  begin
+    for X := 1 to 4 do
+      Result.SetOpen(X, Y, 0, 128);
+    for X := 5 to 8 do
+      Result.SetOpen(X, Y, 16, 192, 1);
+  end;
+  Result.Cell(7, 3)^.Sky := True;
+  Result.AddEntityAtCell('info_player_start', 2, 3, 0);
+  Result.AddEntityAtCell('light', 2, 3).SetKey('light', '300');
+  Result.AddEntityAtCell('monster_soldier', 7, 4, 180);
+end;
+
+procedure TestLevelBsp;
+const
+  Mins: TVector3 = (X: -16; Y: -16; Z: -24);
+  Maxs: TVector3 = (X: 16; Y: 16; Z: 32);
+var
+  Level, Loaded: TQuakeLevel;
+  MapName: String;
+  Bsp: TQuakeBsp;
+  Col: TQuakeCollision;
+  T: TQuakeTrace;
+  Color: TVector3;
+  Stream: TMemoryStream;
+  Stats: TBspBuildStats;
+begin
+  Level := MakeTestLevel;
+  try
+    { JSON round trip }
+    Stream := TMemoryStream.Create;
+    Loaded := TQuakeLevel.Create(3, 3);
+    try
+      Level.SaveToStream(Stream);
+      Stream.Position := 0;
+      Loaded.LoadFromStream(Stream);
+      Check((Loaded.Width = 10) and (Loaded.Height = 8) and (Loaded.Cell(7, 3)^.Sky) and
+        (Loaded.Cell(5, 2)^.Floor = 16) and (Loaded.Cell(5, 2)^.Theme = 1) and Loaded.Cell(0, 0)^.Solid and
+        (Loaded.Entities.Count = 3) and (Loaded.Entities[1].Key('light') = '300'),
+        'level JSON saves and loads cells and entities');
+    finally
+      Loaded.Free;
+      Stream.Free;
+    end;
+
+    Stream := BuildLevelBsp(Level, Stats);
+    Stream.Free;
+    { One region per uniform rectangle: room A, room B split around its sky cell }
+    Check((Stats.Clusters >= 2) and (Stats.Faces > 0) and (Stats.LightBytes > 0), 'level builds into a BSP');
+
+    MapName := RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Check(Bsp.LoadFromPak('maps/' + MapName + '.bsp'), 'the built level loads as a Quake 2 map');
+      Check((Bsp.ModelCount = 1) and (Bsp.ClusterCount = Stats.Clusters) and
+        (Bsp.FindEntity('monster_soldier') <> nil) and (Bsp.FindEntity('info_player_start') <> nil),
+        'built map: one model, its clusters and the level''s entities');
+      Check((Bsp.PointContents(Vector3(160, 224, 64)) and CONTENTS_SOLID) = 0, 'room A is empty');
+      Check((Bsp.PointContents(Vector3(32, 224, 64)) and CONTENTS_SOLID) <> 0, 'the wall cell is solid');
+      Check((Bsp.PointContents(Vector3(160, 224, -8)) and CONTENTS_SOLID) <> 0, 'below the floor is solid');
+      Check((Bsp.PointContents(Vector3(400, 224, 160)) and CONTENTS_SOLID) = 0, 'room B is higher');
+      Col := TQuakeCollision.Create(Bsp);
+      try
+        T := Col.BoxTrace(Vector3(160, 224, 64), Vector3(160, 224, -200), Mins, Maxs, 0, MASK_PLAYERSOLID);
+        Check((T.Fraction < 1) and SameValue(T.EndPos.Z, 24, 0.2) and (T.Normal.Z > 0.9),
+          'the player stands on room A''s floor (origin 24 above it)');
+        T := Col.BoxTrace(Vector3(160, 224, 24), Vector3(160, 224, 300), Mins, Maxs, 0, MASK_PLAYERSOLID);
+        Check(SameValue(T.EndPos.Z, 128 - 32, 0.2), 'room A''s ceiling stops the player');
+        T := Col.BoxTrace(Vector3(160, 224, 24.1), Vector3(-200, 224, 24.1), Mins, Maxs, 0, MASK_PLAYERSOLID);
+        Check(SameValue(T.EndPos.X, 64 + 16, 0.2), 'the west wall stops the player');
+        T := Col.BoxTrace(Vector3(160, 224, 24.1), Vector3(500, 224, 24.1), Mins, Maxs, 0, MASK_PLAYERSOLID);
+        Check(SameValue(T.EndPos.X, 320 - 16, 0.2) and (T.Normal.X < -0.9),
+          'the 16 unit step up to room B blocks a flat move (pmove steps up)');
+        T := Col.BoxTrace(Vector3(160, 224, 44), Vector3(500, 224, 44), Mins, Maxs, 0, MASK_PLAYERSOLID);
+        Check(T.Fraction = 1, 'above the step the player walks into room B');
+      finally
+        Col.Free;
+      end;
+      Check(Bsp.LightPoint(Vector3(160, 224, 40), Color) and (Color.X > 0.3),
+        'models in room A are lit by the light (R_LightPoint finds the lightmap)');
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+end;
+
+procedure TestLevelGen;
+const
+  Mins: TVector3 = (X: -16; Y: -16; Z: -24);
+  Maxs: TVector3 = (X: 16; Y: 16; Z: 32);
+var
+  Level: TQuakeLevel;
+  Report: TLevelGenReport;
+  Seed: Cardinal;
+  AllOk, Same: Boolean;
+  Start: TLevelEntity;
+  E: TLevelEntity;
+  SX, SY, Monsters: Integer;
+  A, B: TMemoryStream;
+  Bsp: TQuakeBsp;
+  Col: TQuakeCollision;
+  T: TQuakeTrace;
+  P: TVector3;
+begin
+  AllOk := True;
+  for Seed := 1 to 12 do
+  begin
+    Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
+    try
+      Start := nil;
+      Monsters := 0;
+      for E in Level.Entities do
+      begin
+        if E.EntClass = 'info_player_start' then
+          Start := E;
+        if Copy(E.EntClass, 1, 8) = 'monster_' then
+          Inc(Monsters);
+      end;
+      if Start = nil then
+      begin
+        AllOk := False;
+        Writeln('  seed ', Seed, ': no player start');
+        Continue;
+      end;
+      Level.CellAt(Start.Origin, SX, SY);
+      if (Report.Rooms < 6) or (Monsters < 5) or (UnreachableCells(Level, SX, SY) > 0) or
+         (Level.Entities.Count < 20) then
+      begin
+        AllOk := False;
+        Writeln('  seed ', Seed, ': rooms ', Report.Rooms, ' monsters ', Monsters, ' unreachable ',
+          UnreachableCells(Level, SX, SY));
+      end;
+    finally
+      Level.Free;
+    end;
+  end;
+  Check(AllOk, 'random levels: 6+ rooms, monsters, every open cell reachable from the start');
+
+  { The same seed makes the same level }
+  A := TMemoryStream.Create;
+  B := TMemoryStream.Create;
+  try
+    Level := GenerateLevel(5);
+    Level.SaveToStream(A);
+    Level.Free;
+    Level := GenerateLevel(5);
+    Level.SaveToStream(B);
+    Level.Free;
+    Same := (A.Size = B.Size) and CompareMem(A.Memory, B.Memory, A.Size);
+    Check(Same, 'a seed always makes the same level');
+  finally
+    A.Free;
+    B.Free;
+  end;
+
+  { rand<seed> maps are generated on demand, the player stands at the start }
+  Bsp := TQuakeBsp.Create;
+  try
+    Check(Bsp.LoadFromPak('maps/' + RandomMapName(7) + '.bsp'), 'rand7 is generated when loaded');
+    Col := TQuakeCollision.Create(Bsp);
+    try
+      P := Bsp.FindEntity('info_player_start').Origin;
+      T := Col.BoxTrace(P, P - Vector3(0, 0, 500), Mins, Maxs, 0, MASK_PLAYERSOLID);
+      Check((not T.StartSolid) and (T.Fraction < 1) and (T.Normal.Z > 0.9) and (Abs(T.EndPos.Z - P.Z) < 2),
+        'the player starts on a floor of the random level');
+    finally
+      Col.Free;
+    end;
+  finally
+    Bsp.Free;
+  end;
+end;
+
 procedure TestTurret;
 var
   L: TTurretLimits;
@@ -1448,6 +1631,8 @@ begin
   TestClock;
   TestModelLightStyles;
   TestTurret;
+  TestLevelBsp;
+  TestLevelGen;
   TestRecord;
   TestGun;
   TestMonsterAttacks;
