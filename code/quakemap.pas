@@ -22,6 +22,7 @@ type
   strict private
     FPakUrl: String;
     FMapName: String;
+    FLevelUrl: String;
     FPreviewEntities: Boolean;
     FPreviewMarkers: Boolean;
     FBsp: TQuakeBsp;
@@ -35,6 +36,7 @@ type
     procedure SetBackground(const Value: TCastleBackground);
     procedure SetPakUrl(const Value: String);
     procedure SetMapName(const Value: String);
+    procedure SetLevelUrl(const Value: String);
     procedure SetPreviewEntities(const Value: Boolean);
     procedure SetPreviewMarkers(const Value: Boolean);
     procedure BuildMarkers;
@@ -82,6 +84,10 @@ type
     property PakUrl: String read FPakUrl write SetPakUrl;
     { Map name, like "demo1" (maps/demo1.bsp) or "base1" in the full game. }
     property MapName: String read FMapName write SetMapName;
+    { A level of the level editor (castle-quake2-level JSON, e.g.
+      castle-config:/levels/mylevel.json), compiled into a map when MapName
+      is empty. (MapName "rand<seed>" shows a random level.) }
+    property LevelUrl: String read FLevelUrl write SetLevelUrl;
     { Show items and monsters as static models (for the editor; the game
       spawns live ones itself). }
     property PreviewEntities: Boolean read FPreviewEntities write SetPreviewEntities default False;
@@ -107,7 +113,9 @@ implementation
 
 uses
   CastleComponentSerialize, CastleUtils, CastleStringUtils, CastleUriUtils, CastleImages, CastleColors, CastleRenderOptions,
-  QuakePak, QuakePalette, QuakeLight, QuakeEntities;
+  QuakePak, QuakePalette, QuakeLight, QuakeEntities, QuakeLevel, QuakeBspBuilder,
+  { (its MissingMapHook builds rand<seed> maps, also in the editor) }
+  QuakeLevelGen;
 
 constructor TQuakeMap.Create(AOwner: TComponent);
 begin
@@ -125,7 +133,7 @@ end;
 
 function TQuakeMap.PropertySections(const PropertyName: String): TPropertySections;
 begin
-  if ArrayContainsString(PropertyName, ['PakUrl', 'MapName', 'PreviewEntities', 'PreviewMarkers',
+  if ArrayContainsString(PropertyName, ['PakUrl', 'MapName', 'LevelUrl', 'PreviewEntities', 'PreviewMarkers',
     'Background', 'SkyName', 'EntityCount', 'FaceCount']) then
     Result := [psBasic]
   else
@@ -207,14 +215,36 @@ end;
 
 procedure TQuakeMap.Rebuild;
 var
-  MapPath: String;
+  MapPath, LevelMap: String;
+  Level: TQuakeLevel;
 begin
   ClearMap;
-  if FMapName = '' then
+  LevelMap := '';
+  if (FMapName = '') and (FLevelUrl <> '') then
+  begin
+    EnsureData;
+    Level := TQuakeLevel.Create(3, 3);
+    try
+      try
+        Level.LoadFromFile(FLevelUrl);
+        Level.Name := 'level_' + LowerCase(ChangeFileExt(ExtractUriName(FLevelUrl), ''));
+        LevelMap := RegisterLevelMap(Level);
+      except
+        on E: Exception do
+          WritelnWarning('QuakeMap', 'Cannot build level "%s": %s', [FLevelUrl, E.Message]);
+      end;
+    finally
+      Level.Free;
+    end;
+  end;
+  if (FMapName = '') and (LevelMap = '') then
     Exit;
   EnsureData;
 
-  MapPath := LowerCase(FMapName);
+  if LevelMap <> '' then
+    MapPath := LevelMap
+  else
+    MapPath := LowerCase(FMapName);
   if Pos('/', MapPath) = 0 then
     MapPath := 'maps/' + MapPath;
   if ExtractFileExt(MapPath) = '' then
@@ -373,6 +403,15 @@ begin
   if FMapName = Value then
     Exit;
   FMapName := Value;
+  if not (csLoading in ComponentState) then
+    Rebuild;
+end;
+
+procedure TQuakeMap.SetLevelUrl(const Value: String);
+begin
+  if FLevelUrl = Value then
+    Exit;
+  FLevelUrl := Value;
   if not (csLoading in ComponentState) then
     Rebuild;
 end;

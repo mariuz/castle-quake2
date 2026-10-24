@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeLevel, QuakeBspBuilder, QuakeLevelGen;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap;
 
 var
   Passed, Failed: Integer;
@@ -1357,6 +1357,33 @@ begin
   end;
 end;
 
+procedure TestMapLevelUrl;
+var
+  Level: TQuakeLevel;
+  Map: TQuakeMap;
+begin
+  { What the CGE editor shows: a level file through TQuakeMap.LevelUrl, a
+    random level through MapName }
+  Level := MakeTestLevel;
+  try
+    Level.SaveToFile('castle-config:/levels/unittest_map.json');
+  finally
+    Level.Free;
+  end;
+  Map := TQuakeMap.Create(nil);
+  try
+    Map.PakUrl := 'castle-data:/paks/quake2_demo.pak';
+    Map.LevelUrl := 'castle-config:/levels/unittest_map.json';
+    Check((Map.Bsp <> nil) and (Map.FaceCount > 0) and (Map.EntityCount >= 3),
+      'TQuakeMap.LevelUrl builds a level of the editor (its 3 entities and worldspawn)');
+    Map.MapName := RandomMapName(3);
+    Check((Map.Bsp <> nil) and (Map.Bsp.MapName = 'rand3') and (Map.FaceCount > 100),
+      'TQuakeMap.MapName rand3 shows random level 3');
+  finally
+    Map.Free;
+  end;
+end;
+
 procedure TestTurret;
 var
   L: TTurretLimits;
@@ -1633,6 +1660,7 @@ begin
   TestTurret;
   TestLevelBsp;
   TestLevelGen;
+  TestMapLevelUrl;
   TestRecord;
   TestGun;
   TestMonsterAttacks;

@@ -31,6 +31,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - **Editor**: views from designs, `TQuakeMap` building levels in the editor with skybox and entity markers, behaviors with published state, monster types (`data/monsters.castle-transform`) and named sounds (`data/sounds.castle-component`).
 - **Reach**: options menu with key rebinding, skill levels, gamepad, touch controls, Android APK and WebAssembly builds.
 - **Engineering**: CI on Windows / Linux / Android / Web, autotests under Mesa (keyboard, virtual gamepad and simulated touch), screenshot references, culling check (vis vs `novis`), map compatibility report, recorded replays, 227 unit checks.
+- **Levels**: random levels from a seed (`QuakeLevelGen`, Quake / Doom layout rules) and an in-game level editor (`QuakeLevelEditor`), compiled at runtime into Quake 2 maps (`QuakeBspBuilder`); levels show in the CGE editor through `TQuakeMap`.
 - **Release**: v0.3.0, the first tagged release, with Windows / Linux / Android packages ([changelog](CHANGELOG.md)).
 
 ## Next: suggested improvements (Phase 6, prioritised)
@@ -172,3 +173,12 @@ Phase 5 is complete; v0.3.0 to v0.8.1 are released. What would help most now, ro
 - [x] Medic revive (`medic_FindDeadMonster`, healing cable, the corpse gets up after the player); tested with a model-less medic on the demo
 - [ ] Attack tables for the full game's monsters, bosses (retail PAK)
 - [x] Tagged release v0.3.0 with Windows, Linux, Android and Web packages (notes from `docs/CHANGELOG.md`)
+
+### Phase 7 – Levels (new)
+- [x] Level compiler: grid levels (cells with floor / ceiling heights, themes, sky, entities) into Quake 2 IBSP v38 maps at runtime (BSP tree, box brushes, faces, lightmaps, vis)
+- [x] Random level generator with Quake / Doom design rules (loops, steps, pillars, platforms, sky rooms, pacing of monsters and items, secret, exit to the next level)
+- [x] In-game level editor: paint, heights, sky, themes, entities, undo, generate, save / load, play, export `.bsp`
+- [x] Levels in the CGE editor (`TQuakeMap.LevelUrl`, `MapName` `rand<seed>`, `TQuakeLevelEditor` component)
+- [ ] Doors, lifts and water in the level editor (brush models)
+- [ ] Real visibility (PVS) for compiled levels instead of everything visible
+- [ ] More themes for the full game's textures; outdoor terrain

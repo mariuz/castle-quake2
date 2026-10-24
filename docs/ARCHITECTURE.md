@@ -159,6 +159,42 @@ Turrets follow `g_turret.c` (pure math in `QuakeTurret`, tested by the unit test
 
 The player dies like `player_die`: below -40 health the body is gibbed (`misc/udeath.wav`, 4 `sm_meat` through `Particles.ThrowGibs`, the view in the head), otherwise a death sound; the view weapon disappears (`gunindex = 0`). `TViewPlay.UpdateDeathView` then moves the camera like the dead pmove and view angles: over 0.3 s the eye drops from origin + 22 to origin + 8 (`PM_DEAD`), or to the floor + 8 when gibbed (`PM_GIB`), and the view turns to the killer (`LookAtKiller`, from the damage's origin), pitches -15 and rolls 40. The `kill` console command is Quake 2's suicide: health 0, so no gibs, and god mode doesn't stop it.
 
+## 6c. Random levels and the level editor
+
+A level is a `TQuakeLevel` (unit `QuakeLevel`): a grid of 64-unit cells. Each cell is a wall, or open space with its own floor and ceiling height (on 16-unit steps), a texture theme (`LevelThemes`: floor, wall, ceiling, step and light-panel WALs of the demo PAK) and maybe a sky ceiling. The level also holds Quake 2 entities (`TLevelEntity`: class, origin, angle, keys). It saves to JSON: one string per row (`#` or `floor,ceil,theme[,s]`), then the entities. Entities standing on a cell get Quake 2's origin heights plus 1 (`EntityFloorOffset`: monsters / player 25, items 17), because a box touching the floor would start its traces in solid.
+
+`QuakeBspBuilder.BuildLevelBsp` compiles it into an IBSP v38 file, playing the parts of qbsp, qrad and qvis:
+- **Tree:** k-d splits on cell boundaries (longer side in half) until a rectangle is uniform (wall, floor, ceiling, sky, theme). An open rectangle becomes a node on its ceiling plane (solid leaf above) over a node on its floor plane (empty leaf above, solid leaf below). Node planes have positive axial normals, because the trace code's axial shortcut assumes them. Leaf 0 is a dummy solid leaf, as Quake 2's `CM_LoadLeafs` requires.
+- **Brushes:** one box brush per solid leaf. Brush sides facing the negative way use the "any axis" plane types. With these, `TQuakeCollision` (CM_BoxTrace) collides with exactly the walls, floors and ceilings.
+- **Faces:** per open cell, its floor (on the floor node, so `R_LightPoint` finds it), its ceiling (on the ceiling node: sky texinfo with `SURF_SKY`, or the light panel over a light), and its walls. Walls face solid or higher / lower neighbours, like Doom's lower and upper sides, with steps in the theme's step texture. Walls are split every 256 units, and faces wind clockwise with Quake's texture axes. Each face is listed in its region's leaf.
+- **Lightmaps:** sampled every 16 texels like `CalcSurfaceExtents`. Each sample adds qrad's linear point light for every `light` entity (intensity − distance, scaled by the angle), with shadows from rays through the grid. A little ambient light is added, more under the sky.
+- **Visibility:** one cluster per empty leaf with every cluster visible (a shared all-ones PVS / PHS row), and one area.
+
+`RegisterLevelMap` adds the file to the PAKs in memory (`TQuakePak.AddMemoryFile`, `maps/<name>.bsp`).
+
+`QuakeBsp.MissingMapHook` (set by `QuakeLevelGen`) builds maps on demand when they aren't in the PAKs: `rand<seed>` is generated, and `<name>` is the editor's `castle-config:/levels/<name>.json`. So `map rand42`, saved games, restarts, level exits and `TQuakeMap.MapName` in the CGE editor all work with them.
+
+`QuakeLevelGen.GenerateLevel(seed)` uses its own xorshift generator, so the same seed gives the same level on every platform. It applies these rules:
+- **Rooms:** up to 11 rooms, 4–8 cells or 9–13 for an arena, 3 cells apart.
+- **Links:** a Prim minimum spanning tree plus about a third more links for loops.
+- **Heights:** room floors assigned outward from the start, ±48 per link.
+- **Corridors:** two cells wide, L-shaped, with one low ceiling (112–128) and at most one 16-unit step per cell.
+- **Room features:** pillars every 3 cells in big rooms, a raised platform with a step ring, 22 % sky rooms with higher ceilings.
+- **Secret:** a 3 × 3 room behind a 3-cell crawlway, with a quad or megahealth and a `trigger_once` → `target_secret` (box triggers through the `mins` / `maxs` keys).
+- **Reachability:** every open cell must be walkable from the start (steps ≤ 16, headroom ≥ 64). Unreachable cells are pulled towards a reachable neighbour, then walled up.
+- **Lights:** over every room, every 4 cells.
+- **Monsters:** none in the start room. The count grows with room area and depth. Soldiers come early, then enforcers, infantry and flyers, then gunners, berserkers, parasites, and the tank only in big rooms. 20 % wait in ambush, and some extras have spawnflag 256 (not on easy).
+- **Items:** the 7 weapons in order of depth, with ammo for them after. Health and armor follow the fights, plus barrels.
+- **Exit:** the deepest room holds a `trigger_once` → `target_changelevel` to `rand<seed+1>`.
+
+The unit tests check 12 seeds for rooms, monsters and reachability, and that the same seed gives the same level. CI generates `rand7`, stands on its floor and exits to `rand8`.
+
+`TQuakeLevelEditor` (unit `QuakeLevelEditor`, a registered `TCastleUserInterface`) is the 2D editor. `TViewPlay.OpenEditor` puts it over the game and freezes the world while it is open.
+- **Layout:** a toolbar with tools and commands, the grid and an entity palette. Cells are tinted by theme, brighter for higher floors and bluish under the sky. Entities are dots with a letter and a facing tick.
+- **Strokes:** each tool changes a cell once per stroke, and fast drags paint every cell in between. Undo keeps up to 40 JSON snapshots.
+- **Commands:** *Generate* loads `GenerateLevel(random seed)` under the editor's name. *Save* / *Load* use `LevelFileUrl`. *Play* saves, compiles and loads `*<name>` (a new unit). *Export* writes the `.bsp` through `UrlSaveStream`.
+- **Scripting:** the `editor` console command (`new`, `generate [seed]`, `save [name]`, `load <name>`, `play`, `export`, `close`, `name`, `tool`, `entity`, `brush`) drives it from demo scripts. CI paints a corridor with simulated mouse drags, places a soldier, saves, generates, reloads and plays.
+
 ## 6b. Savegames
 
 `TQuakeWorld.SaveState` / `LoadState` write and read a `fpjson` object: player stats and inventory, then arrays per entity list (monsters, pickups, movers, props, triggers, lasers, speakers) in spawn order, plus `func_timer` / `trigger_counter` state keyed by BSP entity index and light styles 32–62. Loading reloads the map fresh and applies the state on top (`TQuakeMonster.RestoreState`, `TQuakeMover.ApplyPose`). The view adds the camera and stores the file with `UrlSaveStream('castle-config:/saves/<name>.json')`.

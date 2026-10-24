@@ -11,7 +11,7 @@
 <project name="castle-quake2"
   standalone_source="castle_quake2_standalone.dpr"
   game_units="GameInitialize"
-  editor_units="QuakeMap, QuakePlayer, QuakeHud, QuakeConsole, QuakeMenu, QuakeMonsterTypes, QuakeSound"
+  editor_units="QuakeMap, QuakePlayer, QuakeHud, QuakeConsole, QuakeMenu, QuakeMonsterTypes, QuakeSound, QuakeLevelEditor"
   qualified_name="io.castleengine.castlequake2"
   caption="Castle Quake 2"
   author="castle-quake2"

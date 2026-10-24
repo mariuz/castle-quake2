@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Random levels: *Random Level* in the menu or `randmap [seed]` makes a level from a seed, following classic Quake / Doom design. Rooms of varied size are linked into loops (more than one way around). Low corridors climb in steps between high rooms. Big rooms get pillars for cover and raised platforms, and some rooms open to the sky. Monsters get more numerous and tougher further in, some in ambush and some only on harder skills. Weapons come in order of strength, with ammo after them, health and armor after the fights, and barrels. There is a secret room with a reward, and an exit to the next random level. The same seed always makes the same level.
+- Level editor: *Level Editor* in the menu (or `editor`) to paint levels from above. You can paint walls and floors, set floor and ceiling heights, sky and texture themes, and place the player start, lights, monsters, weapons, ammo, items, barrels and the exit. It has undo, can generate a random level to start from, and saves and loads levels. *Play* compiles the level into a Quake 2 map and starts it at once; *Export* saves the `.bsp`. In the Castle Game Engine editor, `TQuakeMap.LevelUrl` shows a saved level and `MapName` `rand<seed>` a random one, and the editor is a component too (`TQuakeLevelEditor`).
+- Levels are compiled at runtime into real Quake 2 maps (BSP tree, brushes, lightmaps, visibility), so monsters, items, triggers, saves and the exit work in them as in the original maps.
+- Fixed: after a level change the game could keep testing collisions against the previous map (the player and monsters could fall through floors).
 - Monsters walk and run on Quake 2's animation frames: each frame moves them by its distance from the original game's tables, so their feet keep step and every type has its Quake 2 pace — the tank plods at under half the speed it had (47 units a second), parasites lunge almost twice as fast (254), infantry and berserkers are quicker, flyers slower (100). The demo maps' monsters are now all fully supported in the map report.
 
 ## v0.8.1 — 2026-10-24

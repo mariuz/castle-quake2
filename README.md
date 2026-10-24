@@ -40,11 +40,14 @@ A port of **Quake 2** to the **Castle Game Engine** (Object Pascal / Free Pascal
 - **Particles** batched into one scene (camera-facing quads with per-vertex colour / alpha and a soft round sprite): bullet impacts, blood, blaster sparks, splashes, rail trails, BFG blasts, teleport fountains.
 - **Savegames** (F6 / F9 quick save / load, `save` / `load <name>` in the console): the whole level state as JSON in the user config directory (`castle-config:/saves/`) — player, inventory, monsters, items, doors / plats / trains, barrels, ships, triggers, counters, timers, lasers, speakers, switchable lights, objectives.
 - Drop-down **console**, **menu** with the map list read from the loaded PAKs, and a headless **autotest / demo-script harness**.
+- **Random levels** (*Random Level* in the menu, `randmap [seed]` in the console): every seed makes its own level, built with classic Quake / Doom layout rules. Rooms of varied size are linked into loops, not dead-end trees. Low corridors climb in 16-unit steps between high rooms. Big rooms get pillars for cover and raised platforms, and some rooms open to the sky. Monsters grow tougher along the way, and some only appear on harder skills or wait in ambush. Weapons come in order of strength, with ammo after them and health after the fights. There is a secret room, and the exit leads to the next random level. Levels are compiled at runtime into real Quake 2 maps (`QuakeBspBuilder`: BSP tree, brushes for collision, lightmaps, visibility), so everything in the game works in them.
+- **Level editor** (*Level Editor* in the menu, `editor` in the console): a top-down grid to paint walls and floors and to raise or lower floors and ceilings. You can open cells to the sky, pick texture themes, and place the player start, lights, monsters, weapons, ammo, health, armor, barrels and the exit. It has undo, can generate a random level to start from, and saves and loads levels (`castle-config:/levels/<name>.json`). *Play* compiles the level and drops you into it at once; *Export* writes the Quake 2 `.bsp` (`castle-config:/maps/<name>.bsp`).
 
 | | |
 |---|---|
 | ![Soldier](docs/screenshot-soldier.png) | ![Railgun](docs/screenshot-railgun.png) |
 | ![Help computer](docs/screenshot-help-computer.png) | ![Barrel explosion](docs/screenshot-explosion.png) |
+| ![Random level from above](docs/screenshot-random-level.png) | ![Level editor](docs/screenshot-level-editor.png) |
 
 ---
 
@@ -58,6 +61,7 @@ The project follows the structure of CGE's own templates (`3d_fps_game`) and the
 - **`TQuakeMap`** is a `TCastleTransform`: set `PakUrl` (default `castle-data:/paks/quake2_demo.pak`) and `MapName` (`demo1`, `demo2`, `demo3`, or `base1`... with a full PAK) and the level is built right in the editor viewport. Turn on `PreviewEntities` to see items and monsters as static models. Read-only `SkyName`, `EntityCount` and `FaceCount` show map info in the inspector. The game reuses this component: `TQuakeWorld` adds live entities on top of it.
 - **Monster balancing in the editor.** Open `data/monsters.castle-transform`: a row of `TQuakeMonsterType`s, one per monster class, each showing its model. Select one and change `Health`, `Speed`, `Attack`, `Damage`, `AttackRange`, `AttackCooldown`, `Flying`, model, skin or sounds; the game applies the design over its built-in table at startup (a new `MonsterClass` adds a monster type).
 - **Named sounds.** `data/sounds.castle-component` names every sound the code plays (`Items_pkup`, `Weapons_railgf1a`, `Doors_dr1_strt`...) as a `TCastleSound` with a `QuakePath`. Change its `Volume` / `Pitch`, or point `Url` at your own file (e.g. `castle-data:/sounds/pickup.ogg`), and the game plays that instead of the PAK sound.
+- **Levels in the editor.** Set `TQuakeMap.MapName` to `rand42` to see random level 42, or `LevelUrl` to a level saved by the in-game editor (e.g. `castle-config:/levels/mylevel.json`) to see it compiled in the viewport. The 2D editor itself is a component too (**Quake Level Editor**, `TQuakeLevelEditor`, with `LevelUrl`).
 - **Behaviors with published state.** Monsters (`TQuakeMonster`), items (`TQuakePickup`) and brush entities (`TQuakeMover`) are `TCastleBehavior`s attached to named transforms such as `Monster007_monster_soldier`, `Item012_weapon_shotgun` or `Mover19_func_door`. In a debug build (`castle-engine compile --mode=debug`) press **F8** to open the CGE inspector and watch `MonsterState`, `HitPoints`, `IsAlerted`, `MoverState`, `MoveProgress` and more change live.
 
 ---
@@ -76,8 +80,9 @@ The project follows the structure of CGE's own templates (`3d_fps_game`) and the
 | **F1** | Help computer (objectives, kills / goals / secrets) |
 | **F6 / F9** | Quick save / quick load |
 | **F12** | Screenshot |
-| **~** | Console (`map`, `maps`, `save`, `load`, `god`, `give all`, `give quad`, `give invulnerability`, `noclip`, `notarget`, `kill`, `fps`, `markers`, `novis`, `skill`, `lightstyle`, `record <name>` / `stop`, `spawn <class> [key value]...`, `sky <name> [rotate [x y z]]`, `quit`, `help`) |
+| **~** | Console (`map`, `maps`, `save`, `load`, `god`, `give all`, `give quad`, `give invulnerability`, `noclip`, `notarget`, `kill`, `fps`, `markers`, `novis`, `skill`, `lightstyle`, `record <name>` / `stop`, `spawn <class> [key value]...`, `sky <name> [rotate [x y z]]`, `randmap [seed]`, `editor [command]`, `quit`, `help`) |
 | **F8** (debug build) | CGE inspector: hierarchy and live properties |
+| **Level editor** | Left mouse paints with the tool (drag to paint), right erases, middle (or Alt + left) picks a cell's heights and theme; **1**–**0** tools (Floor, Wall, Raise, Lower, Ceil+, Ceil-, Sky, Theme, Entity, Erase), **PageUp / PageDown** brush floor, **Home / End** brush ceiling, **T** theme, **Q / E** turn the entity, **[ / ]** entity type, arrows / WASD pan, wheel / + / - zoom, **F** fit, **Ctrl+Z** undo, **G** generate, **P** play, **Ctrl+S** save, **L** load the next saved level, **N** new, **X** export, **Escape** back to the menu |
 | **Escape** | Menu: *Single Player* (choose Easy / Medium / Hard / Nightmare), *Map Warp*, *Options* (camera, mouse sensitivity, invert mouse, view bob, field of view, sound and music volume, *Controls* to rebind keys) |
 
 | **Touch** (phones, tablets; `--touch` on desktop) | Left thumb anywhere on the left 40 % of the screen: move stick; drag on the right: look; buttons FIRE, JUMP, DUCK, USE, WPN (next weapon), MENU; in menus tap a row to select it, tap it again to activate it (or change its value: left half down, right half up); the Android back button is Escape |
