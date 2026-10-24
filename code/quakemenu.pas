@@ -22,6 +22,8 @@ type
     oiSoundVolume, oiMusicVolume, oiControls, oiBack);
 
 const
+  { Map name the menu passes for a new random level }
+  RandomGameMap = 'random';
   PageNames: array[TMenuPage] of String = ('Main', 'Skill', 'Maps', 'Options', 'Controls', 'Showcase');
 
 type
@@ -32,6 +34,8 @@ type
   private
     FSelectedIdx: Integer;
     FSubMenu: TMenuPage;
+    { The skill page starts a random level (Random Level) }
+    FRandomGame: Boolean;
     FItems: TStringList;
     FOnMenuAction: TOnMenuActionEvent;
     FCameraModeName: String;
@@ -134,6 +138,7 @@ begin
         FItems.Add('Single Player');
         FItems.Add('Map Warp');
         FItems.Add('Options');
+        FItems.Add('Random Level');
         FItems.Add('CGE Features Showcase');
         FItems.Add('Quit');
       end;
@@ -249,11 +254,21 @@ begin
       begin
         Sounds.Play('sound/misc/menu2.wav');
         case FSelectedIdx of
-          0: ShowPage(smSkill);
+          0:
+            begin
+              FRandomGame := False;
+              ShowPage(smSkill);
+            end;
           1: ShowPage(smMaps);
           2: ShowPage(smOptions);
-          3: ShowPage(smShowcase);
-          4: if Assigned(FOnMenuAction) then FOnMenuAction(maQuit, '');
+          3:
+            begin
+              { A random level (QuakeLevelGen) after choosing the skill }
+              FRandomGame := True;
+              ShowPage(smSkill);
+            end;
+          4: ShowPage(smShowcase);
+          5: if Assigned(FOnMenuAction) then FOnMenuAction(maQuit, '');
         end;
       end;
     smSkill:
@@ -268,7 +283,10 @@ begin
           Settings.Save;
           ShowPage(smMain);
           if Assigned(FOnMenuAction) then
-            FOnMenuAction(maNewGame, FirstMapName);
+            if FRandomGame then
+              FOnMenuAction(maNewGame, RandomGameMap)
+            else
+              FOnMenuAction(maNewGame, FirstMapName);
         end;
       end;
     smMaps:

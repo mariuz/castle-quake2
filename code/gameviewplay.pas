@@ -1669,7 +1669,10 @@ begin
       begin
         Menu.Exists := False;
         WalkNavigation.MouseLook := WantMouseLook;
-        LoadLevel(Param);
+        if Param = RandomGameMap then
+          LoadLevel(RandomMapName(1 + Random(999999)))
+        else
+          LoadLevel(Param);
       end;
     maSettingsChanged:
       ApplySettings;
