@@ -53,7 +53,14 @@ begin
   case Action of
     maNewGame, maWarpMap:
       begin
+        { "random" becomes a new random level in TViewPlay.LoadLevel }
         ViewPlay.MapName := Param;
+        Container.View := ViewPlay;
+      end;
+    maLevelEditor:
+      begin
+        ViewPlay.MapName := '';
+        ViewPlay.OpenEditorOnStart := True;
         Container.View := ViewPlay;
       end;
     maQuit:

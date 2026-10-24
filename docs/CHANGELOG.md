@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed: *Random Level* and *Level Editor* in the title menu (the first screen, as in the browser build) failed to load ("Failed to load level"); the title menu passed the placeholder name instead of a new random level, and didn't open the editor.
 - Doors and water in levels. The level editor has **Door** (O) and **Water** (U) tools: door cells become Quake 2 doors (`func_door`, touching cells are one door) that slide up when you come near, and water cells fill up to a depth (V / B change it) to wade or swim in, with the warping water surface. Random levels put doors at some corridor entrances and sunken pools in some rooms; the generator counts swimming up out of a pool as a way out.
 - Monsters open doors too, like Quake 2's door trigger field (not doors with the "no monsters" spawnflag).
 

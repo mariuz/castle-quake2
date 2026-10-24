@@ -40,6 +40,7 @@ type
     Menu: TQuakeMenu;
   private
     FEditor: TQuakeLevelEditor;
+    FOpenEditorOnStart: Boolean;
   published
     LabelFps: TCastleLabel;
   private
@@ -143,6 +144,9 @@ type
 
     property World: TQuakeWorld read FWorld;
     property MapName: String read FMapName write FMapName;
+    { Open the level editor once the view has started (the title menu's
+      Level Editor) }
+    property OpenEditorOnStart: Boolean read FOpenEditorOnStart write FOpenEditorOnStart;
     property AutoTestMap: String read FAutoTestMap write FAutoTestMap;
     property AutoTestPrefix: String read FAutoTestPrefix write FAutoTestPrefix;
     property AutoTestDemo: String read FAutoTestDemo write FAutoTestDemo;
@@ -447,6 +451,12 @@ begin
     if FMapName = '' then
       FMapName := FirstMapName;
     LoadLevel(FMapName);
+    { The title menu's Level Editor }
+    if OpenEditorOnStart then
+    begin
+      OpenEditorOnStart := False;
+      OpenEditor;
+    end;
   end;
 end;
 
@@ -550,15 +560,21 @@ begin
 end;
 
 procedure TViewPlay.LoadLevel(const AMapName: String);
+var
+  LevelName: String;
 begin
-  WritelnLog('GameViewPlay', 'Loading level "%s"', [AMapName]);
-  if FWorld.LoadMap(AMapName) then
+  { "random" (the menus' Random Level): a new random level }
+  LevelName := AMapName;
+  if LevelName = RandomGameMap then
+    LevelName := RandomMapName(1 + Random(999999));
+  WritelnLog('GameViewPlay', 'Loading level "%s"', [LevelName]);
+  if FWorld.LoadMap(LevelName) then
   begin
     FMapName := FWorld.Bsp.MapName;
     PlaceCamera(FWorld.SpawnPoint, FWorld.SpawnAngle);
     Hud.ShowMessage(FMapName, 3.0);
   end else
-    Hud.ShowMessage('Failed to load level: ' + AMapName, 5.0);
+    Hud.ShowMessage('Failed to load level: ' + LevelName, 5.0);
 end;
 
 procedure TViewPlay.CaptureScreenshot(const Prefix: String);
@@ -1825,10 +1841,7 @@ begin
       begin
         Menu.Exists := False;
         WalkNavigation.MouseLook := WantMouseLook;
-        if Param = RandomGameMap then
-          LoadLevel(RandomMapName(1 + Random(999999)))
-        else
-          LoadLevel(Param);
+        LoadLevel(Param);
       end;
     maSettingsChanged:
       ApplySettings;
