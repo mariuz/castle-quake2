@@ -66,7 +66,7 @@ uses
 
 const
   { Spawned, used by targets, drawn or used as markers by the game code }
-  SupportedClasses: array[0..70] of String = (
+  SupportedClasses: array[0..73] of String = (
     { func_group: brushes the map compiler merged into the world }
     'func_group', 'worldspawn', 'info_player_start', 'info_player_deathmatch', 'info_player_coop',
     'info_player_intermission', 'info_null', 'info_notnull', 'misc_teleporter',
@@ -87,6 +87,8 @@ const
     'func_conveyor',
     { clocks and displays (target_character frames) }
     'func_clock', 'target_string', 'target_character',
+    { g_turret.c: the gun, its base and the infantry driving it }
+    'turret_breach', 'turret_base', 'turret_driver',
     { monsters with the generic AI that is all they need }
     'monster_soldier_light', 'monster_soldier', 'monster_soldier_ss', 'monster_infantry',
     'monster_gunner');

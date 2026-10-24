@@ -123,7 +123,7 @@ type
     property Height: Integer read FHeight;
   end;
 
-  TQuakeMoverKind = (mkStatic, mkDoor, mkDoorRotating, mkPlat, mkButton, mkRotating, mkTrain);
+  TQuakeMoverKind = (mkStatic, mkDoor, mkDoorRotating, mkPlat, mkButton, mkRotating, mkTrain, mkTurret);
   TQuakeMoverState = (msAtStart, msToEnd, msAtEnd, msToStart);
 
   TQuakeGeometry = class;
@@ -175,6 +175,10 @@ type
     { target_character: the frame set by its target_string (0..9 digits,
       10 '-', 11 ':', 12 blank); -1 for other movers }
     CharFrame: Integer;
+    { turret_breach / turret_base: current Quake angles (degrees), turned by
+      TQuakeWorld.UpdateTurrets; TurretDmg is dealt when blocked }
+    TurretPitch, TurretYaw: Single;
+    TurretDmg: Integer;
     constructor CreateMover(const AGeometry: TQuakeGeometry; const AEntity: TQuakeEntity;
       const AModelIndex: Integer);
     destructor Destroy; override;
@@ -333,6 +337,11 @@ type
 
     { Find mover by model string like "*1" }
     function FindMoverByModel(const AModel: String): TQuakeMover;
+    { A mover drawn as a grey box from Mins to Maxs (Quake, around the
+      entity origin): brush entities spawned from the console without a
+      "*N" model (no brush collision, ModelIndex 0) }
+    function AddBoxMover(const Ent: TQuakeEntity; const Mins, Maxs: TVector3;
+      const Parent: TCastleTransform): TQuakeMover;
 
     property Bsp: TQuakeBsp read FBsp;
     property SceneWorld: TCastleScene read FSceneWorld;
@@ -362,6 +371,9 @@ var
 
 implementation
 
+uses
+  QuakeTurret;
+
 const
   { Flags that split surfaces into separate batches }
   BatchFlagMask = SURF_WARP or SURF_TRANS33 or SURF_TRANS66 or SURF_FLOWING;
@@ -381,7 +393,7 @@ const
 function IsVisibleBrushClass(const CName: String): Boolean;
 begin
   { target_character: a digit of a target_string display }
-  if CName = 'target_character' then
+  if (CName = 'target_character') or (CName = 'turret_breach') or (CName = 'turret_base') then
     Exit(True);
   Result := (Copy(CName, 1, 5) = 'func_') and (CName <> 'func_areaportal') and
     (CName <> 'func_clock') and (CName <> 'func_timer') and (CName <> 'func_group') and
@@ -1002,11 +1014,24 @@ begin
     Kind := mkTrain;
     Speed := AEntity.Speed(100);
     TrainRunning := (TargetName = '') or ((SpawnFlags and TRAIN_START_ON) <> 0);
+  end else
+  if (CName = 'turret_breach') or (CName = 'turret_base') then
+  begin
+    { The brush model drawn with the entity's angles (s.angles) }
+    Kind := mkTurret;
+    TurretYaw := AEntity.Angle;
+    TurretPitch := 0;
+    TurretDmg := AEntity.GetInt('dmg', 10);
+    if TurretDmg = 0 then
+      TurretDmg := 10;
   end;
 
   Transform.Translation := BaseOffset + Pos1;
   if Kind = mkDoorRotating then
-    Transform.Rotation := Vector4(RotAxis, Angle1);
+    Transform.Rotation := Vector4(RotAxis, Angle1)
+  else
+  if Kind = mkTurret then
+    Transform.Rotation := TurretRotation(TurretPitch, TurretYaw);
 end;
 
 procedure TQuakeMover.UpdateMoveSound(const Moving: Boolean);
@@ -1051,6 +1076,8 @@ begin
       Transform.Rotation := Vector4(RotAxis, SpinAngle);
     mkTrain:
       ; { trains save their translation directly }
+    mkTurret:
+      Transform.Rotation := TurretRotation(TurretPitch, TurretYaw);
     mkStatic:
       ;
     else
@@ -1146,6 +1173,8 @@ begin
       end;
     mkRotating:
       Result := Entity.GetInt('dmg', 0);
+    mkTurret:
+      Result := TurretDmg; { turret_blocked: the team master's dmg }
     else ;
   end;
 end;
@@ -1688,6 +1717,36 @@ begin
        Mover.Center.ToString]);
   end;
   WritelnLog('QuakeGeometry', 'Configured %d brush entities', [FMovers.Count]);
+end;
+
+function TQuakeGeometry.AddBoxMover(const Ent: TQuakeEntity; const Mins, Maxs: TVector3;
+  const Parent: TCastleTransform): TQuakeMover;
+var
+  Root: TX3DRootNode;
+  Shape: TShapeNode;
+  Box: TBoxNode;
+  Mat: TMaterialNode;
+  Tr: TTransformNode;
+begin
+  Result := TQuakeMover.CreateMover(Self, Ent, 0);
+  Root := TX3DRootNode.Create;
+  Tr := TTransformNode.Create;
+  Tr.Translation := QuakeToCge((Mins + Maxs) / 2);
+  Box := TBoxNode.Create;
+  Box.Size := Vector3(Maxs.X - Mins.X, Maxs.Z - Mins.Z, Maxs.Y - Mins.Y);
+  Mat := TMaterialNode.Create;
+  Mat.DiffuseColor := Vector3(0.45, 0.45, 0.5);
+  Mat.EmissiveColor := Vector3(0.15, 0.15, 0.15);
+  Shape := TShapeNode.Create;
+  Shape.Geometry := Box;
+  Shape.Material := Mat;
+  Tr.AddChildren(Shape);
+  Root.AddChildren(Tr);
+  Result.Scene.Load(Root, True);
+  Parent.Add(Result.Transform);
+  FMovers.Add(Result);
+  WritelnLog('QuakeGeometry', 'Mover %d: %s box %s..%s at %s', [FMovers.Count - 1, Ent.ClassName,
+    Mins.ToString, Maxs.ToString, Result.Center.ToString]);
 end;
 
 procedure TQuakeGeometry.AddToWorld(const Parent: TCastleTransform);

@@ -10,7 +10,7 @@ uses
   SysUtils, Classes, Math, Generics.Collections, fpjson, jsonparser,
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions,
   QuakePak, QuakeBsp, QuakeGeometry, QuakeMap, QuakeMd2, QuakePlayer, QuakeLight, QuakeSound, QuakeHud, QuakeSettings,
-  QuakeParticles, QuakeEntities, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace;
+  QuakeParticles, QuakeEntities, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTurret;
 
 const
   { Quake 2 player: eye 22 above origin, origin 24 above the feet }
@@ -25,9 +25,33 @@ type
     Entity: TQuakeEntity;
   end;
 
+  { A turret_breach with its turret_bases and turret_driver (g_turret.c) }
+  TQuakeTurret = class
+  public
+    Breach: TQuakeMover;
+    Bases: array of TQuakeMover;
+    Driver: TQuakeMonster;
+    { Muzzle offset and bases found (turret_breach_finish_init) }
+    Linked: Boolean;
+    { Wished angles (move_angles), turning speed (degrees a second), limits }
+    MovePitch, MoveYaw: Single;
+    Speed: Single;
+    Limits: TTurretLimits;
+    { The breach's target minus its origin: the rocket's start }
+    MoveOrigin: TVector3;
+    { The driver's seat (turret_driver_link move_origin) }
+    DriverOffset: TVector3;
+    { turret_driver_think: when the enemy was (re)acquired, next shot }
+    TrailTime, AttackFinished: Single;
+    LostSight, HadEnemy: Boolean;
+    Shots: Integer;
+  end;
+  TQuakeTurretList = specialize TObjectList<TQuakeTurret>;
+
   { World simulation manager }
   TQuakeWorld = class
   private
+    FTurrets: TQuakeTurretList;
     FItems: TCastleAbstractRootTransform;
     FMap: TQuakeMap;
     FMapReused: Boolean;
@@ -117,6 +141,10 @@ type
     procedure ResetClock(const I: Integer);
     procedure ClockThink(const I: Integer);
     procedure UpdateClocks;
+    { turret_breach_think / turret_driver_think for every turret }
+    procedure UpdateTurrets(const SecondsPassed: Single);
+    procedure LinkTurret(const T: TQuakeTurret);
+    procedure TurretFire(const T: TQuakeTurret);
     procedure UpdateMedics(const SecondsPassed: Single);
     procedure MonsterRevived(const Monster: TQuakeMonster);
     { target_string_use: write the message on the team's target_characters }
@@ -323,6 +351,7 @@ type
     property Pickups: TQuakePickupList read FPickups;
     property Props: TQuakePropList read FProps;
     property Lasers: TQuakeLaserList read FLasers;
+    property Turrets: TQuakeTurretList read FTurrets;
     property WeaponTransform: TCastleTransform read FWeaponTransform;
     property Geometry: TQuakeGeometry read FGeometry;
     property Bsp: TQuakeBsp read FBsp;
@@ -402,6 +431,7 @@ begin
   Sounds.WorldParent := AItems;
   FPickups := TQuakePickupList.Create(True);
   FMonsters := TQuakeMonsterList.Create(True);
+  FTurrets := TQuakeTurretList.Create(True);
   FSightEntities := specialize TList<TQuakeMonster>.Create;
   FMoverPoses := specialize TDictionary<TQuakeMover, TMatrix4>.Create;
   PlayerBlockBox := TBox3D.Empty;
@@ -441,6 +471,7 @@ begin
   FreeAndNil(FCollision);
   FPickups.Free;
   FMonsters.Free;
+  FTurrets.Free;
   FSightEntities.Free;
   FreeAndNil(PlayerTrail);
   FProjectiles.Free;
@@ -479,6 +510,7 @@ begin
     PlayerTrail.Clear;
   FPickups.Clear;
   FSightEntities.Clear;
+  FTurrets.Clear;
   FMonsters.Clear;
   FProjectiles.Clear;
   FTriggers.Clear;
@@ -598,6 +630,8 @@ var
   Trig: TQuakeTrigger;
   SpawnFlags: Integer;
   D: TDelayedTarget;
+  Mover, M2: TQuakeMover;
+  Turret: TQuakeTurret;
 begin
   CName := Ent.ClassName;
   Pos := QuakeToCge(Ent.Origin);
@@ -609,6 +643,51 @@ begin
 
   if (CName = 'info_player_start') or (CName = 'info_player_deathmatch') then
     Exit; { chosen by ChooseSpawnPoint }
+
+  if (CName = 'turret_breach') or (CName = 'turret_base') then
+  begin
+    { SP_turret_breach / SP_turret_base: the brush model, or a box for
+      turrets spawned from the console with mins / maxs }
+    Mover := nil;
+    if FGeometry <> nil then
+      for M2 in FGeometry.Movers do
+        if M2.Entity = Ent then
+          Mover := M2;
+    if (Mover = nil) and (FGeometry <> nil) and Ent.HasField('mins') and Ent.HasField('maxs') then
+      Mover := FGeometry.AddBoxMover(Ent, Ent.GetVector('mins', TVector3.Zero),
+        Ent.GetVector('maxs', TVector3.Zero), FMap);
+    if (Mover <> nil) and (CName = 'turret_breach') then
+    begin
+      Turret := TQuakeTurret.Create;
+      Turret.Breach := Mover;
+      Turret.Speed := Ent.GetFloat('speed', 0);
+      if Turret.Speed = 0 then
+        Turret.Speed := 50;
+      Turret.Limits := TurretLimits(Ent.GetFloat('minpitch', 0), Ent.GetFloat('maxpitch', 0),
+        Ent.GetFloat('minyaw', 0), Ent.GetFloat('maxyaw', 0));
+      Turret.MoveYaw := Mover.TurretYaw;
+      FTurrets.Add(Turret);
+    end;
+    Exit;
+  end;
+
+  if CName = 'turret_driver' then
+  begin
+    { SP_turret_driver: an infantry with 100 health, linked to the breach
+      its target names on the next update }
+    Monster := TQuakeMonster.CreateMonster(FMap, FindMonsterDef('monster_infantry'), Ent, Pos, Ent.Angle);
+    Monster.TurretDriver := True;
+    Monster.Health := 100;
+    Monster.Transform.Name := StringReplace(Monster.Transform.Name, 'monster_infantry', 'turret_driver', []);
+    Monster.OnFoundTarget := @MonsterFoundTarget;
+    Monster.OnPickTarget := @PickTarget;
+    Monster.OnUseTargets := @UseTargets;
+    if Monster.Model <> nil then
+      Monster.Model.PlayAnim('stand', True, 10);
+    FMonsters.Add(Monster);
+    Inc(FStats.TotalKills);
+    Exit;
+  end;
 
   ItemDef := FindItemDef(CName);
   if ItemDef <> nil then
@@ -2827,6 +2906,7 @@ begin
     end;
   end;
   ProcessSightEntities;
+  UpdateTurrets(SecondsPassed);
   FGeometry.ScenePlayerClip.Collides := True;
 
   CheckMonsterTriggers;
@@ -3077,6 +3157,8 @@ begin
     O.Add('exists', FGeometry.Movers[I].Transform.Exists);
     O.Add('spinning', FGeometry.Movers[I].Spinning);
     O.Add('spin', FGeometry.Movers[I].SpinAngle);
+    O.Add('turretPitch', FGeometry.Movers[I].TurretPitch);
+    O.Add('turretYaw', FGeometry.Movers[I].TurretYaw);
     O.Add('trainRunning', FGeometry.Movers[I].TrainRunning);
     O.Add('pos', VecToJson(FGeometry.Movers[I].Transform.Translation));
     O.Add('trainFrom', VecToJson(FGeometry.Movers[I].TrainFrom));
@@ -3268,6 +3350,8 @@ begin
       Mover.Transform.Exists := O.Get('exists', True);
       Mover.Spinning := O.Get('spinning', Mover.Spinning);
       Mover.SpinAngle := O.Get('spin', 0.0);
+      Mover.TurretPitch := O.Get('turretPitch', Mover.TurretPitch);
+      Mover.TurretYaw := O.Get('turretYaw', Mover.TurretYaw);
       Mover.TrainRunning := O.Get('trainRunning', Mover.TrainRunning);
       Mover.MoveLength := O.Get('moveLength', Mover.MoveLength);
       Mover.TrainFrom := JsonToVec(O.Find('trainFrom'));
@@ -3432,6 +3516,152 @@ begin
   end;
 end;
 
+procedure TQuakeWorld.LinkTurret(const T: TQuakeTurret);
+var
+  List: TQuakeEntityList;
+  Team: String;
+  Mover: TQuakeMover;
+begin
+  { turret_breach_finish_init: the muzzle from the breach's target; the
+    bases are the turret_bases of its team }
+  T.Linked := True;
+  if T.Breach.Target <> '' then
+  begin
+    List := FBsp.FindByTargetName(T.Breach.Target);
+    try
+      if List.Count > 0 then
+        T.MoveOrigin := List[0].Origin - T.Breach.Entity.Origin;
+    finally
+      List.Free;
+    end;
+  end else
+    WritelnLog('QuakeWorld', 'turret_breach at %s needs a target', [T.Breach.Entity.Origin.ToString]);
+  Team := T.Breach.Entity.GetField('team', '');
+  if Team <> '' then
+    for Mover in FGeometry.Movers do
+      if (Mover.EntityClass = 'turret_base') and (Mover.Entity.GetField('team', '') = Team) then
+      begin
+        SetLength(T.Bases, Length(T.Bases) + 1);
+        T.Bases[High(T.Bases)] := Mover;
+      end;
+end;
+
+procedure TQuakeWorld.TurretFire(const T: TQuakeTurret);
+var
+  Muzzle, F, R, U: TVector3;
+  Damage: Integer;
+  Proj: TQuakeProjectile;
+begin
+  { turret_breach_fire: a rocket along the breach's forward, 100..150
+    damage (also the splash, radius 150), speed 550 + 50 * skill }
+  Muzzle := TurretMuzzle(T.Breach.Entity.Origin, T.Breach.TurretPitch, T.Breach.TurretYaw, T.MoveOrigin);
+  QuakeAngleVectors(T.Breach.TurretPitch, T.Breach.TurretYaw, F, R, U);
+  Damage := 100 + Random(51);
+  SpawnProjectile(pkRocket, QuakeToCge(Muzzle), QuakeToCge(F), 550 + 50 * GameSkill, Damage, False, T.Driver);
+  Proj := FProjectiles.Last;
+  Proj.SplashDamage := Damage;
+  Proj.SplashRadius := 150;
+  Sounds.PlayAtPoint('sound/weapons/rocklf1a.wav', QuakeToCge(Muzzle), 1, 1, T.Breach, chWeapon);
+  Inc(T.Shots);
+  WritelnLog('QuakeWorld', 'turret_breach fires (pitch %.1f yaw %.1f, %d damage)',
+    [T.Breach.TurretPitch, T.Breach.TurretYaw, Damage]);
+end;
+
+procedure TQuakeWorld.UpdateTurrets(const SecondsPassed: Single);
+var
+  T: TQuakeTurret;
+  M: TQuakeMonster;
+  I: Integer;
+  BreachOrg: TVector3;
+  DP, DY, Reaction: Single;
+  Fire: Boolean;
+begin
+  if FTurrets.Count = 0 then
+    Exit;
+  { turret_driver_link: a driver takes the breach its target names }
+  for M in FMonsters do
+    if M.TurretDriver and (not M.TurretLinked) and M.IsAlive and not M.Dormant then
+      for T in FTurrets do
+        if (T.Driver = nil) and (T.Breach.TargetName <> '') and SameText(T.Breach.TargetName, M.Entity.Target) then
+        begin
+          M.TurretLinked := True;
+          T.Driver := M;
+          T.DriverOffset := TurretDriverOffset(M.Origin, T.Breach.Entity.Origin);
+          WritelnLog('QuakeWorld', '%s drives turret_breach "%s"', [M.Transform.Name, T.Breach.TargetName]);
+          Break;
+        end;
+
+  for T in FTurrets do
+  begin
+    if not T.Linked then
+      LinkTurret(T);
+    BreachOrg := T.Breach.Entity.Origin;
+    Fire := False;
+
+    { turret_driver_die: the gun levels, the turret has no owner any more }
+    if (T.Driver <> nil) and not T.Driver.IsAlive then
+    begin
+      WritelnLog('QuakeWorld', 'turret_driver died: the turret levels');
+      T.Driver := nil;
+      T.MovePitch := 0;
+    end;
+
+    { turret_driver_think: aim at the visible enemy, fire after the
+      reaction time (3 - skill seconds) from when it was (re)acquired }
+    M := T.Driver;
+    if (M <> nil) and M.Alerted and (not FDead) and (not NoTarget) then
+    begin
+      if not T.HadEnemy then
+      begin
+        T.HadEnemy := True;
+        T.TrailTime := FTime;
+        T.LostSight := False;
+      end;
+      if M.CanSeePlayer then
+      begin
+        if T.LostSight then
+        begin
+          T.TrailTime := FTime;
+          T.LostSight := False;
+        end;
+        QuakeVecToAngles(CgeToQuake(FPlayerPos) - BreachOrg, T.MovePitch, T.MoveYaw);
+        Reaction := 3 - GameSkill;
+        if (FTime >= T.AttackFinished) and (FTime - T.TrailTime >= Reaction) then
+        begin
+          T.AttackFinished := FTime + Reaction + 1;
+          Fire := True;
+        end;
+      end else
+        T.LostSight := True;
+    end;
+
+    { turret_breach_think: turn towards the (clamped) wished angles }
+    TurretClampAngles(T.MovePitch, T.MoveYaw, T.Limits);
+    TurretStep(T.Breach.TurretPitch, T.Breach.TurretYaw, T.MovePitch, T.MoveYaw,
+      T.Speed * SecondsPassed, DP, DY);
+    T.Breach.TurretPitch := T.Breach.TurretPitch + DP;
+    T.Breach.TurretYaw := T.Breach.TurretYaw + DY;
+    T.Breach.ApplyPose;
+    for I := 0 to High(T.Bases) do
+    begin
+      T.Bases[I].TurretYaw := T.Bases[I].TurretYaw + DY;
+      T.Bases[I].ApplyPose;
+    end;
+
+    { The driver sits behind the breach, turned and tilted with it }
+    if T.Driver <> nil then
+    begin
+      M := T.Driver;
+      M.FacingAngle := T.Breach.TurretYaw;
+      M.Transform.Translation := QuakeToCge(TurretDriverOrigin(BreachOrg, T.Breach.TurretPitch,
+        T.Breach.TurretYaw, T.DriverOffset, M.Origin.Z));
+      M.Transform.Rotation := TurretRotation(T.Breach.TurretPitch, T.Breach.TurretYaw);
+      if Fire then
+        TurretFire(T);
+    end;
+  end;
+end;
+
 function TQuakeWorld.MoverTrace(const Mover: TQuakeMover; const Start, Stop, Mins, Maxs: TVector3;
   const Mask: Integer): TQuakeTrace;
 begin
@@ -3446,8 +3676,9 @@ var
 begin
   { Into the brush model's own coordinates (CM_TransformedBoxTrace): the
     scene is placed relative to the entity origin (BaseOffset) by its
-    transform; a rotated model keeps the box axis-aligned, like Quake 2 }
-  if not M.TryInverse(Inv) then
+    transform; a rotated model keeps the box axis-aligned, like Quake 2.
+    Console-spawned boxes (ModelIndex 0) have no brushes: never hit. }
+  if (Mover.ModelIndex <= 0) or not M.TryInverse(Inv) then
     Exit(BoxTraceAgainstBox(Stop, Stop, TVector3.Zero, TVector3.Zero, Vector3(1, 1, 1), Vector3(0, 0, 0), 0));
   LStart := CgeToQuake(Inv.MultPoint(QuakeToCge(Start)) + Mover.BaseOffset);
   LStop := CgeToQuake(Inv.MultPoint(QuakeToCge(Stop)) + Mover.BaseOffset);
@@ -3682,6 +3913,8 @@ begin
     Exit;
   for Mover in FGeometry.Movers do
   begin
+    if Mover.ModelIndex <= 0 then
+      Continue; { console-spawned boxes have no brushes }
     M := Mover.Transform.Transform;
     if FMoverPoses.TryGetValue(Mover, Old) and not TMatrix4.PerfectlyEquals(M, Old) and
        Mover.Transform.Exists and Old.TryInverse(OldInv) then
@@ -3703,7 +3936,7 @@ begin
         end;
       end;
       { Continuously spinning brushes only push the player }
-      if Mover.Kind = mkRotating then
+      if Mover.Kind in [mkRotating, mkTurret] then
       begin
         FMoverPoses.AddOrSetValue(Mover, M);
         Continue;

@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret;
 
 var
   Passed, Failed: Integer;
@@ -602,7 +602,9 @@ begin
   Check(ClassSupport('func_object', NoteText) = csPartial, 'unknown func_ brushes are drawn (partial)');
   Check(ClassSupport('func_conveyor', NoteText) = csSupported, 'func_conveyor moves the player by its contents');
   Check(ClassSupport('misc_viper', NoteText) = csSupported, 'misc_viper flies its path');
-  Check(ClassSupport('turret_breach', NoteText) = csUnsupported, 'turret_breach is unsupported');
+  Check(ClassSupport('turret_breach', NoteText) = csSupported, 'turret_breach turns and fires');
+  Check(ClassSupport('turret_driver', NoteText) = csSupported, 'turret_driver aims its breach');
+  Check(ClassSupport('misc_actor', NoteText) = csUnsupported, 'misc_actor is unsupported');
   Check(ClassSupport('target_string', NoteText) = csSupported, 'target_string writes its target_characters');
 end;
 
@@ -1094,6 +1096,47 @@ begin
   Check((CharacterFrame(' 1:05', 1) = 12) and (CharacterFrame(' 1:05', 9) = 12), 'blank for spaces and past the end');
 end;
 
+procedure TestTurret;
+var
+  L: TTurretLimits;
+  P, Y, DP, DY: Single;
+  Off, F, R, U, Fwd: TVector3;
+begin
+  { g_turret.c defaults and angle rules }
+  L := TurretLimits(0, 0, 0, 0);
+  Check(SameValue(L.Pos1Pitch, 30) and SameValue(L.Pos2Pitch, -30) and SameValue(L.Pos2Yaw, 360),
+    'turret limits default to pitch -30..30, yaw 0..360');
+  QuakeVecToAngles(Vector3(1, 0, 1), P, Y);
+  Check(SameValue(P, -45) and SameValue(Y, 0), 'vectoangles: up is negative pitch');
+  QuakeVecToAngles(Vector3(0, -1, 0), P, Y);
+  Check(SameValue(Y, 270), 'vectoangles: -Y is yaw 270');
+  P := -60; Y := 0;
+  TurretClampAngles(P, Y, L);
+  Check(SameValue(P, -30), 'turret aims at most 30 degrees up');
+  P := 0; Y := 100;
+  TurretClampAngles(P, Y, TurretLimits(0, 0, 0, 90));
+  Check(SameValue(Y, 90), 'turret yaw clamped to maxyaw');
+  P := 0; Y := 350;
+  TurretClampAngles(P, Y, TurretLimits(0, 0, 0, 90));
+  Check(SameValue(Y, 0), 'turret yaw clamped to the nearer limit');
+  TurretStep(0, 350, 0, 10, 5, DP, DY);
+  Check(SameValue(DY, 5) and SameValue(DP, 0), 'turret turns the short way, at its speed');
+  { Muzzle along forward / right / up }
+  Off := TurretMuzzle(TVector3.Zero, 0, 90, Vector3(32, 0, 8));
+  Check(TVector3.Equals(Off, Vector3(0, 32, 8), 0.001), 'turret muzzle turns with the breach');
+  { The driver's seat }
+  Off := TurretDriverOffset(Vector3(-40, 0, 0), TVector3.Zero);
+  Check(SameValue(Off.X, 40) and SameValue(Off.Y, 180) and SameValue(Off.Z, 0), 'turret driver offset');
+  Check(TVector3.Equals(TurretDriverOrigin(TVector3.Zero, 0, 90, Off, 0), Vector3(0, -40, 0), 0.001),
+    'turret driver turns with the breach');
+  Check(SameValue(TurretDriverOrigin(TVector3.Zero, 10, 0, Off, 0).Z, 7), 'turret driver rises when the gun dips');
+  Check(SameValue(SnapToEights(1.07), 1.125) and SameValue(SnapToEights(-1.07), -1.125), 'SnapToEights');
+  { The brush is drawn with the breach's angles }
+  QuakeAngleVectors(30, 90, F, R, U);
+  Fwd := RotatePointAroundAxis(TurretRotation(30, 90), Vector3(1, 0, 0));
+  Check(TVector3.Equals(Fwd, QuakeToCge(F), 0.001), 'turret rotation matches AngleVectors');
+end;
+
 procedure TestModelLightStyles;
 var
   Bsp: TQuakeBsp;
@@ -1326,6 +1369,7 @@ begin
   TestGibs;
   TestClock;
   TestModelLightStyles;
+  TestTurret;
   TestRecord;
   TestGun;
   TestMonsterAttacks;

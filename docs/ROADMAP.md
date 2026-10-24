@@ -20,7 +20,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Audio | 3D sounds, entity channels, merged loop sounds, CD music | Quake 2 attenuation (incl. `ATTN_STATIC`), `CHAN_*` channels, point sounds that outlive entities, loop mixer (one voice per sound, PVS-checked, `SOUND_LOOPATTENUATE`), 32 sources, OGG tracks, named sounds editable in the editor | Stereo panning curve (OpenAL's, not Quake 2's), `s_volume` style master limiter. |
 | Input / options | Key bindings, mouse sensitivity, joystick, skill | Options menu (sensitivity, invert, FOV, volumes), key rebinding, skill selection, saved in `UserConfig`, gamepad (sticks, triggers, menus), touch controls (stick, drag look, buttons, tap menus) | Gamepad button rebinding; gamepad and touch not yet tried on real hardware. |
 | Multiplayer | Deathmatch / coop over UDP | Single player only | Out of scope for now (see below). |
-| Tooling | Console, `+map`, demos | Console, autotest scripts (keys, gamepad, touch), `record` to turn play into a script, screenshot comparison in CI, 201 unit checks, map compatibility report, CGE editor components and designs, F8 inspector, Windows / Linux / Android / WebAssembly builds | Editor property editors. |
+| Tooling | Console, `+map`, demos | Console, autotest scripts (keys, gamepad, touch), `record` to turn play into a script, screenshot comparison in CI, 216 unit checks, map compatibility report, CGE editor components and designs, F8 inspector, Windows / Linux / Android / WebAssembly builds | Editor property editors. |
 
 ## Done so far
 
@@ -30,7 +30,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - **Performance**: PVS + areaportal culling of the world and of entities (`novis` to compare), batched particles.
 - **Editor**: views from designs, `TQuakeMap` building levels in the editor with skybox and entity markers, behaviors with published state, monster types (`data/monsters.castle-transform`) and named sounds (`data/sounds.castle-component`).
 - **Reach**: options menu with key rebinding, skill levels, gamepad, touch controls, Android APK and WebAssembly builds.
-- **Engineering**: CI on Windows / Linux / Android / Web, autotests under Mesa (keyboard, virtual gamepad and simulated touch), screenshot references, culling check (vis vs `novis`), map compatibility report, recorded replays, 201 unit checks.
+- **Engineering**: CI on Windows / Linux / Android / Web, autotests under Mesa (keyboard, virtual gamepad and simulated touch), screenshot references, culling check (vis vs `novis`), map compatibility report, recorded replays, 216 unit checks.
 - **Release**: v0.3.0, the first tagged release, with Windows / Linux / Android packages ([changelog](CHANGELOG.md)).
 
 ## Next: suggested improvements (Phase 6, prioritised)
@@ -41,7 +41,7 @@ Phase 5 is complete; v0.3.0 to v0.7.0 are released. What would help most now, ro
 2. ~~**Monsters and shots on the BSP traces**~~ — done (monsters move with `SV_movestep` / `M_CheckBottom`, shots / projectiles / sight / lasers trace `MASK_SHOT` / `MASK_OPAQUE`). The player now collides with the real brushes, but monsters still move with CGE mesh collisions and the `PlayerBlockBox` workaround, and hitscan / projectiles / line of sight use `WorldRayCast` against render meshes. Porting `SV_movestep` / `M_CheckBottom` (step up 18, don't walk off ledges) and using `TQuakeCollision` for shots and sight would make monsters respect player-clip / monster-clip brushes, ride and be pushed by movers, and make sight checks much cheaper.
 3. ~~**Movers push everything**~~ — done (monsters, corpses and items ride and get pushed; blocked monsters take the mover's damage, corpses are gibbed). Plats and doors only carry / push the player; monsters, items and corpses on a moving plat stay behind. Once monsters use traces, extend `PushPlayerByMovers` to all entities (`SV_Push` iterates every entity).
 4. ~~**Record playthroughs as test scripts**~~ — done (`record <name>` / `stop`, `IN:` lines on the script clock with drift correction, `--demo @file`). A `record` console command that writes the player's inputs as an autotest demo script (`GO` / `T` / `P` / `X` with timings) would turn any bug repro into a regression test, and is a cheap stand-in for Quake 2's demo files.
-5. **Full game monsters** (medium–large, needs the retail PAK). Attack tables (`QuakeMonsterAttacks`) for gladiator, chick, mutant, brain, floater, hover, flipper, medic and the bosses; medic revive; supertank / Makron / jorg behaviour; `misc_viper`, `target_blaster`, `func_killbox`, `turret_*`. Run `--map-report` on a retail `baseq2` to order the work; a nightly workflow can test against a private PAK.
+5. **Full game monsters** (medium–large, needs the retail PAK). Attack tables (`QuakeMonsterAttacks`) for gladiator, chick, mutant, brain, floater, hover, flipper, medic and the bosses; medic revive; supertank / Makron / jorg behaviour (medic revive, `misc_viper`, `target_blaster`, `func_killbox` and turrets are done). Run `--map-report` on a retail `baseq2` to order the work; a nightly workflow can test against a private PAK.
 6. ~~**Release v0.3.0**~~ — done. Tag a release so the Windows, Linux, Android and Web packages are published together, with a short changelog of Phase 5.
 7. **Editor**: property editors (map dropdown, reload verb), selectable entities with their key / value pairs (needs the Lazarus-built editor).
 8. **Audio polish**: Quake 2's stereo panning curve and a master limiter, so many loud sounds at once don't clip.
@@ -60,7 +60,7 @@ Phase 5 is complete; v0.3.0 to v0.7.0 are released. What would help most now, ro
 - ~~Swept player box~~ — done: `QuakeTrace` ports `CM_BoxTrace` over the map's brushes (plus movers in their own space and monster boxes) and the player runs Quake 2's `PM_StepSlideMove`, `PM_CatagorizePosition`, `PM_CheckDuck`, friction, water and ladder moves on it; movers carry riders and push the player (`SV_Push`), monsters don't walk into him. Blocked movers act like Quake 2 too (`SV_Push` keeps the pushed or the old position, else the pusher's `blocked`: doors and plats deal their `dmg` (2) and go back, crusher doors keep going, trains deal 100 unless BLOCK_STOPS). Still to do: monsters moving with the same traces.
 
 ### 3. Full game support (needs the retail PAK)
-- **Medic revive**, **boss behaviour** (supertank, Makron, jorg) and the missing entities (`misc_viper`, `target_blaster`, `func_killbox`, `turret_*`). Test with a local `baseq2` in a nightly-style workflow that is skipped when the PAK isn't available.
+- ~~**Medic revive**~~, **boss behaviour** (supertank, Makron, jorg); ~~the missing entities (`misc_viper`, `target_blaster`, `func_killbox`, `turret_*`)~~ — done, tested by spawning them on the demo. Test with a local `baseq2` in a nightly-style workflow that is skipped when the PAK isn't available.
 - ~~Save projectiles and delayed events~~ — done (also fixed `trigger_relay` ignoring `delay` and delayed `target_explosion`s, so demo1's opening explosions now come in sequence).
 - ~~Map compatibility report~~ — done: `castle-quake2 --map-report report.md` loads every map in the PAKs and lists load times, counts and the unsupported / partially supported entity classes (`QuakeMapReport`); the demo's is in [`map-report-demo.md`](map-report-demo.md) and CI keeps it free of unsupported classes. Run it with a retail `baseq2` to find what to implement next.
 
@@ -167,7 +167,7 @@ Phase 5 is complete; v0.3.0 to v0.7.0 are released. What would help most now, ro
 - [x] `func_clock`, `target_string`, `target_character` (countdowns and clocks on digit brushes)
 - [x] Light styles in the model tint (R_LightPoint over all styles of the face below)
 - [x] Player death view and gibbing (`player_die`, `LookAtKiller`, dead view angles)
-- [ ] Turrets (`turret_breach` / `turret_base` / `turret_driver`): need full-game maps to test
+- [x] Turrets (`turret_breach` / `turret_base` / `turret_driver`, `g_turret.c`); tested with console-spawned box turrets on the demo
 - [x] Medic revive (`medic_FindDeadMonster`, healing cable, the corpse gets up after the player); tested with a model-less medic on the demo
 - [ ] Attack tables for the full game's monsters, bosses (retail PAK)
 - [x] Tagged release v0.3.0 with Windows, Linux, Android and Web packages (notes from `docs/CHANGELOG.md`)

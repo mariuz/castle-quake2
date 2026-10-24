@@ -803,6 +803,11 @@ begin
         FWorld.Geometry.Movers[J].Entity.ClassName, FWorld.Geometry.Movers[J].Entity.Model,
         FWorld.Geometry.ModelTexFrame(FWorld.Geometry.Movers[J].ModelIndex), Ord(FWorld.Geometry.Movers[J].State),
         FWorld.Geometry.Movers[J].Progress, BoolToStr(FWorld.Geometry.Movers[J].Transform.Exists, True)]);
+    for J := 0 to FWorld.Turrets.Count - 1 do
+      WritelnLog('Demo', 'Turret %d pitch %.1f yaw %.1f aim %.1f %.1f bases %d driver %s shots %d', [J,
+        FWorld.Turrets[J].Breach.TurretPitch, FWorld.Turrets[J].Breach.TurretYaw,
+        FWorld.Turrets[J].MovePitch, FWorld.Turrets[J].MoveYaw, Length(FWorld.Turrets[J].Bases),
+        BoolToStr(FWorld.Turrets[J].Driver <> nil, True), FWorld.Turrets[J].Shots]);
     for J := 0 to FWorld.Props.Count - 1 do
       WritelnLog('Demo', 'Prop %d %s health %d destroyed %s flying %s exists %s', [J,
         FWorld.Props[J].Entity.ClassName, FWorld.Props[J].Health,

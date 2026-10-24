@@ -211,6 +211,12 @@ type
     CanSeePlayer: Boolean;
     Gibbed: Boolean;
     KillCounted: Boolean;
+    { turret_driver: an infantry that only aims its turret_breach (placed,
+      turned and fired by TQuakeWorld.UpdateTurrets); no pain, gibbed on
+      death (gib_health 0) }
+    TurretDriver: Boolean;
+    { The driver took its breach (turret_driver_link), once }
+    TurretLinked: Boolean;
     { Targets fired on death (monster_death_use); empty when "target" was a path }
     DeathTarget: String;
     { path_corner walked to while idle }
@@ -265,6 +271,10 @@ type
     procedure TakeDamage(const Dmg: Integer);
     { Throw the class's gibs (or explode) and vanish }
     procedure Gib(const Dmg: Integer);
+    { Health at or below which the body is gibbed (gib_health) }
+    function GibHealth: Integer;
+    { turret_driver: notice the player (no moving, no attacks) }
+    procedure UpdateDriverSight(const PlayerPos: TVector3);
     { A medic brought this corpse back: full health, standing, after the
       player (ED_CallSpawn + FoundTarget) }
     procedure Revive;
@@ -947,6 +957,8 @@ end;
 
 function TQuakeMonster.CanDodge: Boolean;
 begin
+  if TurretDriver then
+    Exit(False);
   { The monsters with monsterinfo.dodge in the Quake 2 game code }
   Result := (Copy(Def^.ClassName, 1, 15) = 'monster_soldier') or
     (Def^.ClassName = 'monster_infantry') or (Def^.ClassName = 'monster_gunner') or
@@ -1205,6 +1217,12 @@ begin
     FAttack.Stop;
   if Model = nil then
     Exit;
+  { The turret driver stands (infantry_stand) until it dies }
+  if TurretDriver and (NewState in [msIdle, msChase, msAttack]) then
+  begin
+    Model.PlayAnim('stand', True, 10);
+    Exit;
+  end;
   case NewState of
     msIdle: Model.PlayAnim('stand,idle,fidget', True, 10);
     msChase:
@@ -1443,6 +1461,14 @@ begin
   StickToFloor(SecondsPassed);
 end;
 
+function TQuakeMonster.GibHealth: Integer;
+begin
+  if TurretDriver then
+    Result := 0
+  else
+    Result := MonsterGibs(Def^.ClassName).GibHealth;
+end;
+
 procedure TQuakeMonster.Gib(const Dmg: Integer);
 var
   G: TMonsterGibs;
@@ -1473,7 +1499,7 @@ begin
   begin
     { Shooting corpses gibs them }
     Health := Health - Dmg;
-    if (Health <= MonsterGibs(Def^.ClassName).GibHealth) and not Gibbed then
+    if (Health <= GibHealth) and not Gibbed then
       Gib(Dmg);
     Exit;
   end;
@@ -1484,7 +1510,7 @@ begin
     Sounds.PlayAt(MonsterSound(Def, Def^.DeathSound), Transform, 1, 1, chVoice);
     if Model <> nil then
       Model.Scene.Collides := False;
-    if (Health <= MonsterGibs(Def^.ClassName).GibHealth) or MonsterGibs(Def^.ClassName).Explodes then
+    if (Health <= GibHealth) or MonsterGibs(Def^.ClassName).Explodes then
     begin
       Gib(Dmg);
       State := msDead;
@@ -1495,6 +1521,9 @@ begin
 
   if not Alerted then
     Alert;
+  { SP_turret_driver has no pain function }
+  if TurretDriver then
+    Exit;
   { Quake 2 monsters don't flinch on every hit, and never on nightmare }
   if (State <> msPain) and (GameSkill < 3) and (Random < 0.6) then
   begin
@@ -1568,6 +1597,12 @@ begin
       Model.SetShell(Vector3(0, 1, 0));
     end else
       Model.SetShell(TVector3.Zero);
+  end;
+
+  if TurretDriver then
+  begin
+    UpdateDriverSight(PlayerPos);
+    Exit;
   end;
 
   if (not FDropped) and Assigned(EntityTrace) and IsAlive then
@@ -1743,6 +1778,24 @@ begin
       Steer(MoveVec.Normalize, SecondsPassed);
   end;
   StickToFloor(SecondsPassed);
+end;
+
+procedure TQuakeMonster.UpdateDriverSight(const PlayerPos: TVector3);
+var
+  Delta: TVector3;
+begin
+  { turret_driver_think: FindTarget, then only whether the enemy is
+    visible; the world aims and fires the breach }
+  if (State in [msDying, msDead]) then
+  begin
+    if State = msDying then
+      State := msDead;
+    Exit;
+  end;
+  Delta := PlayerPos - Transform.Translation;
+  CanSeePlayer := (not NoTarget) and (Delta.Length < 2000) and SightClear(EyePos, PlayerPos);
+  if (not Alerted) and CanSeePlayer and WouldNotice(Delta) then
+    Alert;
 end;
 
 procedure TQuakeMonster.MonsterJump(const HorizVel: TVector3; const UpSpeed: Single);

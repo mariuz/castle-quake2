@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Turrets (`g_turret.c`): a `turret_breach` turns towards where its `turret_driver` aims (within its pitch / yaw limits, at its `speed`), its `turret_base` turns with it, and it fires rockets (100–150 damage, faster on harder skills) from the point its target marks, once the driver has seen the player for 3 − skill seconds; the driver is an infantry that rides behind the gun, never flinches and is gibbed when killed, and the gun then levels. The demo has no turrets: CI spawns one (as boxes) with the `spawn` command.
 - Player death like Quake 2's `player_die`: the view drops (eye 8 above the origin), turns to the killer, looks a little up and rolls 40°, and the view weapon goes away; below -40 health the player is gibbed (splat, 4 pieces of meat, the view at floor level). The `kill` command is a suicide at health 0 (no gibs, also in god mode), as in Quake 2.
 
 ## v0.7.0 — 2026-10-23
