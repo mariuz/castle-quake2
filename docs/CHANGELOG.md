@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Random and edited levels now have real visibility: the level compiler works out which parts of the level can see each other (like Quake 2's `qvis`, on the level grid), so only what you can see is drawn and monsters only hear you through open space, as in the original maps. On a typical random level about a quarter of it is drawn at a time.
+
 ## v0.11.0 — 2026-10-24
 
 Lifts and switches: in the level editor and in random levels (lifts to high rooms, the exit locked behind a switch). Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.

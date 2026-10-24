@@ -1270,6 +1270,87 @@ begin
   end;
 end;
 
+{ Compiled levels get a grid PVS: rooms behind walls or around corners are
+  out of it, a straight corridor joins them }
+procedure TestLevelVis;
+var
+  Level: TQuakeLevel;
+  Bsp: TQuakeBsp;
+  Stats: TBspBuildStats;
+  X, Y: Integer;
+
+  function ClusterAt(const CX, CY: Integer): Integer;
+  begin
+    Result := Bsp.LeafCluster(Bsp.PointLeaf(Vector3((CX + 0.5) * LevelCellSize, (CY + 0.5) * LevelCellSize, 40)));
+  end;
+
+  function Sees(const Phs: Boolean; const AX, AY, BX, BY: Integer): Boolean;
+  var
+    Row: TBytes;
+    C: Integer;
+  begin
+    if Phs then
+      Bsp.ClusterPHS(ClusterAt(AX, AY), Row)
+    else
+      Bsp.ClusterPVS(ClusterAt(AX, AY), Row);
+    C := ClusterAt(BX, BY);
+    Result := (C >= 0) and ((Row[C shr 3] and (1 shl (C and 7))) <> 0);
+  end;
+
+  function Load(const Name: String): Boolean;
+  begin
+    Level.Name := Name;
+    FreeAndNil(Bsp);
+    Bsp := TQuakeBsp.Create;
+    Result := Bsp.LoadFromPak('maps/' + RegisterLevelMap(Level) + '.bsp');
+  end;
+
+begin
+  Bsp := nil;
+  Level := TQuakeLevel.Create(16, 16);
+  try
+    { Room A (1..4, 1..4), room B (9..12, 1..4) behind a wall; room C
+      (9..12, 8..12) reached from A by a corridor turning a corner }
+    for Y := 1 to 4 do
+      for X := 1 to 4 do
+      begin
+        Level.SetOpen(X, Y, 0, 128);
+        Level.SetOpen(X + 8, Y, 0, 128);
+      end;
+    for Y := 8 to 12 do
+      for X := 9 to 12 do
+        Level.SetOpen(X, Y, 0, 128);
+    for Y := 5 to 10 do
+      Level.SetOpen(2, Y, 0, 128);
+    for X := 3 to 8 do
+      Level.SetOpen(X, 10, 0, 128);
+    Level.AddEntityAtCell('info_player_start', 2, 2, 0);
+    Check(Load('unittest_vis'), 'the vis test level loads');
+    Check((ClusterAt(2, 2) >= 0) and (ClusterAt(10, 2) >= 0) and (ClusterAt(10, 10) >= 0),
+      'rooms and corridors have clusters');
+    Check(Sees(False, 2, 2, 3, 3) and Sees(False, 2, 2, 2, 6) and Sees(False, 2, 9, 5, 10),
+      'a room sees itself and the corridor leaving it, the corridor its bend');
+    Check((not Sees(False, 2, 2, 10, 2)) and not Sees(False, 10, 2, 2, 2),
+      'rooms behind a wall are out of each other''s PVS');
+    Check(not Sees(False, 2, 2, 10, 10), 'a room around a corner is out of the PVS');
+    Check(Sees(True, 2, 6, 10, 10) and not Sees(True, 2, 2, 10, 2),
+      'the PHS reaches one room further (the corridor hears room C), not through walls');
+
+    { A straight corridor between A and B: they see each other }
+    for X := 5 to 8 do
+      Level.SetOpen(X, 2, 0, 128);
+    Check(Load('unittest_vis2') and Sees(False, 2, 2, 10, 2) and Sees(False, 1, 1, 12, 3) and
+      not Sees(False, 2, 2, 10, 10),
+      'a straight corridor joins the PVS of both rooms');
+
+    BuildLevelBsp(Level, Stats).Free;
+    Check((Stats.VisPercent > 0) and (Stats.VisPercent < 100), 'the build reports the share of visible clusters');
+  finally
+    Bsp.Free;
+    Level.Free;
+  end;
+end;
+
 procedure TestLevelDoorsWater;
 const
   Mins: TVector3 = (X: -16; Y: -16; Z: -24);
@@ -1837,6 +1918,7 @@ begin
   TestModelLightStyles;
   TestTurret;
   TestLevelBsp;
+  TestLevelVis;
   TestLevelDoorsWater;
   TestLevelLiftsSwitches;
   TestLevelGen;

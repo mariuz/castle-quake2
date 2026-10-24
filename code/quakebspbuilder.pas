@@ -13,8 +13,11 @@
     nodes (floors / ceilings, for R_LightPoint) and in its leaf.
   - Lightmaps: the "light" entities with qrad's linear falloff and a sky
     term, shadows from rays through the grid.
-  - Visibility: one cluster per empty leaf, everything visible (PVS / PHS
-    all ones); one area.
+  - Visibility: one cluster per empty (and water) leaf; a cluster sees
+    another when a sight line on the grid joins their rectangles through
+    open cells (qvis-like but 2D: heights and doors never block, walls are
+    shrunk a little, so it errs towards visible). PHS: the union of the
+    PVS rows of the visible clusters. One area.
 
   The result loads with TQuakeBsp like a map from a PAK
   (RegisterLevelMap adds it to Pak as maps/<name>.bsp). }
@@ -30,6 +33,10 @@ uses
 type
   TBspBuildStats = record
     Nodes, Leafs, Faces, Brushes, Clusters, LightBytes, Models: Integer;
+    { Average share of the clusters in a cluster's PVS (0..100) }
+    VisPercent: Integer;
+    { Time spent on the visibility, in milliseconds }
+    VisMsec: Integer;
   end;
 
 { The map file of a level }
@@ -100,6 +107,9 @@ type
     Lighting: TMemoryStream;
     Lights: array of TLight;
     Clusters: Integer;
+    VisPercent, VisMsec: Integer;
+    { Solid cells for sight (BuildVis), row by row }
+    SolidCells: array of Boolean;
     Models: TModelList;
     { func_door entities of the door models, for the entity lump }
     DoorEntities: String;
@@ -145,6 +155,11 @@ type
     procedure LightFace(const FaceIdx: Integer; const FA: TFaceAxis; const Dist: Single;
       const SkyCell: Boolean);
     procedure CollectLights;
+    { Grid sight from (AX, AY) to (BX, BY), in cells }
+    function SightClear(const AX, AY, BX, BY: Double): Boolean;
+    function RegionsSee(const A, B: TRegion): Boolean;
+    { Compressed PVS and PHS rows of each cluster }
+    procedure BuildVis(out Pvs, Phs: array of TBytes);
     function Write(out Stats: TBspBuildStats): TMemoryStream;
   end;
 
@@ -1233,12 +1248,284 @@ begin
   end;
 end;
 
+const
+  { Walls are this much (in cells) thinner for sight: lines grazing a
+    corner stay clear }
+  SightShrink = 4 / LevelCellSize;
+  SightInset = 0.01;
+
+function TBuilder.SightClear(const AX, AY, BX, BY: Double): Boolean;
+var
+  CX, CY, EX, EY, SX, SY, Steps: Integer;
+  DX, DY, TMaxX, TMaxY, TDeltaX, TDeltaY: Double;
+
+  function SolidAt(const X, Y: Integer): Boolean;
+  begin
+    Result := (X < 0) or (Y < 0) or (X >= Level.Width) or (Y >= Level.Height) or
+      SolidCells[Y * Level.Width + X];
+  end;
+
+  { Does the segment cross solid cell (X, Y), shrunk on its open sides
+    (walls of several cells stay closed along their seams)? }
+  function Blocks(const X, Y: Integer): Boolean;
+  var
+    T0, T1: Double;
+
+    function Inset(const NX, NY: Integer): Double;
+    begin
+      if SolidAt(NX, NY) then
+        Result := 0
+      else
+        Result := SightShrink;
+    end;
+
+    function Slab(const P, D, Lo, Hi: Double): Boolean;
+    var
+      TA, TB, Tmp: Double;
+    begin
+      if Abs(D) < 1e-12 then
+        { Along a seam between walls (Lo or Hi not inset) counts as inside }
+        Exit((P >= Lo) and (P <= Hi));
+      TA := (Lo - P) / D;
+      TB := (Hi - P) / D;
+      if TA > TB then
+      begin
+        Tmp := TA; TA := TB; TB := Tmp;
+      end;
+      T0 := Max(T0, TA);
+      T1 := Min(T1, TB);
+      Result := T0 < T1;
+    end;
+
+  begin
+    if not SolidAt(X, Y) then
+      Exit(False);
+    T0 := 0;
+    T1 := 1;
+    Result := Slab(AX, DX, X + Inset(X - 1, Y), X + 1 - Inset(X + 1, Y)) and
+      Slab(AY, DY, Y + Inset(X, Y - 1), Y + 1 - Inset(X, Y + 1));
+  end;
+
+begin
+  CX := Floor(AX); CY := Floor(AY);
+  EX := Floor(BX); EY := Floor(BY);
+  DX := BX - AX; DY := BY - AY;
+  if DX > 0 then
+  begin
+    SX := 1; TDeltaX := 1 / DX; TMaxX := (CX + 1 - AX) / DX;
+  end else
+  if DX < 0 then
+  begin
+    SX := -1; TDeltaX := -1 / DX; TMaxX := (AX - CX) / -DX;
+  end else
+  begin
+    SX := 0; TDeltaX := MaxDouble; TMaxX := MaxDouble;
+  end;
+  if DY > 0 then
+  begin
+    SY := 1; TDeltaY := 1 / DY; TMaxY := (CY + 1 - AY) / DY;
+  end else
+  if DY < 0 then
+  begin
+    SY := -1; TDeltaY := -1 / DY; TMaxY := (AY - CY) / -DY;
+  end else
+  begin
+    SY := 0; TDeltaY := MaxDouble; TMaxY := MaxDouble;
+  end;
+  Steps := Abs(EX - CX) + Abs(EY - CY) + 2;
+  while Steps > 0 do
+  begin
+    if Blocks(CX, CY) then
+      Exit(False);
+    if ((CX = EX) and (CY = EY)) or (Min(TMaxX, TMaxY) > 1) then
+      Break;
+    if TMaxX < TMaxY then
+    begin
+      Inc(CX, SX); TMaxX := TMaxX + TDeltaX;
+    end else
+    begin
+      Inc(CY, SY); TMaxY := TMaxY + TDeltaY;
+    end;
+    Dec(Steps);
+  end;
+  Result := True;
+end;
+
+function TBuilder.RegionsSee(const A, B: TRegion): Boolean;
+type
+  TPoint2 = record
+    X, Y: Double;
+  end;
+var
+  PA, PB: array of TPoint2;
+
+  { Sample points (every cell corner) on the sides of R facing O }
+  procedure Samples(const R, O: TRegion; var P: array of TPoint2; out Count: Integer);
+
+    procedure Add(const X, Y: Double);
+    begin
+      if Count <= High(P) then
+      begin
+        P[Count].X := X;
+        P[Count].Y := Y;
+        Inc(Count);
+      end;
+    end;
+
+    procedure Side(const Vertical: Boolean; const Fixed: Double; const Lo, Hi: Integer);
+    var
+      I: Integer;
+      V: Double;
+    begin
+      for I := 0 to Hi - Lo do
+      begin
+        V := EnsureRange(Lo + I, Lo + SightInset, Hi - SightInset);
+        if Vertical then
+          Add(Fixed, V)
+        else
+          Add(V, Fixed);
+      end;
+    end;
+
+  begin
+    Count := 0;
+    if O.X1 > R.X1 then
+      Side(True, R.X1 - SightInset, R.Y0, R.Y1);
+    if O.X0 < R.X0 then
+      Side(True, R.X0 + SightInset, R.Y0, R.Y1);
+    if O.Y1 > R.Y1 then
+      Side(False, R.Y1 - SightInset, R.X0, R.X1);
+    if O.Y0 < R.Y0 then
+      Side(False, R.Y0 + SightInset, R.X0, R.X1);
+  end;
+
+var
+  CA, CB, I, J: Integer;
+begin
+  { Touching (sharing an edge or a corner): always visible }
+  if (A.X0 <= B.X1) and (B.X0 <= A.X1) and (A.Y0 <= B.Y1) and (B.Y0 <= A.Y1) then
+    Exit(True);
+  SetLength(PA, 4 * (A.X1 - A.X0 + A.Y1 - A.Y0) + 8);
+  SetLength(PB, 4 * (B.X1 - B.X0 + B.Y1 - B.Y0) + 8);
+  Samples(A, B, PA, CA);
+  Samples(B, A, PB, CB);
+  for I := 0 to CA - 1 do
+    for J := 0 to CB - 1 do
+      if SightClear(PA[I].X, PA[I].Y, PB[J].X, PB[J].Y) then
+        Exit(True);
+  Result := False;
+end;
+
+function CompressVisRow(const Row: TBytes): TBytes;
+var
+  I, N, Zeros: Integer;
+begin
+  SetLength(Result, 2 * Length(Row) + 2);
+  N := 0;
+  I := 0;
+  while I < Length(Row) do
+  begin
+    if Row[I] <> 0 then
+    begin
+      Result[N] := Row[I];
+      Inc(N);
+      Inc(I);
+    end else
+    begin
+      Zeros := 0;
+      while (I < Length(Row)) and (Row[I] = 0) and (Zeros < 255) do
+      begin
+        Inc(Zeros);
+        Inc(I);
+      end;
+      Result[N] := 0;
+      Result[N + 1] := Zeros;
+      Inc(N, 2);
+    end;
+  end;
+  SetLength(Result, N);
+end;
+
+procedure TBuilder.BuildVis(out Pvs, Phs: array of TBytes);
+var
+  RowBytes, I, J, K, C: Integer;
+  RegionClusters: array of array[0..1] of Integer;
+  See: array of TBytes;
+  Row: TBytes;
+  Start: QWord;
+  Seen: Int64;
+
+  procedure SetBit(var R: TBytes; const Cluster: Integer);
+  begin
+    if Cluster >= 0 then
+      R[Cluster shr 3] := R[Cluster shr 3] or (1 shl (Cluster and 7));
+  end;
+
+  procedure Link(const RA, RB: Integer);
+  var
+    A, B: Integer;
+  begin
+    for A in RegionClusters[RA] do
+      for B in RegionClusters[RB] do
+        if (A >= 0) and (B >= 0) then
+        begin
+          SetBit(See[A], B);
+          SetBit(See[B], A);
+        end;
+  end;
+
+begin
+  Start := GetTickCount64;
+  SetLength(SolidCells, Level.Width * Level.Height);
+  for I := 0 to High(SolidCells) do
+    SolidCells[I] := Level.Cell(I mod Level.Width, I div Level.Width)^.Solid;
+  RowBytes := (Clusters + 7) div 8;
+  SetLength(See, Clusters);
+  for I := 0 to Clusters - 1 do
+  begin
+    SetLength(See[I], RowBytes);
+    FillChar(See[I][0], RowBytes, 0);
+  end;
+  SetLength(RegionClusters, Regions.Count);
+  for I := 0 to Regions.Count - 1 do
+  begin
+    RegionClusters[I][0] := Leafs[Regions[I].Leaf].Cluster;
+    RegionClusters[I][1] := -1;
+    if Regions[I].WaterLeaf >= 0 then
+      RegionClusters[I][1] := Leafs[Regions[I].WaterLeaf].Cluster;
+  end;
+  for I := 0 to Regions.Count - 1 do
+    for J := I to Regions.Count - 1 do
+      if (I = J) or RegionsSee(Regions[I], Regions[J]) then
+        Link(I, J);
+  Seen := 0;
+  for C := 0 to Clusters - 1 do
+  begin
+    for K := 0 to Clusters - 1 do
+      if (See[C][K shr 3] and (1 shl (K and 7))) <> 0 then
+        Inc(Seen);
+    Pvs[C] := CompressVisRow(See[C]);
+    { PHS: everything the visible clusters see }
+    Row := Copy(See[C]);
+    for K := 0 to Clusters - 1 do
+      if (See[C][K shr 3] and (1 shl (K and 7))) <> 0 then
+        for J := 0 to RowBytes - 1 do
+          Row[J] := Row[J] or See[K][J];
+    Phs[C] := CompressVisRow(Row);
+  end;
+  VisPercent := 0;
+  if Clusters > 0 then
+    VisPercent := Round(100 * Seen / (Int64(Clusters) * Clusters));
+  VisMsec := GetTickCount64 - Start;
+end;
+
 function TBuilder.Write(out Stats: TBspBuildStats): TMemoryStream;
 var
   Hdr: TBSPHeader;
   Ents: String;
   Vis: TMemoryStream;
-  I, RowBytes, Ofs: Integer;
+  I, Ofs: Integer;
+  PvsRows, PhsRows: array of TBytes;
   Areas: array[0..1] of TBSPArea;
   Portal: TBSPAreaPortal;
   Zero: Byte;
@@ -1270,19 +1557,28 @@ begin
   BytesLump(LUMP_PLANES, specialize ListBytes<TBSPPlane>(Planes));
   BytesLump(LUMP_VERTICES, specialize ListBytes<TVector3>(Vertices));
 
-  { Visibility: every cluster sees every cluster (one shared row) }
+  { Visibility: PVS and PHS rows after the offsets }
+  SetLength(PvsRows, Clusters);
+  SetLength(PhsRows, Clusters);
+  BuildVis(PvsRows, PhsRows);
   Vis := TMemoryStream.Create;
   try
-    RowBytes := (Clusters + 7) div 8;
     Vis.WriteDWord(Clusters);
     Ofs := 4 + 8 * Clusters;
     for I := 0 to Clusters - 1 do
     begin
       Vis.WriteDWord(Ofs);
+      Inc(Ofs, Length(PvsRows[I]));
       Vis.WriteDWord(Ofs);
+      Inc(Ofs, Length(PhsRows[I]));
     end;
-    for I := 0 to RowBytes - 1 do
-      Vis.WriteByte($FF);
+    for I := 0 to Clusters - 1 do
+    begin
+      if Length(PvsRows[I]) > 0 then
+        Vis.WriteBuffer(PvsRows[I][0], Length(PvsRows[I]));
+      if Length(PhsRows[I]) > 0 then
+        Vis.WriteBuffer(PhsRows[I][0], Length(PhsRows[I]));
+    end;
     Lump(LUMP_VISIBILITY, Vis.Memory, Vis.Size);
   finally
     Vis.Free;
@@ -1323,6 +1619,8 @@ begin
   Stats.Faces := Faces.Count;
   Stats.Brushes := Brushes.Count;
   Stats.Clusters := Clusters;
+  Stats.VisPercent := VisPercent;
+  Stats.VisMsec := VisMsec;
   Stats.LightBytes := Lighting.Size;
 end;
 
@@ -1363,8 +1661,9 @@ begin
   finally
     B.Free;
   end;
-  WritelnLog('QuakeBspBuilder', 'Built "%s": %d nodes, %d leafs, %d clusters, %d faces, %d brushes, %d models, %d lightmap bytes',
-    [Level.Name, Stats.Nodes, Stats.Leafs, Stats.Clusters, Stats.Faces, Stats.Brushes, Stats.Models, Stats.LightBytes]);
+  WritelnLog('QuakeBspBuilder', 'Built "%s": %d nodes, %d leafs, %d clusters (%d %% visible, %d ms), %d faces, %d brushes, %d models, %d lightmap bytes',
+    [Level.Name, Stats.Nodes, Stats.Leafs, Stats.Clusters, Stats.VisPercent, Stats.VisMsec,
+     Stats.Faces, Stats.Brushes, Stats.Models, Stats.LightBytes]);
 end;
 
 function RegisterLevelMap(const Level: TQuakeLevel): String;
