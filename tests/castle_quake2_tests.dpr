@@ -321,7 +321,7 @@ end;
 
 const
   { Sounds the game code plays by literal path, named in the sounds design }
-  DesignSoundPaths: array[0..62] of String = (
+  DesignSoundPaths: array[0..63] of String = (
     'sound/doors/dr1_end.wav',
     'sound/doors/dr1_mid.wav',
     'sound/doors/dr1_strt.wav',
@@ -384,7 +384,7 @@ const
     'sound/weapons/rocklx1a.wav',
     'sound/weapons/shotgf1b.wav',
     'sound/weapons/sshotf1b.wav',
-    'sound/world/quake.wav'
+    'sound/world/quake.wav', 'sound/world/brkglas.wav'
   );
 
 { Readable component name for a sound path: sound/items/pkup.wav -> Items_pkup }
@@ -1668,7 +1668,9 @@ var
   Stream: TMemoryStream;
   Report: TLevelGenReport;
   Seed: Cardinal;
-  Windows: Integer;
+  Windows, I: Integer;
+  Glass, E: TQuakeEntity;
+  Found: Boolean;
 begin
   { Rooms A (x 1..4) and B (x 6..9) behind a wall at x 5 with a window in
     (5, 3): sill 48, top 144 }
@@ -1701,19 +1703,27 @@ begin
       Check(Bsp.LoadFromPak('maps/unittest_window.bsp'), 'the window level loads');
       Col := TQuakeCollision.Create(Bsp);
       try
+        { The glass is a brush model (breakable), the world is open there }
         T := Col.BoxTrace(Vector3(3 * 64, 3.5 * 64, 96), Vector3(8 * 64, 3.5 * 64, 96), TVector3.Zero, TVector3.Zero,
           0, MASK_SHOT);
-        Check((T.Fraction < 1) and SameValue(T.EndPos.X, 5.5 * 64 - LevelWindowThickness / 2, 0.2) and
-          ((T.Contents and CONTENTS_WINDOW) <> 0), 'shots stop at the glass');
-        T := Col.BoxTrace(Vector3(3 * 64, 3.5 * 64, 96), Vector3(8 * 64, 3.5 * 64, 96), TVector3.Zero, TVector3.Zero,
-          0, MASK_OPAQUE);
-        Check(T.Fraction = 1, 'sight passes the glass (monsters see through windows)');
+        Check(T.Fraction = 1, 'the window''s opening is open in the world (the glass is a model)');
         T := Col.BoxTrace(Vector3(3 * 64, 3.5 * 64, 40), Vector3(8 * 64, 3.5 * 64, 40), TVector3.Zero, TVector3.Zero,
           0, MASK_OPAQUE);
         Check(T.Fraction < 1, 'below the sill is wall');
       finally
         Col.Free;
       end;
+      Glass := nil;
+      for E in Bsp.Entities do
+        if (E.ClassName = 'func_explosive') and (E.GetField('_glass') = '1') then
+          Glass := E;
+      Check((Glass <> nil) and (Bsp.ModelCount = 2) and (Glass.GetInt('health', 0) > 0) and (Glass.GetInt('dmg', 0) = 0),
+        'the glass is a shootable func_explosive without blast (Quake 2 glass)');
+      Found := False;
+      for I := 0 to High(Bsp.Brushes) do
+        if Bsp.Brushes[I].Contents = CONTENTS_WINDOW then
+          Found := True;
+      Check(Found, 'its brush is CONTENTS_WINDOW: shots and the player stop, sight passes');
     finally
       Bsp.Free;
     end;

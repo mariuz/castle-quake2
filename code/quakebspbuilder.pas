@@ -177,8 +177,8 @@ type
     procedure AddLadderFaces(const X, Y: Integer);
     { The glass pane of a window cell (False: none) }
     function WindowBox(const X, Y: Integer; out Mins, Maxs: TVector3; out Axis: Integer): Boolean;
-    procedure AddWindowBrushes(const R: TRegion);
-    procedure AddWindowFaces(const X, Y: Integer);
+    { Every window: a glass func_explosive model (CONTENTS_WINDOW) }
+    procedure BuildWindows;
     { Grid sight from (AX, AY) to (BX, BY), in cells }
     function SightClear(const AX, AY, BX, BY: Double): Boolean;
     function RegionsSee(const A, B: TRegion): Boolean;
@@ -488,8 +488,6 @@ begin
       R.Leaf := NewLeaf(False, Vector3(Mins.X, Mins.Y, C^.Floor), Vector3(Maxs.X, Maxs.Y, C^.Ceil));
     if C^.Ladder then
       AddLadderBrushes(R);
-    if C^.Window then
-      AddWindowBrushes(R);
     Regions.Add(R);
 
     N := Default(TBSPNode);
@@ -1001,7 +999,6 @@ begin
       begin
         AddWalls(X, Y);
         AddLadderFaces(X, Y);
-        AddWindowFaces(X, Y);
       end;
 
     { The water surface, seen from above and from below (warped, no
@@ -1639,44 +1636,52 @@ begin
   Maxs.Data[Axis] := Mins.Data[Axis] + LevelWindowThickness;
 end;
 
-procedure TBuilder.AddWindowBrushes(const R: TRegion);
+procedure TBuilder.BuildWindows;
 var
-  X, Y, Axis: Integer;
+  X, Y, Axis, Head, I: Integer;
   Mins, Maxs: TVector3;
-  L: TBSPLeaf;
-begin
-  L := Leafs[R.Leaf];
-  L.FirstLeafBrush := LeafBrushes.Count;
-  L.NumLeafBrushes := 0;
-  for Y := R.Y0 to R.Y1 - 1 do
-    for X := R.X0 to R.X1 - 1 do
-      if WindowBox(X, Y, Mins, Maxs, Axis) then
-      begin
-        LeafBrushes.Add(AddBoxBrush(Mins, Maxs, CONTENTS_WINDOW));
-        Inc(L.NumLeafBrushes);
-      end;
-  { Player, monster and shot traces have WINDOW in their masks, sight
-    (MASK_OPAQUE) doesn't: monsters see through glass, nobody walks or
-    shoots through it }
-  if L.NumLeafBrushes > 0 then
-    L.Contents := CONTENTS_WINDOW;
-  Leafs[R.Leaf] := L;
-end;
-
-procedure TBuilder.AddWindowFaces(const X, Y: Integer);
-var
-  Mins, Maxs: TVector3;
-  Axis: Integer;
+  M: TBSPModel;
   FA: TFaceAxis;
+  L: TBSPLeaf;
+  B: TBSPBrush;
 begin
-  if not WindowBox(X, Y, Mins, Maxs, Axis) then
-    Exit;
-  { Both sides of the pane: translucent, no lightmap (like qrad) }
-  FA.Axis := Axis;
-  FA.Positive := True;
-  AddFace(FA, Maxs.Data[Axis], Mins, Maxs, LevelWindowTexture, SURF_TRANS33);
-  FA.Positive := False;
-  AddFace(FA, Mins.Data[Axis], Mins, Maxs, LevelWindowTexture, SURF_TRANS33);
+  for Y := 0 to Level.Height - 1 do
+    for X := 0 to Level.Width - 1 do
+    begin
+      if not WindowBox(X, Y, Mins, Maxs, Axis) then
+        Continue;
+      M := Default(TBSPModel);
+      Head := BuildBoxModel(Mins, Maxs);
+      { The pane's leaf and brush are glass: player, monster and shot
+        traces stop at it, sight (MASK_OPAQUE) passes }
+      for I := 0 to Leafs.Count - 1 do
+        if (Leafs[I].Contents = CONTENTS_SOLID) and (Leafs[I].FirstLeafBrush = LeafBrushes.Count - 1) then
+        begin
+          L := Leafs[I];
+          L.Contents := CONTENTS_WINDOW;
+          Leafs[I] := L;
+          B := Brushes[LeafBrushes[L.FirstLeafBrush]];
+          B.Contents := CONTENTS_WINDOW;
+          Brushes[LeafBrushes[L.FirstLeafBrush]] := B;
+        end;
+      M.HeadNode := Head;
+      M.FirstFace := Faces.Count;
+      { Both sides of the pane: translucent, no lightmap (like qrad) }
+      FA.Axis := Axis;
+      FA.Positive := True;
+      AddFace(FA, Maxs.Data[Axis], Mins, Maxs, LevelWindowTexture, SURF_TRANS33);
+      FA.Positive := False;
+      AddFace(FA, Mins.Data[Axis], Mins, Maxs, LevelWindowTexture, SURF_TRANS33);
+      M.NumFaces := Faces.Count - M.FirstFace;
+      M.Mins := Mins;
+      M.Maxs := Maxs;
+      { Quake 2 glass: a func_explosive without dmg (debris, no blast);
+        "_glass" (ours) makes it shatter with world/brkglas.wav }
+      DoorEntities := DoorEntities + Format('{' + LineEnding + '"classname" "func_explosive"' + LineEnding +
+        '"model" "*%d"' + LineEnding + '"health" "10"' + LineEnding + '"mass" "50"' + LineEnding +
+        '"_glass" "1"' + LineEnding + '}' + LineEnding, [Models.Count]);
+      Models.Add(M);
+    end;
 end;
 
 procedure TBuilder.CollectLights;
@@ -2193,6 +2198,7 @@ begin
     B.BuildMoverGroups(False);
     B.BuildMoverGroups(True);
     B.BuildButtons;
+    B.BuildWindows;
     Result := B.Write(Stats);
     Stats.Models := B.Models.Count;
   finally
