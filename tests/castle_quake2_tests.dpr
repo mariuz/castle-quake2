@@ -1657,6 +1657,80 @@ begin
   end;
 end;
 
+{ Windows: a glass pane that stops shots and the player, not sight }
+procedure TestLevelWindows;
+var
+  Level, Loaded: TQuakeLevel;
+  Bsp: TQuakeBsp;
+  Col: TQuakeCollision;
+  T: TQuakeTrace;
+  X, Y: Integer;
+  Stream: TMemoryStream;
+  Report: TLevelGenReport;
+  Seed: Cardinal;
+  Windows: Integer;
+begin
+  { Rooms A (x 1..4) and B (x 6..9) behind a wall at x 5 with a window in
+    (5, 3): sill 48, top 144 }
+  Level := TQuakeLevel.Create(11, 7);
+  try
+    Level.Name := 'unittest_window';
+    for Y := 1 to 5 do
+      for X := 1 to 9 do
+        if X <> 5 then
+          Level.SetOpen(X, Y, 0, 192);
+    Level.SetOpen(5, 3, 48, 144);
+    Level.Cell(5, 3)^.Window := True;
+    Level.AddEntityAtCell('info_player_start', 2, 3);
+    Check(Level.WindowAxis(5, 3) = 0, 'the window looks along X (open on both sides)');
+    Stream := TMemoryStream.Create;
+    Loaded := TQuakeLevel.Create(3, 3);
+    try
+      Level.SaveToStream(Stream);
+      Stream.Position := 0;
+      Loaded.LoadFromStream(Stream);
+      Check(Loaded.Cell(5, 3)^.Window and (Loaded.Cell(5, 3)^.Floor = 48), 'windows save and load');
+    finally
+      Loaded.Free;
+      Stream.Free;
+    end;
+
+    RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Check(Bsp.LoadFromPak('maps/unittest_window.bsp'), 'the window level loads');
+      Col := TQuakeCollision.Create(Bsp);
+      try
+        T := Col.BoxTrace(Vector3(3 * 64, 3.5 * 64, 96), Vector3(8 * 64, 3.5 * 64, 96), TVector3.Zero, TVector3.Zero,
+          0, MASK_SHOT);
+        Check((T.Fraction < 1) and SameValue(T.EndPos.X, 5.5 * 64 - LevelWindowThickness / 2, 0.2) and
+          ((T.Contents and CONTENTS_WINDOW) <> 0), 'shots stop at the glass');
+        T := Col.BoxTrace(Vector3(3 * 64, 3.5 * 64, 96), Vector3(8 * 64, 3.5 * 64, 96), TVector3.Zero, TVector3.Zero,
+          0, MASK_OPAQUE);
+        Check(T.Fraction = 1, 'sight passes the glass (monsters see through windows)');
+        T := Col.BoxTrace(Vector3(3 * 64, 3.5 * 64, 40), Vector3(8 * 64, 3.5 * 64, 40), TVector3.Zero, TVector3.Zero,
+          0, MASK_OPAQUE);
+        Check(T.Fraction < 1, 'below the sill is wall');
+      finally
+        Col.Free;
+      end;
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+
+  Windows := 0;
+  for Seed := 1 to 12 do
+  begin
+    Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
+    Inc(Windows, Report.Windows);
+    Level.Free;
+  end;
+  Check(Windows > 0, 'random levels have windows between areas');
+end;
+
 procedure TestLevelLiftsSwitches;
 const
   Mins: TVector3 = (X: -16; Y: -16; Z: -24);
@@ -2210,6 +2284,7 @@ begin
   TestLevelKeysSlime;
   TestLevelLaddersLava;
   TestLevelRamps;
+  TestLevelWindows;
   TestLevelLiftsSwitches;
   TestLevelGen;
   TestMapLevelUrl;

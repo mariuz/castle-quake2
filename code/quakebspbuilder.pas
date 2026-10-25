@@ -49,7 +49,7 @@ function RegisterLevelMap(const Level: TQuakeLevel): String;
 implementation
 
 uses
-  Math, Generics.Collections, CastleLog, QuakeBsp, QuakePak, QuakePalette;
+  Math, StrUtils, Generics.Collections, CastleLog, QuakeBsp, QuakePak, QuakePalette;
 
 type
   TPlaneList = specialize TList<TBSPPlane>;
@@ -175,6 +175,10 @@ type
       listed in its air leaf }
     procedure AddLadderBrushes(const R: TRegion);
     procedure AddLadderFaces(const X, Y: Integer);
+    { The glass pane of a window cell (False: none) }
+    function WindowBox(const X, Y: Integer; out Mins, Maxs: TVector3; out Axis: Integer): Boolean;
+    procedure AddWindowBrushes(const R: TRegion);
+    procedure AddWindowFaces(const X, Y: Integer);
     { Grid sight from (AX, AY) to (BX, BY), in cells }
     function SightClear(const AX, AY, BX, BY: Double): Boolean;
     function RegionsSee(const A, B: TRegion): Boolean;
@@ -283,7 +287,7 @@ begin
   else
     Result := Format('%d,%d,%d,%d,%d,%d,%d', [C^.Floor, C^.Ceil, Ord(C^.Sky), C^.Theme, Ord(C^.Door),
       IfThen(CellHasWater(C), C^.Water, 0), Ord(CellHasWater(C) and C^.Slime)]) +
-      Format(',%d,%d,%d', [Ord(CellHasWater(C) and C^.Lava), Ord(C^.Ladder), Level.RampDir(X, Y)]);
+      Format(',%d,%d,%d', [Ord(CellHasWater(C) and C^.Lava), Ord(C^.Ladder), Level.RampDir(X, Y)]) + StrUtils.IfThen(C^.Window, ',g', '');
 end;
 
 function TBuilder.Uniform(const X0, Y0, X1, Y1: Integer): Boolean;
@@ -484,6 +488,8 @@ begin
       R.Leaf := NewLeaf(False, Vector3(Mins.X, Mins.Y, C^.Floor), Vector3(Maxs.X, Maxs.Y, C^.Ceil));
     if C^.Ladder then
       AddLadderBrushes(R);
+    if C^.Window then
+      AddWindowBrushes(R);
     Regions.Add(R);
 
     N := Default(TBSPNode);
@@ -995,6 +1001,7 @@ begin
       begin
         AddWalls(X, Y);
         AddLadderFaces(X, Y);
+        AddWindowFaces(X, Y);
       end;
 
     { The water surface, seen from above and from below (warped, no
@@ -1614,6 +1621,62 @@ begin
   FA.Axis := 2;
   FA.Positive := True;
   AddBoxFace(FA, Mins, Maxs, LevelLadderTexture);
+end;
+
+function TBuilder.WindowBox(const X, Y: Integer; out Mins, Maxs: TVector3; out Axis: Integer): Boolean;
+var
+  C: PLevelCell;
+begin
+  C := Level.Cell(X, Y);
+  Axis := Level.WindowAxis(X, Y);
+  Result := Axis >= 0;
+  if not Result then
+    Exit;
+  Mins := Vector3(X * LevelCellSize, Y * LevelCellSize, C^.Floor);
+  Maxs := Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, C^.Ceil);
+  { A thin pane across the middle, facing along Axis }
+  Mins.Data[Axis] := (Mins.Data[Axis] + Maxs.Data[Axis] - LevelWindowThickness) / 2;
+  Maxs.Data[Axis] := Mins.Data[Axis] + LevelWindowThickness;
+end;
+
+procedure TBuilder.AddWindowBrushes(const R: TRegion);
+var
+  X, Y, Axis: Integer;
+  Mins, Maxs: TVector3;
+  L: TBSPLeaf;
+begin
+  L := Leafs[R.Leaf];
+  L.FirstLeafBrush := LeafBrushes.Count;
+  L.NumLeafBrushes := 0;
+  for Y := R.Y0 to R.Y1 - 1 do
+    for X := R.X0 to R.X1 - 1 do
+      if WindowBox(X, Y, Mins, Maxs, Axis) then
+      begin
+        LeafBrushes.Add(AddBoxBrush(Mins, Maxs, CONTENTS_WINDOW));
+        Inc(L.NumLeafBrushes);
+      end;
+  { Player, monster and shot traces have WINDOW in their masks, sight
+    (MASK_OPAQUE) doesn't: monsters see through glass, nobody walks or
+    shoots through it }
+  if L.NumLeafBrushes > 0 then
+    L.Contents := CONTENTS_WINDOW;
+  Leafs[R.Leaf] := L;
+end;
+
+procedure TBuilder.AddWindowFaces(const X, Y: Integer);
+var
+  Mins, Maxs: TVector3;
+  Axis: Integer;
+  FA: TFaceAxis;
+begin
+  if not WindowBox(X, Y, Mins, Maxs, Axis) then
+    Exit;
+  { Both sides of the pane: translucent, no lightmap (like qrad) }
+  FA.Axis := Axis;
+  FA.Positive := True;
+  AddFace(FA, Maxs.Data[Axis], Mins, Maxs, LevelWindowTexture, SURF_TRANS33);
+  FA.Positive := False;
+  AddFace(FA, Mins.Data[Axis], Mins, Maxs, LevelWindowTexture, SURF_TRANS33);
 end;
 
 procedure TBuilder.CollectLights;

@@ -42,6 +42,10 @@ type
     { A slope: the floor rises from Floor at the back edge to the floor of
       the neighbour RampDir points to (at most LevelRampMaxRise higher) }
     Ramp: Boolean;
+    { A window: a glass pane (CONTENTS_WINDOW, translucent) across the
+      cell between its open sides (WindowAxis), from Floor (the sill) to
+      Ceil }
+    Window: Boolean;
     { A lift (func_plat): a slab moving between Floor and LiftTop; touching
       lift cells with the same heights are one lift }
     Lift: Boolean;
@@ -100,6 +104,9 @@ type
     { Direction a ramp in (X, Y) rises towards: the highest open neighbour
       above its floor, at most LevelRampMaxRise up; -1 = flat }
     function RampDir(const X, Y: Integer): Integer;
+    { The axis a window looks along (0 X: open to the west and east, 1 Y),
+      -1 when it isn't between two open cells }
+    function WindowAxis(const X, Y: Integer): Integer;
     { The floor of (X, Y) at a point of the cell (Quake coordinates; a ramp
       slopes, other cells are flat) }
     function FloorAt(const X, Y: Integer; const PX, PY: Single): Single;
@@ -167,6 +174,8 @@ const
   { A ramp rises at most this much over its cell (45 degrees: Quake 2's
     walkable limit is a floor normal of 0.7) }
   LevelRampMaxRise = 48;
+  LevelWindowTexture = 'e1u1/wndow0_3';
+  LevelWindowThickness = 4;
   { Key items of Key = 1, 2 }
   LevelKeyClasses: array[1..2] of String = ('key_blue_key', 'key_red_key');
   LevelDoorTexture = 'e1u1/dr02_1';
@@ -302,6 +311,24 @@ end;
 function TQuakeLevel.InGrid(const X, Y: Integer): Boolean;
 begin
   Result := (X >= 0) and (Y >= 0) and (X < FWidth) and (Y < FHeight);
+end;
+
+function TQuakeLevel.WindowAxis(const X, Y: Integer): Integer;
+
+  function Open(const NX, NY: Integer): Boolean;
+  begin
+    Result := InGrid(NX, NY) and not Cell(NX, NY)^.Solid;
+  end;
+
+begin
+  Result := -1;
+  if (not InGrid(X, Y)) or Cell(X, Y)^.Solid or not Cell(X, Y)^.Window then
+    Exit;
+  if Open(X - 1, Y) and Open(X + 1, Y) then
+    Result := 0
+  else
+  if Open(X, Y - 1) and Open(X, Y + 1) then
+    Result := 1;
 end;
 
 function TQuakeLevel.RampDir(const X, Y: Integer): Integer;
@@ -458,6 +485,8 @@ begin
         C^.Ladder := False;
       if C^.Ramp and (C^.Door or C^.Lift or C^.Button or C^.Wet or C^.Ladder) then
         C^.Ramp := False;
+      if C^.Window and (C^.Door or C^.Lift or C^.Button or C^.Wet or C^.Ladder or C^.Ramp or C^.Sky) then
+        C^.Window := False;
       if C^.Button and (C^.Door or C^.Lift or C^.Wet) then
         C^.Button := False;
       if C^.Button and (C^.Channel = 0) then
@@ -637,6 +666,8 @@ begin
             Row := Row + ',r';
           if C^.Ramp then
             Row := Row + ',p';
+          if C^.Window then
+            Row := Row + ',g';
           if C^.Door and (C^.Key > 0) then
             Row := Row + ',k' + IntToStr(C^.Key);
           if C^.Lift then
@@ -750,6 +781,9 @@ begin
             else
             if Vals[I] = 'p' then
               C^.Ramp := True
+            else
+            if Vals[I] = 'g' then
+              C^.Window := True
             else
             if Copy(Vals[I], 1, 1) = 'k' then
               C^.Key := StrToIntDef(Copy(Vals[I], 2, MaxInt), 0)
