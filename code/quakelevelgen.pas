@@ -44,7 +44,7 @@ type
 
   TLevelGenReport = record
     Rooms, Links, Loops, OpenCells, FixedCells, WalledCells, Monsters, Items, Doors, Pools, Lifts, Switches: Integer;
-    SlimePools, KeyDoors, Teleporters, LavaPools, Ladders, OutdoorRooms: Integer;
+    SlimePools, KeyDoors, Teleporters, LavaPools, Ladders, OutdoorRooms, Ramps: Integer;
     StartRoom, ExitRoom, SecretRoom: Integer;
   end;
 
@@ -780,6 +780,30 @@ var
     end;
   end;
 
+  { Steps become slopes: corridor cells and outdoor ground with a higher
+    neighbour (at most LevelRampMaxRise up) are ramps }
+  procedure AddRamps;
+  var
+    X, Y, R: Integer;
+    C: PLevelCell;
+  begin
+    for Y := 1 to Level.Height - 2 do
+      for X := 1 to Level.Width - 2 do
+      begin
+        C := Level.Cell(X, Y);
+        if C^.Solid or C^.Wet or C^.Door or C^.Lift or C^.Button or C^.Ladder then
+          Continue;
+        R := CellRoom(X, Y);
+        if (R >= 0) and not (Rooms[R].Sky and (Rooms[R].W >= 6) and (Rooms[R].H >= 6)) then
+          Continue;
+        C^.Ramp := True;
+        if Level.RampDir(X, Y) < 0 then
+          C^.Ramp := False
+        else
+          Inc(Report.Ramps);
+      end;
+  end;
+
   { Fix steps that are too high (corridors crossing): pull unreachable
     cells towards a reachable neighbour; wall up what still can't be
     reached }
@@ -1406,6 +1430,7 @@ begin
     CX := Rooms[StartRoom].X;
   MakeReachable(CX, CY);
   Level.Normalize;
+  AddRamps;
   FloodReach(Level, CX, CY, Reached);
   AddExitSwitch(StartRoom, ExitRoom, CX, CY);
 
@@ -1449,10 +1474,10 @@ begin
     if IsRandomMapName(Name, Seed) then
     begin
       Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
-      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools (%d slime), %d lifts, %d ladders, %d switches, %d key doors, %d teleporters, %d lava pits, %d outdoor rooms, %d monsters, %d items, secret room %d',
+      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools (%d slime), %d lifts, %d ladders, %d switches, %d key doors, %d teleporters, %d lava pits, %d outdoor rooms, %d ramps, %d monsters, %d items, secret room %d',
         [Name, Report.Rooms, Report.Links, Report.Loops, Report.OpenCells, Report.FixedCells,
          Report.WalledCells, Report.Doors, Report.Pools, Report.SlimePools, Report.Lifts, Report.Ladders, Report.Switches,
-         Report.KeyDoors, Report.Teleporters, Report.LavaPools, Report.OutdoorRooms, Report.Monsters,
+         Report.KeyDoors, Report.Teleporters, Report.LavaPools, Report.OutdoorRooms, Report.Ramps, Report.Monsters,
          Report.Items, Report.SecretRoom]);
     end else
     if UriExists(LevelFileUrl(Name)) = ueFile then

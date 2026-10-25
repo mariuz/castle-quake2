@@ -39,6 +39,9 @@ type
     { A ladder against the highest neighbouring step (LadderDir), up to its
       floor }
     Ladder: Boolean;
+    { A slope: the floor rises from Floor at the back edge to the floor of
+      the neighbour RampDir points to (at most LevelRampMaxRise higher) }
+    Ramp: Boolean;
     { A lift (func_plat): a slab moving between Floor and LiftTop; touching
       lift cells with the same heights are one lift }
     Lift: Boolean;
@@ -94,6 +97,12 @@ type
     { Direction (0 +X, 1 -X, 2 +Y, 3 -Y) of the open neighbour a ladder in
       (X, Y) climbs to: the highest floor more than a step up; -1 = none }
     function LadderDir(const X, Y: Integer): Integer;
+    { Direction a ramp in (X, Y) rises towards: the highest open neighbour
+      above its floor, at most LevelRampMaxRise up; -1 = flat }
+    function RampDir(const X, Y: Integer): Integer;
+    { The floor of (X, Y) at a point of the cell (Quake coordinates; a ramp
+      slopes, other cells are flat) }
+    function FloorAt(const X, Y: Integer; const PX, PY: Single): Single;
     { The cell, or a solid one outside the grid (don't change that) }
     function Cell(const X, Y: Integer): PLevelCell;
     procedure SetOpen(const X, Y: Integer; const AFloor, ACeil: Integer; const ATheme: Integer = 0);
@@ -155,6 +164,9 @@ const
   { A ladder: this deep in front of its wall, this wide }
   LevelLadderDepth = 8;
   LevelLadderHalfWidth = 20;
+  { A ramp rises at most this much over its cell (45 degrees: Quake 2's
+    walkable limit is a floor normal of 0.7) }
+  LevelRampMaxRise = 48;
   { Key items of Key = 1, 2 }
   LevelKeyClasses: array[1..2] of String = ('key_blue_key', 'key_red_key');
   LevelDoorTexture = 'e1u1/dr02_1';
@@ -292,6 +304,52 @@ begin
   Result := (X >= 0) and (Y >= 0) and (X < FWidth) and (Y < FHeight);
 end;
 
+function TQuakeLevel.RampDir(const X, Y: Integer): Integer;
+var
+  D, Best: Integer;
+  C, N: PLevelCell;
+begin
+  Result := -1;
+  if not InGrid(X, Y) then
+    Exit;
+  C := Cell(X, Y);
+  if C^.Solid or not C^.Ramp then
+    Exit;
+  Best := C^.Floor;
+  for D := 0 to 3 do
+    if InGrid(X + LadderDX[D], Y + LadderDY[D]) then
+    begin
+      N := Cell(X + LadderDX[D], Y + LadderDY[D]);
+      if (not N^.Solid) and (N^.Floor > Best) and (N^.Floor <= C^.Floor + LevelRampMaxRise) then
+      begin
+        Best := N^.Floor;
+        Result := D;
+      end;
+    end;
+end;
+
+function TQuakeLevel.FloorAt(const X, Y: Integer; const PX, PY: Single): Single;
+var
+  C: PLevelCell;
+  D: Integer;
+  T, Top: Single;
+begin
+  C := Cell(X, Y);
+  Result := C^.Floor;
+  D := RampDir(X, Y);
+  if D < 0 then
+    Exit;
+  Top := Cell(X + LadderDX[D], Y + LadderDY[D])^.Floor;
+  { 0 at the back edge, 1 at the edge towards D }
+  case D of
+    0: T := PX / LevelCellSize - X;
+    1: T := X + 1 - PX / LevelCellSize;
+    2: T := PY / LevelCellSize - Y;
+    else T := Y + 1 - PY / LevelCellSize;
+  end;
+  Result := C^.Floor + (Top - C^.Floor) * EnsureRange(T, 0, 1);
+end;
+
 function TQuakeLevel.LadderDir(const X, Y: Integer): Integer;
 var
   D, Best: Integer;
@@ -354,7 +412,7 @@ end;
 
 procedure TQuakeLevel.Normalize;
 var
-  X, Y: Integer;
+  X, Y, D: Integer;
   C: PLevelCell;
 begin
   for Y := 0 to FHeight - 1 do
@@ -398,6 +456,8 @@ begin
       end;
       if C^.Ladder and (C^.Door or C^.Lift or C^.Button or C^.Wet) then
         C^.Ladder := False;
+      if C^.Ramp and (C^.Door or C^.Lift or C^.Button or C^.Wet or C^.Ladder) then
+        C^.Ramp := False;
       if C^.Button and (C^.Door or C^.Lift or C^.Wet) then
         C^.Button := False;
       if C^.Button and (C^.Channel = 0) then
@@ -408,6 +468,15 @@ begin
       { A locked door opens with its key, not a switch }
       if C^.Key > 0 then
         C^.Channel := 0;
+    end;
+  { Headroom over a ramp's high end }
+  for Y := 0 to FHeight - 1 do
+    for X := 0 to FWidth - 1 do
+    begin
+      C := Cell(X, Y);
+      D := RampDir(X, Y);
+      if D >= 0 then
+        C^.Ceil := Max(C^.Ceil, Cell(X + LadderDX[D], Y + LadderDY[D])^.Floor + LevelMinHeadroom);
     end;
 end;
 
@@ -424,6 +493,9 @@ var
   P: TVector3;
 begin
   P := CellFloorCenter(X, Y);
+  { On a ramp: the floor's highest point under a 32-unit box }
+  P.Z := Max(Max(FloorAt(X, Y, P.X - 16, P.Y - 16), FloorAt(X, Y, P.X + 16, P.Y - 16)),
+    Max(FloorAt(X, Y, P.X - 16, P.Y + 16), FloorAt(X, Y, P.X + 16, P.Y + 16)));
   if AClassName = 'light' then
     P.Z := Cell(X, Y)^.Ceil - 16
   else
@@ -563,6 +635,8 @@ begin
             Row := Row + ',v';
           if C^.Ladder then
             Row := Row + ',r';
+          if C^.Ramp then
+            Row := Row + ',p';
           if C^.Door and (C^.Key > 0) then
             Row := Row + ',k' + IntToStr(C^.Key);
           if C^.Lift then
@@ -673,6 +747,9 @@ begin
             else
             if Vals[I] = 'r' then
               C^.Ladder := True
+            else
+            if Vals[I] = 'p' then
+              C^.Ramp := True
             else
             if Copy(Vals[I], 1, 1) = 'k' then
               C^.Key := StrToIntDef(Copy(Vals[I], 2, MaxInt), 0)

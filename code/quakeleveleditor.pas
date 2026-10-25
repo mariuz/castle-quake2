@@ -28,7 +28,7 @@ uses
 
 type
   TLevelEditTool = (etFloor, etWall, etRaise, etLower, etCeilUp, etCeilDown, etSky, etTheme,
-    etEntity, etErase, etDoor, etWater, etLift, etButton, etSlime, etKeyDoor, etLava, etLadder, etHills);
+    etEntity, etErase, etDoor, etWater, etLift, etButton, etSlime, etKeyDoor, etLava, etLadder, etHills, etRamp);
   TLevelEditCommand = (ecNew, ecGenerate, ecSave, ecLoad, ecPlay, ecExport, ecClose);
 
   TLevelEditorEvent = procedure(const Level: TQuakeLevel) of object;
@@ -111,9 +111,9 @@ type
 
 const
   ToolNames: array[TLevelEditTool] of String = ('Floor', 'Wall', 'Raise', 'Lower', 'Ceil+', 'Ceil-',
-    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water', 'Lift', 'Button', 'Slime', 'Key', 'Lava', 'Ladder', 'Hills');
+    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water', 'Lift', 'Button', 'Slime', 'Key', 'Lava', 'Ladder', 'Hills', 'Ramp');
   ToolKeys: array[TLevelEditTool] of String = ('1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'O', 'U',
-    'H', 'J', 'M', 'K', 'I', 'R', '');
+    'H', 'J', 'M', 'K', 'I', 'R', '', '');
   CommandNames: array[TLevelEditCommand] of String = ('New', 'Generate', 'Save', 'Load', 'Play',
     'Export', 'Close');
   { What the Entity tool places; "exit" is a trigger with a changelevel }
@@ -742,6 +742,20 @@ begin
           C^.Wet := False;
         end;
       end;
+    etRamp:
+      if not C^.Solid then
+      begin
+        { A slope up to the highest neighbour (or flat again) }
+        C^.Ramp := not C^.Ramp;
+        if C^.Ramp then
+        begin
+          C^.Door := False;
+          C^.Lift := False;
+          C^.Button := False;
+          C^.Wet := False;
+          C^.Ladder := False;
+        end;
+      end;
     etHills:
       if not C^.Solid then
       begin
@@ -749,6 +763,8 @@ begin
           everywhere for a cell, so neighbouring strokes fit together) }
         C^.Floor := FBrushFloor + TerrainHeight(X, Y);
         C^.Ceil := Max(C^.Ceil, C^.Floor + LevelMinHeadroom);
+        { Sloping up to higher neighbours }
+        C^.Ramp := not (C^.Door or C^.Lift or C^.Button or C^.Wet or C^.Ladder);
       end;
     etSlime:
       if not C^.Solid then
@@ -1135,6 +1151,16 @@ begin
           Vector4(KeyCol.XYZ * 0.75, 0.85));
         DrawRectangleOutline(R, KeyCol);
       end;
+      if C^.Ramp and not C^.Solid then
+      begin
+        { An arrow up the slope }
+        I := FLevel.RampDir(X, Y);
+        if I >= 0 then
+          DrawRectangle(FloatRectangle(R.Left + R.Width * IfThen(I = 0, 0.6, IfThen(I = 1, 0.1, 0.35)),
+            R.Bottom + R.Height * IfThen(I = 2, 0.6, IfThen(I = 3, 0.1, 0.35)),
+            R.Width * IfThen(I < 2, 0.3, 0.3), R.Height * 0.3), Vector4(0.95, 0.95, 0.95, 0.8));
+        DrawRectangleOutline(R, Vector4(0.9, 0.9, 0.9, 0.7));
+      end;
       if C^.Ladder and not C^.Solid then
       begin
         { Rungs }
@@ -1228,7 +1254,7 @@ begin
           StrUtils.IfThen(C^.Door, ' door', '') + StrUtils.IfThen(C^.Lift, ' lift to ' + IntToStr(C^.LiftTop), '') +
             StrUtils.IfThen(C^.Button, ' button', '') + StrUtils.IfThen(C^.Channel > 0, ' channel ' + IntToStr(C^.Channel), '') +
             StrUtils.IfThen(C^.Key = 1, ' blue key', '') + StrUtils.IfThen(C^.Key = 2, ' red key', ''),
-          StrUtils.IfThen(C^.Ladder, ' ladder', '') +
+          StrUtils.IfThen(C^.Ladder, ' ladder', '') + StrUtils.IfThen(C^.Ramp, ' ramp', '') +
           StrUtils.IfThen(CellHasWater(C), StrUtils.IfThen(C^.Lava, ' lava ', StrUtils.IfThen(C^.Slime, ' slime ', ' water ')) + IntToStr(C^.Water), '')]);
       I := FLevel.EntityAtCell(FHover.X, FHover.Y);
       if I >= 0 then

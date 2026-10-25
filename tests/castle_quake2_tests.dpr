@@ -1588,6 +1588,75 @@ begin
   end;
 end;
 
+{ Ramps: a sloped floor node and wedge brush, walkable }
+procedure TestLevelRamps;
+const
+  Mins: TVector3 = (X: -16; Y: -16; Z: -24);
+  Maxs: TVector3 = (X: 16; Y: 16; Z: 32);
+var
+  Level, Loaded: TQuakeLevel;
+  Bsp: TQuakeBsp;
+  Col: TQuakeCollision;
+  T: TQuakeTrace;
+  Color: TVector3;
+  X, Y: Integer;
+  Stream: TMemoryStream;
+begin
+  { Floor 0 (x 1..3), a ramp in x 4 rising to floor 32 (x 5..8) }
+  Level := TQuakeLevel.Create(10, 6);
+  try
+    Level.Name := 'unittest_ramp';
+    for Y := 1 to 4 do
+    begin
+      for X := 1 to 4 do
+        Level.SetOpen(X, Y, 0, 192);
+      for X := 5 to 8 do
+        Level.SetOpen(X, Y, 32, 192);
+      Level.Cell(4, Y)^.Ramp := True;
+    end;
+    Level.AddEntityAtCell('info_player_start', 2, 2);
+    Level.AddEntityAtCell('light', 4, 2).SetKey('light', '400');
+    Check((Level.RampDir(4, 2) = 0) and (Level.RampDir(2, 2) = -1), 'a ramp rises towards its higher neighbour');
+    Check(SameValue(Level.FloorAt(4, 2, 4.5 * 64, 2.5 * 64), 16, 0.01) and SameValue(Level.FloorAt(4, 2, 5 * 64, 0), 32, 0.01),
+      'the floor of a ramp slopes along it');
+    Stream := TMemoryStream.Create;
+    Loaded := TQuakeLevel.Create(3, 3);
+    try
+      Level.SaveToStream(Stream);
+      Stream.Position := 0;
+      Loaded.LoadFromStream(Stream);
+      Check(Loaded.Cell(4, 3)^.Ramp and not Loaded.Cell(3, 3)^.Ramp, 'ramps save and load');
+    finally
+      Loaded.Free;
+      Stream.Free;
+    end;
+
+    RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Check(Bsp.LoadFromPak('maps/unittest_ramp.bsp'), 'the ramp level loads');
+      Col := TQuakeCollision.Create(Bsp);
+      try
+        { Dropping onto the middle of the ramp: its box corner touches at
+          x 4.5 * 64 - 16 (floor 8 there; box bottom 24 below the origin) }
+        T := Col.BoxTrace(Vector3(4.5 * 64, 2.5 * 64, 120), Vector3(4.5 * 64, 2.5 * 64, -50), Mins, Maxs, 0, MASK_PLAYERSOLID);
+        Check((T.Fraction < 1) and SameValue(T.EndPos.Z, 24 + 24, 0.5) and (T.Normal.Z > 0.7) and (T.Normal.Z < 0.99),
+          'the player lands on the slope (a walkable, tilted plane)');
+        T := Col.BoxTrace(Vector3(2 * 64, 2.5 * 64, 24.1), Vector3(7 * 64, 2.5 * 64, 24.1), Mins, Maxs, 0, MASK_PLAYERSOLID);
+        Check((T.Fraction < 1) and (T.Normal.Z > 0.7), 'walking into the ramp meets its slope, not a wall');
+      finally
+        Col.Free;
+      end;
+      Check(Bsp.LightPoint(Vector3(4.5 * 64, 2.5 * 64, 40), Color) and (Color.X > 0.2),
+        'models on the ramp are lit by its lightmap (R_LightPoint on the sloped node)');
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+end;
+
 procedure TestLevelLiftsSwitches;
 const
   Mins: TVector3 = (X: -16; Y: -16; Z: -24);
@@ -2140,6 +2209,7 @@ begin
   TestLevelDoorsWater;
   TestLevelKeysSlime;
   TestLevelLaddersLava;
+  TestLevelRamps;
   TestLevelLiftsSwitches;
   TestLevelGen;
   TestMapLevelUrl;

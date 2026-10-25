@@ -124,6 +124,20 @@ type
     function Uniform(const X0, Y0, X1, Y1: Integer): Boolean;
     function AddPlane(const Axis: Integer; const Positive: Boolean; const Dist: Single): Integer;
     function AxialPlane(const Axis: Integer; const Dist: Single): Integer;
+    { A plane of any direction (types 3..5 by its largest axis) }
+    function SlopePlane(const Normal: TVector3; const Dist: Single): Integer;
+    { The plane of a ramp region's floor (normal up), False when flat }
+    function RampPlane(const X0, Y0, X1, Y1: Integer; out Normal: TVector3; out Dist: Single): Boolean;
+    { A solid leaf under a ramp: its brush is a wedge (box sides, bottom and
+      the slope on top) }
+    function NewWedgeLeaf(const Mins, Maxs: TVector3; const Plane: Integer): Integer;
+    { A convex polygon face (clockwise from the front) on a plane }
+    function AddPolyFace(const Verts: array of TVector3; const Normal: TVector3; const PlaneId, Side,
+      TexAxis: Integer; const Tex: String; const Flags: Integer): Integer;
+    { Lightmap of a face on the plane Normal . p = Dist (TexAxis: the axis
+      its texture is projected along, as TexInfo) }
+    procedure LightFacePlane(const FaceIdx: Integer; const Normal: TVector3; const Dist: Single;
+      const TexAxis: Integer; const SkyCell: Boolean);
     function NewNode: Integer;
     procedure AddDummySolidLeaf;
     function NewLeaf(const Solid: Boolean; const Mins, Maxs: TVector3): Integer;
@@ -269,7 +283,7 @@ begin
   else
     Result := Format('%d,%d,%d,%d,%d,%d,%d', [C^.Floor, C^.Ceil, Ord(C^.Sky), C^.Theme, Ord(C^.Door),
       IfThen(CellHasWater(C), C^.Water, 0), Ord(CellHasWater(C) and C^.Slime)]) +
-      Format(',%d,%d', [Ord(CellHasWater(C) and C^.Lava), Ord(C^.Ladder)]);
+      Format(',%d,%d,%d', [Ord(CellHasWater(C) and C^.Lava), Ord(C^.Ladder), Level.RampDir(X, Y)]);
 end;
 
 function TBuilder.Uniform(const X0, Y0, X1, Y1: Integer): Boolean;
@@ -440,6 +454,8 @@ var
   N: TBSPNode;
   R: TRegion;
   Front, Back: Integer;
+  SlopeN: TVector3;
+  SlopeD: Single;
 begin
   Mins := Vector3(X0 * LevelCellSize, Y0 * LevelCellSize, ZMin);
   Maxs := Vector3(X1 * LevelCellSize, Y1 * LevelCellSize, ZMax);
@@ -491,12 +507,23 @@ begin
     end;
 
     N := Default(TBSPNode);
-    N.PlaneNum := AxialPlane(2, C^.Floor);
-    if R.WaterLeaf >= 0 then
-      N.Children[0] := -(R.WaterLeaf + 1)
-    else
+    if RampPlane(X0, Y0, X1, Y1, SlopeN, SlopeD) then
+    begin
+      { A ramp: the floor node on the slope, a wedge below it }
+      N.PlaneNum := SlopePlane(SlopeN, SlopeD);
       N.Children[0] := -(R.Leaf + 1);
-    N.Children[1] := -(NewLeaf(True, Mins, Vector3(Maxs.X, Maxs.Y, C^.Floor)) + 1);
+      N.Children[1] := -(NewWedgeLeaf(Mins, Vector3(Maxs.X, Maxs.Y,
+        Max(Level.FloorAt(X0, Y0, Mins.X, Mins.Y), Level.FloorAt(X1 - 1, Y1 - 1, Maxs.X, Maxs.Y))),
+        N.PlaneNum) + 1);
+    end else
+    begin
+      N.PlaneNum := AxialPlane(2, C^.Floor);
+      if R.WaterLeaf >= 0 then
+        N.Children[0] := -(R.WaterLeaf + 1)
+      else
+        N.Children[0] := -(R.Leaf + 1);
+      N.Children[1] := -(NewLeaf(True, Mins, Vector3(Maxs.X, Maxs.Y, C^.Floor)) + 1);
+    end;
     SetNodeBounds(N, Mins, Vector3(Maxs.X, Maxs.Y, C^.Ceil));
     Nodes[NodeFloor] := N;
     Exit(NodeCeil);
@@ -559,6 +586,139 @@ begin
   T.NextTexInfo := -1;
   Result := TexInfos.Add(T);
   TexInfoIndex.Add(Key, Result);
+end;
+
+function TBuilder.SlopePlane(const Normal: TVector3; const Dist: Single): Integer;
+var
+  P: TBSPPlane;
+  Key: String;
+  A: Integer;
+begin
+  Key := Format('s %.5f %.5f %.5f %.3f', [Normal.X, Normal.Y, Normal.Z, Dist]);
+  if PlaneIndex.TryGetValue(Key, Result) then
+    Exit;
+  P := Default(TBSPPlane);
+  P.Normal := Normal;
+  P.Dist := Dist;
+  A := 2;
+  if (Abs(Normal.X) >= Abs(Normal.Y)) and (Abs(Normal.X) >= Abs(Normal.Z)) then
+    A := 0
+  else
+  if Abs(Normal.Y) >= Abs(Normal.Z) then
+    A := 1;
+  P.PlaneType := 3 + A;
+  Result := Planes.Add(P);
+  PlaneIndex.Add(Key, Result);
+end;
+
+function TBuilder.RampPlane(const X0, Y0, X1, Y1: Integer; out Normal: TVector3; out Dist: Single): Boolean;
+var
+  D: Integer;
+  C: PLevelCell;
+  Rise, Back: Single;
+begin
+  D := Level.RampDir(X0, Y0);
+  Result := D >= 0;
+  if not Result then
+    Exit;
+  C := Level.Cell(X0, Y0);
+  case D of
+    0: Rise := Level.Cell(X0 + 1, Y0)^.Floor - C^.Floor;
+    1: Rise := Level.Cell(X0 - 1, Y0)^.Floor - C^.Floor;
+    2: Rise := Level.Cell(X0, Y0 + 1)^.Floor - C^.Floor;
+    else Rise := Level.Cell(X0, Y0 - 1)^.Floor - C^.Floor;
+  end;
+  { Rising Rise over one cell along D: normal = (-slope along D) + up }
+  Rise := Rise / LevelCellSize;
+  case D of
+    0: begin Normal := Vector3(-Rise, 0, 1); Back := X0 * LevelCellSize; end;
+    1: begin Normal := Vector3(Rise, 0, 1); Back := X1 * LevelCellSize; end;
+    2: begin Normal := Vector3(0, -Rise, 1); Back := Y0 * LevelCellSize; end;
+    else begin Normal := Vector3(0, Rise, 1); Back := Y1 * LevelCellSize; end;
+  end;
+  Normal := Normal.Normalize;
+  { Through the back edge at the low floor }
+  if D < 2 then
+    Dist := Normal.X * Back + Normal.Z * C^.Floor
+  else
+    Dist := Normal.Y * Back + Normal.Z * C^.Floor;
+end;
+
+function TBuilder.NewWedgeLeaf(const Mins, Maxs: TVector3; const Plane: Integer): Integer;
+var
+  L: TBSPLeaf;
+  B: TBSPBrush;
+  I: Integer;
+  Sides: array[0..5] of Integer;
+  S: TBSPBrushSide;
+begin
+  L := Default(TBSPLeaf);
+  for I := 0 to 2 do
+  begin
+    L.Mins[I] := ClampShort(Mins.Data[I]);
+    L.Maxs[I] := ClampShort(Maxs.Data[I]);
+  end;
+  L.Contents := CONTENTS_SOLID;
+  L.Cluster := -1;
+  Sides[0] := AddPlane(0, True, Maxs.X);
+  Sides[1] := AddPlane(0, False, Mins.X);
+  Sides[2] := AddPlane(1, True, Maxs.Y);
+  Sides[3] := AddPlane(1, False, Mins.Y);
+  Sides[4] := Plane;
+  Sides[5] := AddPlane(2, False, Mins.Z);
+  B.FirstSide := BrushSides.Count;
+  B.NumSides := 6;
+  B.Contents := CONTENTS_SOLID;
+  for I := 0 to 5 do
+  begin
+    S.PlaneNum := Sides[I];
+    S.TexInfo := 0;
+    BrushSides.Add(S);
+  end;
+  L.FirstLeafBrush := LeafBrushes.Count;
+  L.NumLeafBrushes := 1;
+  LeafBrushes.Add(Brushes.Add(B));
+  Result := Leafs.Add(L);
+end;
+
+function TBuilder.AddPolyFace(const Verts: array of TVector3; const Normal: TVector3; const PlaneId, Side,
+  TexAxis: Integer; const Tex: String; const Flags: Integer): Integer;
+var
+  I, Count: Integer;
+  Idx: array of Integer;
+  F: TBSPFace;
+  E: TBSPEdge;
+  Cross: TVector3;
+  Reverse: Boolean;
+begin
+  Count := Length(Verts);
+  { Quake faces wind clockwise seen from the front }
+  Cross := TVector3.CrossProduct(Verts[1] - Verts[0], Verts[2] - Verts[0]);
+  Reverse := TVector3.DotProduct(Cross, Normal) > 0;
+  SetLength(Idx, Count);
+  for I := 0 to Count - 1 do
+    if Reverse then
+      Idx[I] := AddVertex(Verts[Count - 1 - I])
+    else
+      Idx[I] := AddVertex(Verts[I]);
+  F := Default(TBSPFace);
+  F.PlaneId := PlaneId;
+  F.Side := Side;
+  F.FirstEdge := SurfEdges.Count;
+  F.NumEdges := Count;
+  for I := 0 to Count - 1 do
+  begin
+    E.V0 := Idx[I];
+    E.V1 := Idx[(I + 1) mod Count];
+    SurfEdges.Add(Edges.Add(E));
+  end;
+  F.TexInfoId := TexInfo(Tex, TexAxis, Flags);
+  F.Styles[0] := 255;
+  F.Styles[1] := 255;
+  F.Styles[2] := 255;
+  F.Styles[3] := 255;
+  F.LightmapOffset := -1;
+  Result := Faces.Add(F);
 end;
 
 function TBuilder.AddVertex(const V: TVector3): Integer;
@@ -638,6 +798,7 @@ var
   FA: TFaceAxis;
   Dist: Single;
   Theme: TLevelTheme;
+  N3: TVector3;
 
   procedure Wall(const Z0, Z1: Integer; const Tex: String);
   var
@@ -654,6 +815,56 @@ var
       LightFace(FaceIdx, FA, Dist, C^.Sky);
       Z := ZTop;
     end;
+  end;
+
+  { The step between this cell's floor and the neighbour's along the edge
+    towards D, where either slopes: a quad, or a triangle where they cross }
+  procedure SlopedStep(const D: Integer);
+  var
+    A, B, Pc: TVector3;
+    BA, BB, TA, TB, DA, DB, U: Single;
+    FaceIdx: Integer;
+  begin
+    { The edge's ends (A at the lower coordinate) }
+    if DX[D] <> 0 then
+    begin
+      A := Vector3(Dist, Y * LevelCellSize, 0);
+      B := Vector3(Dist, (Y + 1) * LevelCellSize, 0);
+    end else
+    begin
+      A := Vector3(X * LevelCellSize, Dist, 0);
+      B := Vector3((X + 1) * LevelCellSize, Dist, 0);
+    end;
+    BA := Level.FloorAt(X, Y, A.X, A.Y);
+    BB := Level.FloorAt(X, Y, B.X, B.Y);
+    TA := Min(Level.FloorAt(X + DX[D], Y + DY[D], A.X, A.Y), C^.Ceil);
+    TB := Min(Level.FloorAt(X + DX[D], Y + DY[D], B.X, B.Y), C^.Ceil);
+    DA := TA - BA;
+    DB := TB - BB;
+    if (DA <= 0.5) and (DB <= 0.5) then
+      Exit;
+    N3 := TVector3.Zero;
+    N3.Data[FA.Axis] := IfThen(FA.Positive, 1, -1);
+    if (DA > 0.5) and (DB > 0.5) then
+      FaceIdx := AddPolyFace([Vector3(A.X, A.Y, BA), Vector3(B.X, B.Y, BB), Vector3(B.X, B.Y, TB),
+        Vector3(A.X, A.Y, TA)], N3, AxialPlane(FA.Axis, Dist), Ord(not FA.Positive), FA.Axis, Theme.Step, 0)
+    else
+    begin
+      { Where the top crosses the bottom }
+      if DA > 0.5 then
+        U := DA / (DA - Min(DB, 0))
+      else
+        U := Max(DA, 0) / (Max(DA, 0) - DB);
+      Pc := A + (B - A) * U;
+      Pc.Z := BA + (BB - BA) * U;
+      if DA > 0.5 then
+        FaceIdx := AddPolyFace([Vector3(A.X, A.Y, BA), Pc, Vector3(A.X, A.Y, TA)], N3,
+          AxialPlane(FA.Axis, Dist), Ord(not FA.Positive), FA.Axis, Theme.Step, 0)
+      else
+        FaceIdx := AddPolyFace([Pc, Vector3(B.X, B.Y, BB), Vector3(B.X, B.Y, TB)], N3,
+          AxialPlane(FA.Axis, Dist), Ord(not FA.Positive), FA.Axis, Theme.Step, 0);
+    end;
+    LightFace(FaceIdx, FA, Dist, C^.Sky);
   end;
 
 begin
@@ -684,7 +895,11 @@ begin
       Wall(C^.Floor, C^.Ceil, Theme.Wall)
     else
     begin
-      { Lower side: the neighbour's floor is higher (a step up) }
+      { Lower side: the neighbour's floor is higher (a step up); along a
+        ramp the floors slope along the edge }
+      if C^.Ramp or N^.Ramp then
+        SlopedStep(D)
+      else
       if N^.Floor > C^.Floor then
         Wall(C^.Floor, Min(N^.Floor, C^.Ceil), Theme.Step);
       { Upper side: the neighbour's ceiling is lower }
@@ -705,8 +920,10 @@ var
   Theme: TLevelTheme;
   CeilTex, LiquidTex: String;
   LiquidFlags: Integer;
-  HasLight: Boolean;
+  HasLight, IsRamp: Boolean;
   LX, LY: Integer;
+  SlopeN: TVector3;
+  SlopeD: Single;
 begin
   for I := 0 to Regions.Count - 1 do
   begin
@@ -720,13 +937,25 @@ begin
     N.FirstFace := Faces.Count;
     FA.Axis := 2;
     FA.Positive := True;
+    IsRamp := RampPlane(R.X0, R.Y0, R.X1, R.Y1, SlopeN, SlopeD);
     for Y := R.Y0 to R.Y1 - 1 do
       for X := R.X0 to R.X1 - 1 do
-      begin
-        FaceIdx := AddFace(FA, C^.Floor, Vector3(X * LevelCellSize, Y * LevelCellSize, 0),
-          Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, 0), Theme.Floor, 0);
-        LightFace(FaceIdx, FA, C^.Floor, C^.Sky);
-      end;
+        if IsRamp then
+        begin
+          { A sloped quad, its corners on the ramp }
+          FaceIdx := AddPolyFace([
+            Vector3(X * LevelCellSize, Y * LevelCellSize, Level.FloorAt(X, Y, X * LevelCellSize, Y * LevelCellSize)),
+            Vector3((X + 1) * LevelCellSize, Y * LevelCellSize, Level.FloorAt(X, Y, (X + 1) * LevelCellSize, Y * LevelCellSize)),
+            Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, Level.FloorAt(X, Y, (X + 1) * LevelCellSize, (Y + 1) * LevelCellSize)),
+            Vector3(X * LevelCellSize, (Y + 1) * LevelCellSize, Level.FloorAt(X, Y, X * LevelCellSize, (Y + 1) * LevelCellSize))],
+            SlopeN, Nodes[R.NodeFloor].PlaneNum, 0, 2, Theme.Floor, 0);
+          LightFacePlane(FaceIdx, SlopeN, SlopeD, 2, C^.Sky);
+        end else
+        begin
+          FaceIdx := AddFace(FA, C^.Floor, Vector3(X * LevelCellSize, Y * LevelCellSize, 0),
+            Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, 0), Theme.Floor, 0);
+          LightFace(FaceIdx, FA, C^.Floor, C^.Sky);
+        end;
     N.NumFaces := Faces.Count - N.FirstFace;
     Nodes[R.NodeFloor] := N;
 
@@ -1219,11 +1448,21 @@ end;
 procedure TBuilder.LightFace(const FaceIdx: Integer; const FA: TFaceAxis; const Dist: Single;
   const SkyCell: Boolean);
 var
+  N: TVector3;
+begin
+  N := TVector3.Zero;
+  N.Data[FA.Axis] := IfThen(FA.Positive, 1, -1);
+  LightFacePlane(FaceIdx, N, Dist * N.Data[FA.Axis], FA.Axis, SkyCell);
+end;
+
+procedure TBuilder.LightFacePlane(const FaceIdx: Integer; const Normal: TVector3; const Dist: Single;
+  const TexAxis: Integer; const SkyCell: Boolean);
+var
   F: TBSPFace;
   T: TBSPTexInfo;
-  I, W, H, SI, TI: Integer;
+  I, W, H, SI, TI, A1, A2: Integer;
   MinS, MaxS, MinT, MaxT, S, TT: Single;
-  V, P, N, Col, FMin, FMax: TVector3;
+  V, P, Col, FMin, FMax: TVector3;
   B: array[0..2] of Byte;
   BMinS, BMinT: Integer;
 begin
@@ -1247,8 +1486,8 @@ begin
   BMinT := Floor(MinT / 16);
   W := Ceil(MaxS / 16) - BMinS + 1;
   H := Ceil(MaxT / 16) - BMinT + 1;
-  N := TVector3.Zero;
-  N.Data[FA.Axis] := IfThen(FA.Positive, 1, -1);
+  A1 := (TexAxis + 1) mod 3;
+  A2 := (TexAxis + 2) mod 3;
   F.LightmapOffset := Lighting.Position;
   F.Styles[0] := 0;
   for TI := 0 to H - 1 do
@@ -1258,8 +1497,7 @@ begin
       TT := (BMinT + TI) * 16;
       { Back from texture space (axial vectors with no offset) }
       P := TVector3.Zero;
-      P.Data[FA.Axis] := Dist;
-      case FA.Axis of
+      case TexAxis of
         2:
           begin
             P.X := S;
@@ -1276,12 +1514,14 @@ begin
             P.Z := -TT;
           end;
       end;
-      { Samples on the face, a unit in front of it }
-      P := Vector3(EnsureRange(P.X, FMin.X + 1, FMax.X - 1), EnsureRange(P.Y, FMin.Y + 1, FMax.Y - 1),
-        EnsureRange(P.Z, FMin.Z + 1, FMax.Z - 1));
-      P.Data[FA.Axis] := Dist;
-      P := P + N;
-      Col := LightAt(P, N, SkyCell);
+      { Samples on the face, a unit in front of it: within its box, on its
+        plane along the projection axis }
+      P.Data[A1] := EnsureRange(P.Data[A1], FMin.Data[A1] + 1, FMax.Data[A1] - 1);
+      P.Data[A2] := EnsureRange(P.Data[A2], FMin.Data[A2] + 1, FMax.Data[A2] - 1);
+      P.Data[TexAxis] := (Dist - Normal.Data[A1] * P.Data[A1] - Normal.Data[A2] * P.Data[A2]) /
+        Normal.Data[TexAxis];
+      P := P + Normal;
+      Col := LightAt(P, Normal, SkyCell);
       B[0] := EnsureRange(Round(Col.X), 0, 255);
       B[1] := EnsureRange(Round(Col.Y), 0, 255);
       B[2] := EnsureRange(Round(Col.Z), 0, 255);
