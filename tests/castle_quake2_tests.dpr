@@ -1731,6 +1731,26 @@ begin
   Check(Windows > 0, 'random levels have windows between areas');
 end;
 
+{ Audio polish: Quake 2's stereo loudness and the master limiter }
+procedure TestSoundMixer;
+var
+  G: Single;
+  I: Integer;
+begin
+  Check(SameValue(QuakePanLoudness(0), Sqrt(0.5), 1e-5) and SameValue(QuakePanLoudness(1), 1, 1e-5) and
+    SameValue(QuakePanLoudness(-1), 1, 1e-5), 'Quake 2 panning: ahead -3 dB, at the sides full');
+  Check(SameValue(LimiterTarget(1.5, 2), 1) and SameValue(LimiterTarget(4, 2), Sqrt(0.5), 1e-5),
+    'the limiter keeps quiet mixes, compresses 2:1 above the threshold');
+  G := LimiterStep(1, 0.5, 0.1);
+  Check(G < 0.55, 'the limiter turns down within a tenth of a second (attack)');
+  G := LimiterStep(0.5, 1, 0.1);
+  Check((G > 0.55) and (G < 0.7), 'and comes back slowly (release)');
+  G := 0.5;
+  for I := 1 to 30 do
+    G := LimiterStep(G, 1, 0.1);
+  Check(G > 0.99, 'back to full volume after a few seconds');
+end;
+
 procedure TestLevelLiftsSwitches;
 const
   Mins: TVector3 = (X: -16; Y: -16; Z: -24);
@@ -2285,6 +2305,7 @@ begin
   TestLevelLaddersLava;
   TestLevelRamps;
   TestLevelWindows;
+  TestSoundMixer;
   TestLevelLiftsSwitches;
   TestLevelGen;
   TestMapLevelUrl;

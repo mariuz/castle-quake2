@@ -1003,6 +1003,8 @@ begin
         FWorld.Geometry.Movers[J].Entity.ClassName, FWorld.Geometry.Movers[J].Entity.Model,
         FWorld.Geometry.ModelTexFrame(FWorld.Geometry.Movers[J].ModelIndex), Ord(FWorld.Geometry.Movers[J].State),
         FWorld.Geometry.Movers[J].Progress, BoolToStr(FWorld.Geometry.Movers[J].Transform.Exists, True)]);
+    WritelnLog('Demo', 'Sound mixer: %d playing, load %.2f, limiter %.2f', [Sounds.ActiveSoundCount,
+      Sounds.MixLoad, Sounds.LimiterGain]);
     for J := 0 to FWorld.Turrets.Count - 1 do
       WritelnLog('Demo', 'Turret %d pitch %.1f yaw %.1f aim %.1f %.1f bases %d driver %s shots %d', [J,
         FWorld.Turrets[J].Breach.TurretPitch, FWorld.Turrets[J].Breach.TurretYaw,
@@ -1514,7 +1516,9 @@ begin
   FWorld.SetGunAngles(PlayerMovement.GunAngles);
   FWorld.Geometry.UpdateVisibility(CgeToQuake(MainViewport.Camera.Translation));
   FWorld.CullEntities;
+  Sounds.ListenerRight := TVector3.CrossProduct(MainViewport.Camera.Direction, MainViewport.Camera.Up).Normalize;
   FWorld.UpdateLoopSounds(MainViewport.Camera.Translation);
+  Sounds.UpdateMixer(SecondsPassed, Settings.SoundVolume / 100);
   WalkNavigation.Exists := not FWorld.Dead;
   UpdateDeathView(SecondsPassed);
 

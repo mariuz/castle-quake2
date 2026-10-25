@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Real slopes: ramps in levels. The level editor has a **Ramp** tool: the floor slopes up to the highest neighbouring cell, smooth to walk on. Random levels climb on slopes instead of 16-unit steps, outdoor hills roll, and the *Hills* tool paints slopes.
+- Windows between rooms: a **Window** tool in the editor, and a few windows in random levels. You and monsters can see through the glass, but nobody can walk or shoot through it.
+- Audio polish: sounds straight ahead are a little quieter than sounds to the side, as in Quake 2, and the master volume is turned down gently when many loud sounds play at once (big fights no longer distort).
 - A key hunt in random levels: on even seeds the blue key that opens the exit often lies in a vault behind red doors, and you have to find the red key first. Red key doors have a red lamp.
 
 ## v0.13.0 — 2026-10-25
