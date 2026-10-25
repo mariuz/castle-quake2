@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.13.0 — 2026-10-25
+
+Keys, ladders, slime, lava, teleporters and outdoor areas in random and edited levels. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - Ladders, lava and outdoor areas in levels. The level editor has a **Ladder** tool (R): a ladder goes up the highest step next to the cell, and you climb it like Quake 2's (walk into it, look up). The **Lava** tool (I) makes glowing lava pools that hurt a lot. Quake 2's demo has no lava texture, so the game draws its own. The **Hills** tool paints rolling ground for outdoor areas.
 - Four more themes: red and brown indoors, rock and grass outdoors.
