@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The full game's textures as themes: with the retail Quake 2 PAKs, every texture set (e1u2, e2u3...) becomes a level theme for the editor and the random levels. Level files remember theme names, so they still load on the demo.
+- Breakable glass: windows shatter when shot, with Quake 2's glass sound and debris. Quake 2's breakable walls only explode now if they are meant to (`dmg`), and always throw debris.
 - Real slopes: ramps in levels. The level editor has a **Ramp** tool: the floor slopes up to the highest neighbouring cell, smooth to walk on. Random levels climb on slopes instead of 16-unit steps, outdoor hills roll, and the *Hills* tool paints slopes.
 - Windows between rooms: a **Window** tool in the editor, and a few windows in random levels. You and monsters can see through the glass, but nobody can walk or shoot through it.
 - Audio polish: sounds straight ahead are a little quieter than sounds to the side, as in Quake 2, and the master volume is turned down gently when many loud sounds play at once (big fights no longer distort).

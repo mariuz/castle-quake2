@@ -371,7 +371,7 @@ var
         Continue;
       R := Default(TGenRoom);
       R.X := X; R.Y := Y; R.W := W; R.H := H;
-      R.Theme := Rnd.Int(LevelIndoorThemes);
+      R.Theme := IndoorTheme(Rnd.Int(IndoorThemeCount));
       R.Sky := Rnd.Chance(0.22);
       SetLength(Rooms, Length(Rooms) + 1);
       Rooms[High(Rooms)] := R;
@@ -567,7 +567,7 @@ var
       for P in Path do
         if CellRoom(P.X, P.Y) < 0 then
           Inc(OutCount);
-      Theme := Rnd.Int(LevelIndoorThemes);
+      Theme := IndoorTheme(Rnd.Int(IndoorThemeCount));
       { One low ceiling along the corridor (it follows the floor's steps) }
       Headroom := 112 + 16 * Rnd.Int(2);
       Floor := Rooms[A].Floor;
@@ -741,7 +741,10 @@ var
     begin
       if (not Rooms[I].Sky) or (Rooms[I].W < 6) or (Rooms[I].H < 6) then
         Continue;
-      Theme := LevelIndoorThemes + Integer((Seed + Cardinal(I)) mod Cardinal(Length(LevelThemes) - LevelIndoorThemes));
+      if OutdoorThemeCount = 0 then
+        Theme := Rooms[I].Theme
+      else
+        Theme := OutdoorTheme(Integer((Seed + Cardinal(I)) mod Cardinal(OutdoorThemeCount)));
       for Y := Rooms[I].Y to Rooms[I].Y + Rooms[I].H - 1 do
         for X := Rooms[I].X to Rooms[I].X + Rooms[I].W - 1 do
         begin
@@ -1463,6 +1466,7 @@ var
   I, StartRoom, ExitRoom, CX, CY, Best: Integer;
 begin
   Report := Default(TLevelGenReport);
+  EnsureLevelThemes;
   Rnd.State := SeedState(Seed);
   for I := 1 to 8 do
     Rnd.Next;

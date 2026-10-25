@@ -259,6 +259,7 @@ end;
 
 procedure TViewPlay.OpenEditor;
 begin
+  EnsureLevelThemes;
   if FEditor = nil then
   begin
     FEditor := TQuakeLevelEditor.Create(FreeAtStop);

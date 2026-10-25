@@ -2173,6 +2173,7 @@ var
 begin
   Stats := Default(TBspBuildStats);
   EnsureLevelTextures;
+  EnsureLevelThemes;
   Level.Normalize;
   if Level.OpenCellCount = 0 then
     raise Exception.Create('The level has no open cells');

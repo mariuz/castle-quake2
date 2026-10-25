@@ -1761,6 +1761,72 @@ begin
   Check(G > 0.99, 'back to full volume after a few seconds');
 end;
 
+{ Themes of the full game's textures: a texture directory with enough
+  plain textures becomes a theme (simulated with demo WALs under a new
+  directory; runs last, it adds them to the PAKs) }
+procedure TestLevelThemes;
+const
+  Copies: array[0..16] of array[0..1] of String = (
+    ('floor3_1', 'floor1_1'), ('wslt1_1', 'wall1_1'), ('metal5_1', 'ceil1_1'), ('metal3_2', 'step1_1'),
+    ('plite1_1', 'lite1_1'), ('metal1_1', 'metal1_1'), ('metal1_2', 'metal1_2'), ('metal2_2', 'metal2_2'),
+    ('grate1_3', 'grate1_3'), ('grnx2_1', 'grnx2_1'), ('red1_2', 'red1_2'), ('box1_1', 'box1_1'),
+    ('crate1_1', 'crate1_1'), ('comp1_1', 'comp1_1'), ('c_met5_1', 'c_met5_1'), ('sky1', 'sky1'),
+    ('dr02_1', 'door1_1'));
+var
+  I, Idx, Builtin: Integer;
+  Data: PByte;
+  Size: Cardinal;
+  Stream: TMemoryStream;
+  Level, Loaded: TQuakeLevel;
+  Built: TStringStream;
+  Stats: TBspBuildStats;
+begin
+  EnsureLevelThemes;
+  Builtin := Length(LevelThemes);
+  Check((Builtin = Length(BuiltInThemes)) and (IndoorThemeCount = 6) and (OutdoorThemeCount = 2),
+    'the demo has the built-in themes only (6 indoor, 2 outdoor)');
+  for I := 0 to High(Copies) do
+  begin
+    Data := Pak.GetData('textures/e1u1/' + Copies[I][0] + '.wal', Size);
+    Stream := TMemoryStream.Create;
+    Stream.WriteBuffer(Data^, Size);
+    Pak.AddMemoryFile('textures/e9u9/' + Copies[I][1] + '.wal', Stream);
+  end;
+  EnsureLevelThemes;
+  Idx := ThemeIndex('e9u9');
+  Check((Idx = Builtin) and (Length(LevelThemes) = Builtin + 1), 'a full-game texture directory becomes a theme');
+  if Idx >= 0 then
+    Check((LevelThemes[Idx].Floor = 'e9u9/floor1_1') and (LevelThemes[Idx].Wall = 'e9u9/wall1_1') and
+      (LevelThemes[Idx].Ceil = 'e9u9/ceil1_1') and (LevelThemes[Idx].Step = 'e9u9/step1_1') and
+      (LevelThemes[Idx].Light = 'e9u9/lite1_1') and not LevelThemes[Idx].Outdoor and (IndoorThemeCount = 7),
+      'its floor, wall, ceiling, step and light are picked by name and WAL flags (sky and doors skipped)');
+
+  Level := MakeTestLevel;
+  Loaded := TQuakeLevel.Create(3, 3);
+  Built := TStringStream.Create('');
+  try
+    Level.Cell(2, 2)^.Theme := Idx;
+    Level.Name := 'unittest_theme';
+    BuildLevelBsp(Level, Stats).Free;
+    Check(Stats.Faces > 0, 'a level with a discovered theme builds');
+    Level.SaveToStream(Built);
+    Built.Position := 0;
+    Loaded.LoadFromStream(Built);
+    Check(Loaded.Cell(2, 2)^.Theme = Idx, 'levels save theme names and load them back');
+    { A file of other PAKs: themes by name, unknown ones fall back }
+    Built.Free;
+    Built := TStringStream.Create('{"width": 3, "height": 3, "rows": ["#", "# 0,128,0 0,128,1 #", "#"], ' +
+      '"themes": ["grass", "nosuch"], "entities": []}');
+    Loaded.LoadFromStream(Built);
+    Check((Loaded.Cell(1, 1)^.Theme = ThemeIndex('grass')) and (Loaded.Cell(2, 1)^.Theme = 0),
+      'theme names map to this game''s list (missing ones: the first theme)');
+  finally
+    Built.Free;
+    Loaded.Free;
+    Level.Free;
+  end;
+end;
+
 procedure TestLevelLiftsSwitches;
 const
   Mins: TVector3 = (X: -16; Y: -16; Z: -24);
@@ -2325,6 +2391,8 @@ begin
   TestMonsterMoves;
   TestTrace;
   TestMonsterJump;
+  { Last: it adds textures to the PAKs }
+  TestLevelThemes;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then

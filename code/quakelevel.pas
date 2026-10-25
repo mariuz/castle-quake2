@@ -64,6 +64,8 @@ type
   { Texture set of a theme (WAL names in the PAK, without "textures/") }
   TLevelTheme = record
     Name, Floor, Wall, Ceil, Step, Light: String;
+    { For outdoor (sky) areas: the generator's outdoor rooms }
+    Outdoor: Boolean;
   end;
 
   { A Quake 2 entity: classname, origin and the other key / value pairs }
@@ -138,26 +140,25 @@ type
   end;
 
 const
-  { Themes 0..LevelIndoorThemes - 1 are for rooms and corridors, the rest
-    for outdoor (sky) areas }
-  LevelIndoorThemes = 6;
-  LevelThemes: array[0..7] of TLevelTheme = (
+  { The themes of the demo's textures (LevelThemes starts with them; more
+    are discovered in the full game's PAKs, DiscoverLevelThemes) }
+  BuiltInThemes: array[0..7] of TLevelTheme = (
     (Name: 'base'; Floor: 'e1u1/floor3_1'; Wall: 'e1u1/wslt1_1'; Ceil: 'e1u1/ceil1_1';
-      Step: 'e1u1/metal3_2'; Light: 'e1u1/plite1_1'),
+      Step: 'e1u1/metal3_2'; Light: 'e1u1/plite1_1'; Outdoor: False),
     (Name: 'metal'; Floor: 'e1u1/grate1_3'; Wall: 'e1u1/metal2_2'; Ceil: 'e1u1/ceil1_3';
-      Step: 'e1u1/metal1_1'; Light: 'e1u1/plite1_3'),
+      Step: 'e1u1/metal1_1'; Light: 'e1u1/plite1_3'; Outdoor: False),
     (Name: 'green'; Floor: 'e1u1/florr1_2'; Wall: 'e1u1/grnx2_1'; Ceil: 'e1u1/ceil1_4';
-      Step: 'e1u1/grnmt1_1'; Light: 'e1u1/plite1_1'),
+      Step: 'e1u1/grnmt1_1'; Light: 'e1u1/plite1_1'; Outdoor: False),
     (Name: 'tech'; Floor: 'e1u1/floor3_2'; Wall: 'e1u1/wbasic1_1'; Ceil: 'e1u1/ceil1_7';
-      Step: 'e1u1/metal3_5'; Light: 'e1u1/baselt_2'),
+      Step: 'e1u1/metal3_5'; Light: 'e1u1/baselt_2'; Outdoor: False),
     (Name: 'red'; Floor: 'e1u1/floor3_3'; Wall: 'e1u1/red1_2'; Ceil: 'e1u1/metal5_1';
-      Step: 'e1u1/metal1_3'; Light: 'e1u1/baselt_3'),
+      Step: 'e1u1/metal1_3'; Light: 'e1u1/baselt_3'; Outdoor: False),
     (Name: 'brown'; Floor: 'e1u1/c_met7_1'; Wall: 'e1u2/metal13_1'; Ceil: 'e1u1/wtroof4_2';
-      Step: 'e1u1/metal3_3'; Light: 'e1u1/baselt_4'),
+      Step: 'e1u1/metal3_3'; Light: 'e1u1/baselt_4'; Outdoor: False),
     (Name: 'rock'; Floor: 'e1u1/rocks16_2'; Wall: 'e1u1/rocks19_1'; Ceil: 'e1u1/rocks16_2';
-      Step: 'e1u1/rocks19_1'; Light: 'e1u1/plite1_3'),
+      Step: 'e1u1/rocks19_1'; Light: 'e1u1/plite1_3'; Outdoor: True),
     (Name: 'grass'; Floor: 'e1u1/grass1_7'; Wall: 'e1u1/rocks19_1'; Ceil: 'e1u1/rocks16_2';
-      Step: 'e1u1/rocks16_2'; Light: 'e1u1/plite1_3')
+      Step: 'e1u1/rocks16_2'; Light: 'e1u1/plite1_3'; Outdoor: True)
   );
   LevelSkyTexture = 'e1u1/sky1';
   LevelWaterTexture = 'e1u1/bluwter';
@@ -186,6 +187,31 @@ const
   LevelButtonHalfWidth = 12;
   LevelButtonHeight = 40;
 
+var
+  { The themes levels can use: BuiltInThemes, then the ones discovered in
+    the loaded PAKs (EnsureLevelThemes). Cells store an index; level files
+    also store the names, so they keep their themes as the list changes. }
+  LevelThemes: array of TLevelTheme;
+
+{ Back to BuiltInThemes only }
+procedure ResetLevelThemes;
+
+{ BuiltInThemes plus a theme per texture directory of the PAKs with enough
+  plain textures (the full game's e1u2, e2u3...; the demo's few extra ones
+  don't count): floor, wall, ceiling, step and light picked by the WAL
+  flags and names }
+procedure DiscoverLevelThemes;
+
+{ DiscoverLevelThemes when the PAKs changed since the last time }
+procedure EnsureLevelThemes;
+
+{ Themes the generator uses for rooms and corridors / outdoor areas }
+function IndoorThemeCount: Integer;
+function IndoorTheme(const I: Integer): Integer;
+function OutdoorThemeCount: Integer;
+function OutdoorTheme(const I: Integer): Integer;
+function ThemeIndex(const Name: String): Integer;
+
 { Water in the cell (its surface above the floor) }
 function CellHasWater(const C: PLevelCell): Boolean;
 
@@ -201,7 +227,7 @@ function EntityFloorOffset(const AClassName: String): Single;
 implementation
 
 uses
-  Math, fpjson, jsonparser, CastleDownload, CastleFilesUtils, CastleUriUtils;
+  Math, StrUtils, fpjson, jsonparser, CastleDownload, CastleFilesUtils, CastleUriUtils, CastleLog, QuakePak;
 
 var
   DotFormat: TFormatSettings;
@@ -213,6 +239,197 @@ const
 function CellHasWater(const C: PLevelCell): Boolean;
 begin
   Result := (not C^.Solid) and C^.Wet and (C^.Water > C^.Floor);
+end;
+
+var
+  ThemesForFileCount: Integer = -1;
+
+procedure ResetLevelThemes;
+var
+  I: Integer;
+begin
+  SetLength(LevelThemes, Length(BuiltInThemes));
+  for I := 0 to High(BuiltInThemes) do
+    LevelThemes[I] := BuiltInThemes[I];
+end;
+
+procedure DiscoverLevelThemes;
+const
+  { A directory needs this many plain textures to be a theme }
+  MinTextures = 12;
+  SURF_LIGHT = 1;
+  SURF_SKY = 4;
+  SURF_WARP = 8;
+  SURF_TRANS33 = $10;
+  SURF_TRANS66 = $20;
+  SURF_NODRAW = $80;
+var
+  Files, Dirs: TStringList;
+  Plain, Lights: TStringList;
+  I, J, Slash: Integer;
+  Path, Dir, Name: String;
+  Data: PByte;
+  Size: Cardinal;
+  Flags, Contents, Value: LongInt;
+  T: TLevelTheme;
+
+  function Skipped(const N: String): Boolean;
+  const
+    Words: array[0..15] of String = ('sky', 'clip', 'trigger', 'hint', 'origin', 'skip', 'door', 'dr0',
+      'btn', 'button', 'sign', 'exit', 'arrow', 'lever', 'alarm', 'black');
+  var
+    W: String;
+  begin
+    Result := (N = '') or (N[1] in ['+', '*', '#']);
+    for W in Words do
+      if Pos(W, N) > 0 then
+        Exit(True);
+  end;
+
+  function Pick(const Hints: array of String; const Fallback: String): String;
+  var
+    K: Integer;
+    H: String;
+  begin
+    for H in Hints do
+      for K := 0 to Plain.Count - 1 do
+        if Pos(H, Plain[K]) > 0 then
+          Exit(Dir + '/' + Plain[K]);
+    Result := Fallback;
+  end;
+
+begin
+  ResetLevelThemes;
+  Files := Pak.FindFiles('textures/', '.wal');
+  Dirs := TStringList.Create;
+  Plain := TStringList.Create;
+  Lights := TStringList.Create;
+  try
+    Files.Sort;
+    Dirs.Sorted := True;
+    Dirs.Duplicates := dupIgnore;
+    for Path in Files do
+    begin
+      Slash := Pos('/', Copy(Path, 10, MaxInt));
+      if Slash > 0 then
+        Dirs.Add(Copy(Path, 10, Slash - 1));
+    end;
+    for Dir in Dirs do
+    begin
+      { The demo's own textures are the built-in themes }
+      if Dir = 'e1u1' then
+        Continue;
+      Plain.Clear;
+      Lights.Clear;
+      for J := 0 to Files.Count - 1 do
+      begin
+        Path := Files[J];
+        if Copy(Path, 1, 10 + Length(Dir)) <> 'textures/' + Dir + '/' then
+          Continue;
+        Name := ChangeFileExt(Copy(Path, 11 + Length(Dir), MaxInt), '');
+        if Pos('/', Name) > 0 then
+          Continue;
+        Data := Pak.GetData(Path, Size);
+        if (Data = nil) or (Size < 100) then
+          Continue;
+        { WAL header: name, size, mip offsets, next anim name, then flags }
+        Flags := PLongInt(Data + 88)^;
+        Contents := PLongInt(Data + 92)^;
+        Value := PLongInt(Data + 96)^;
+        if ((Flags and (SURF_SKY or SURF_WARP or SURF_TRANS33 or SURF_TRANS66 or SURF_NODRAW)) <> 0) or
+           (Contents <> 0) or Skipped(Name) then
+          Continue;
+        if ((Flags and SURF_LIGHT) <> 0) and (Value > 0) then
+          Lights.Add(Name)
+        else
+          Plain.Add(Name);
+      end;
+      if Plain.Count < MinTextures then
+        Continue;
+      T.Name := Dir;
+      T.Floor := Pick(['floor', 'flr', 'grate', 'grnd', 'flat', 'plat', 'grass', 'dirt'], Dir + '/' + Plain[0]);
+      T.Wall := Pick(['wall', 'wbasic', 'wslt', 'brick', 'stone', 'rock', 'metal', 'comp', 'bas'], Dir + '/' + Plain[1]);
+      T.Ceil := Pick(['ceil', 'roof', 'top'], T.Floor);
+      T.Step := Pick(['step', 'trim', 'support', 'metal', 'pip'], T.Wall);
+      if Lights.Count > 0 then
+        T.Light := Dir + '/' + Lights[0]
+      else
+        T.Light := BuiltInThemes[0].Light;
+      T.Outdoor := (Pos('grass', T.Floor) > 0) or (Pos('rock', T.Floor) > 0) or (Pos('dirt', T.Floor) > 0) or
+        (Pos('grnd', T.Floor) > 0);
+      SetLength(LevelThemes, Length(LevelThemes) + 1);
+      LevelThemes[High(LevelThemes)] := T;
+      WritelnLog('QuakeLevel', 'Theme "%s" from the PAKs: floor %s, wall %s, ceiling %s, step %s, light %s%s',
+        [T.Name, T.Floor, T.Wall, T.Ceil, T.Step, T.Light, StrUtils.IfThen(T.Outdoor, ' (outdoor)', '')]);
+    end;
+  finally
+    Lights.Free;
+    Plain.Free;
+    Dirs.Free;
+    Files.Free;
+  end;
+  ThemesForFileCount := Pak.FileCount;
+end;
+
+procedure EnsureLevelThemes;
+begin
+  if (Pak <> nil) and (Pak.FileCount <> ThemesForFileCount) then
+    DiscoverLevelThemes;
+end;
+
+function IndoorThemeCount: Integer;
+var
+  T: TLevelTheme;
+begin
+  Result := 0;
+  for T in LevelThemes do
+    if not T.Outdoor then
+      Inc(Result);
+end;
+
+function IndoorTheme(const I: Integer): Integer;
+var
+  K, N: Integer;
+begin
+  N := 0;
+  for K := 0 to High(LevelThemes) do
+    if not LevelThemes[K].Outdoor then
+    begin
+      if N = I then
+        Exit(K);
+      Inc(N);
+    end;
+  Result := 0;
+end;
+
+function OutdoorThemeCount: Integer;
+begin
+  Result := Length(LevelThemes) - IndoorThemeCount;
+end;
+
+function OutdoorTheme(const I: Integer): Integer;
+var
+  K, N: Integer;
+begin
+  N := 0;
+  for K := 0 to High(LevelThemes) do
+    if LevelThemes[K].Outdoor then
+    begin
+      if N = I then
+        Exit(K);
+      Inc(N);
+    end;
+  Result := 0;
+end;
+
+function ThemeIndex(const Name: String): Integer;
+var
+  K: Integer;
+begin
+  for K := 0 to High(LevelThemes) do
+    if LevelThemes[K].Name = Name then
+      Exit(K);
+  Result := -1;
 end;
 
 function TerrainHeight(const X, Y: Integer): Integer;
@@ -454,7 +671,8 @@ begin
       C^.Ceil := Round(C^.Ceil / LevelHeightStep) * LevelHeightStep;
       if C^.Ceil < C^.Floor + LevelMinHeadroom then
         C^.Ceil := C^.Floor + LevelMinHeadroom;
-      C^.Theme := Min(C^.Theme, High(LevelThemes));
+      if C^.Theme > High(LevelThemes) then
+        C^.Theme := 0;
       if C^.Wet and (C^.Water > C^.Floor) then
         C^.Water := EnsureRange(Round(C^.Water / 8) * 8, C^.Floor + 8, C^.Ceil - 8)
       else
@@ -618,7 +836,7 @@ end;
 procedure TQuakeLevel.SaveToStream(const Stream: TStream);
 var
   Root, JE, JKeys: TJSONObject;
-  Rows, Ents: TJSONArray;
+  Rows, Ents, Names: TJSONArray;
   X, Y, I: Integer;
   C: PLevelCell;
   Row: String;
@@ -681,6 +899,12 @@ begin
       Rows.Add(Row);
     end;
     Root.Add('rows', Rows);
+    { The theme names, so the cells keep their themes when the list differs
+      (other PAKs) }
+    Names := TJSONArray.Create;
+    for I := 0 to High(LevelThemes) do
+      Names.Add(LevelThemes[I].Name);
+    Root.Add('themes', Names);
     Ents := TJSONArray.Create;
     for E in FEntities do
     begin
@@ -710,7 +934,7 @@ procedure TQuakeLevel.LoadFromStream(const Stream: TStream);
 var
   Data: TJSONData;
   Root, JE, JKeys: TJSONObject;
-  Rows, Ents, Org: TJSONArray;
+  Rows, Ents, Org, Names: TJSONArray;
   X, Y, I: Integer;
   Parts, Vals: TStringArray;
   C: PLevelCell;
@@ -792,6 +1016,19 @@ begin
               C^.Channel := StrToIntDef(Copy(Vals[I], 2, MaxInt), 0);
         end;
       end;
+    { Theme indexes of the file -> ours, by name (missing: the first) }
+    Names := Root.Find('themes', jtArray) as TJSONArray;
+    if Names <> nil then
+    begin
+      EnsureLevelThemes;
+      for Y := 0 to FHeight - 1 do
+        for X := 0 to FWidth - 1 do
+        begin
+          C := Cell(X, Y);
+          if (not C^.Solid) and (C^.Theme < Names.Count) then
+            C^.Theme := Max(0, ThemeIndex(Names.Strings[C^.Theme]));
+        end;
+    end;
     Ents := Root.Find('entities', jtArray) as TJSONArray;
     if Ents <> nil then
       for I := 0 to Ents.Count - 1 do
@@ -840,6 +1077,7 @@ begin
 end;
 
 initialization
+  ResetLevelThemes;
   DotFormat := DefaultFormatSettings;
   DotFormat.DecimalSeparator := '.';
 end.
