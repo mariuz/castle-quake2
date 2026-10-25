@@ -1008,7 +1008,7 @@ begin
           Tex := LevelLiftTexture
         else
         if Start^.Key > 0 then
-          Tex := LevelKeyDoorTexture
+          Tex := LevelKeyDoorTextures[Start^.Key]
         else
           Tex := LevelDoorTexture;
         { Doors fill floor to ceiling; a lift is a slab with its top at

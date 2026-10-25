@@ -63,8 +63,13 @@ function IsRandomMapName(const MapName: String; out Seed: Cardinal): Boolean;
   headroom >= 64) }
 function UnreachableCells(const Level: TQuakeLevel; const X, Y: Integer): Integer;
 
-{ Can (TX, TY) be reached on foot from (X, Y) with the locked doors shut? }
-function ReachableWithLockedDoors(const Level: TQuakeLevel; const X, Y, TX, TY: Integer): Boolean;
+type
+  TLevelKeySet = set of Byte;
+
+{ Can (TX, TY) be reached on foot from (X, Y) with the doors of these keys
+  and the switch doors shut? }
+function ReachableWithLockedDoors(const Level: TQuakeLevel; const X, Y, TX, TY: Integer;
+  const LockedKeys: TLevelKeySet = [1, 2]): Boolean;
 
 { Where the level editor saves the level of this name }
 function LevelFileUrl(const Name: String): String;
@@ -265,7 +270,8 @@ begin
       Inc(Result);
 end;
 
-function ReachableWithLockedDoors(const Level: TQuakeLevel; const X, Y, TX, TY: Integer): Boolean;
+function ReachableWithLockedDoors(const Level: TQuakeLevel; const X, Y, TX, TY: Integer;
+  const LockedKeys: TLevelKeySet): Boolean;
 var
   Reached: array of Boolean;
   Locked: specialize TList<Integer>;
@@ -275,7 +281,7 @@ begin
   try
     for I := 0 to Level.Width * Level.Height - 1 do
       if (not Level.Cell(I mod Level.Width, I div Level.Width)^.Solid) and
-         ((Level.Cell(I mod Level.Width, I div Level.Width)^.Key > 0) or
+         ((Level.Cell(I mod Level.Width, I div Level.Width)^.Key in LockedKeys - [0]) or
           (Level.Cell(I mod Level.Width, I div Level.Width)^.Channel > 0) and
           Level.Cell(I mod Level.Width, I div Level.Width)^.Door) then
       begin
@@ -1124,6 +1130,87 @@ var
 
   { The exit room locked: doors (channel 1) at its entrances, opened by a
     button (channel 1) in a room on the way, reachable with the doors shut }
+  { The corridor cells at a room's entrances; False when one can't hold a
+    door (lift, water, sky, button, ladder) }
+  function RoomEntrances(const Room: Integer; const List: specialize TList<Integer>): Boolean;
+  var
+    X, Y, D: Integer;
+    C: PLevelCell;
+    Next: Boolean;
+  begin
+    List.Clear;
+    for Y := 1 to Level.Height - 2 do
+      for X := 1 to Level.Width - 2 do
+      begin
+        C := Level.Cell(X, Y);
+        if C^.Solid or (CellRoom(X, Y) >= 0) then
+          Continue;
+        Next := False;
+        for D := 0 to 3 do
+          if CellRoom(X + DX[D], Y + DY[D]) = Room then
+            Next := True;
+        if not Next then
+          Continue;
+        if C^.Lift or C^.Wet or C^.Sky or C^.Button or C^.Ladder then
+          Exit(False);
+        List.Add(Y * Level.Width + X);
+      end;
+    Result := List.Count > 0;
+  end;
+
+  procedure SetSolid(const List: specialize TList<Integer>; const Value: Boolean);
+  var
+    I: Integer;
+  begin
+    for I in List do
+      Level.Cell(I mod Level.Width, I div Level.Width)^.Solid := Value;
+  end;
+
+  { Even seeds, the key hunt: the blue key (of the exit) lies in a vault
+    room behind red doors, the red key somewhere reachable with all those
+    doors shut. False: no vault fits (then the blue key lies in the open). }
+  function AddRedVault(const VaultRoom, BX, BY, SX, SY: Integer;
+    const ExitEntrances: specialize TList<Integer>; const Cands: array of Integer): Boolean;
+  var
+    Vault: specialize TList<Integer>;
+    I, T, R, KX, KY: Integer;
+    C: PLevelCell;
+  begin
+    Result := False;
+    Vault := specialize TList<Integer>.Create;
+    try
+      if not RoomEntrances(VaultRoom, Vault) then
+        Exit;
+      for I in Vault do
+        if ExitEntrances.Contains(I) then
+          Exit;
+      SetSolid(ExitEntrances, True);
+      SetSolid(Vault, True);
+      FloodReach(Level, SX, SY, Reached);
+      SetSolid(Vault, False);
+      SetSolid(ExitEntrances, False);
+      { The vault must be sealed by its doors }
+      if Reached[BY * Level.Width + BX] then
+        Exit;
+      for T := 1 to 10 do
+      begin
+        R := Cands[Rnd.Int(Length(Cands))];
+        if (R = VaultRoom) or not FreeCell(R, KX, KY) then
+          Continue;
+        Level.AddEntityAtCell(LevelKeyClasses[2], KX, KY);
+        for I in Vault do
+        begin
+          C := Level.Cell(I mod Level.Width, I div Level.Width);
+          C^.Door := True;
+          C^.Key := 2;
+        end;
+        Exit(True);
+      end;
+    finally
+      Vault.Free;
+    end;
+  end;
+
   procedure AddExitSwitch(const StartRoom, ExitRoom, SX, SY: Integer);
   var
     Entrances: specialize TList<Integer>;
@@ -1189,6 +1276,9 @@ var
             C^.Key := 1;
           end;
           Report.KeyDoors := 1;
+          { The room of the blue key may be a vault locked with the red key }
+          if AddRedVault(R, BX, BY, SX, SY, Entrances, Cands) then
+            Report.KeyDoors := 2;
         end else
         begin
           C := Level.Cell(BX, BY);

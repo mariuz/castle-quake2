@@ -147,7 +147,8 @@ const
   LevelWaterTexture = 'e1u1/bluwter';
   { The demo has no slime texture: its warping sewage stands in }
   LevelSlimeTexture = 'e1u1/sewer1';
-  LevelKeyDoorTexture = 'e1u1/keydr1_1';
+  { Doors of the blue and red key (the red one has a red lamp) }
+  LevelKeyDoorTextures: array[1..2] of String = ('e1u1/keydr1_1', 'e1u2/keydran1_1');
   { Made in memory by QuakeBspBuilder (the demo has no lava texture) }
   LevelLavaTexture = 'castle/lava';
   LevelLadderTexture = 'e1u1/wsupprt1_3';

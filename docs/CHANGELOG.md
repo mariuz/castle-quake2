@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- A key hunt in random levels: on even seeds the blue key that opens the exit often lies in a vault behind red doors, and you have to find the red key first. Red key doors have a red lamp.
+
 ## v0.13.0 — 2026-10-25
 
 Keys, ladders, slime, lava, teleporters and outdoor areas in random and edited levels. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.

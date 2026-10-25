@@ -1699,7 +1699,8 @@ var
   Start: TLevelEntity;
   E: TLevelEntity;
   SX, SY, KX, KY, Monsters, Lifts, Switches, Doors, Pools, KeyDoors, Slime, Teleporters: Integer;
-  Ladders, Lava, Outdoor: Integer;
+  Ladders, Lava, Outdoor, RX, RY, Vaults: Integer;
+  Ok1: Boolean;
   KeyOk: Boolean;
   A, B: TMemoryStream;
   Bsp: TQuakeBsp;
@@ -1718,6 +1719,7 @@ begin
   Ladders := 0;
   Lava := 0;
   Outdoor := 0;
+  Vaults := 0;
   KeyOk := True;
   for Seed := 1 to 12 do
   begin
@@ -1749,17 +1751,33 @@ begin
         Continue;
       end;
       Level.CellAt(Start.Origin, SX, SY);
-      { The key of a locked exit lies on the near side of its doors }
+      { The key hunt: one key opens the exit (its key on the near side of
+        the exit's doors), or the red key (reachable with every locked door
+        shut) opens the vault of the blue key }
       if Report.KeyDoors > 0 then
       begin
         KX := -1;
+        RX := -1;
         for E in Level.Entities do
           if E.EntClass = 'key_blue_key' then
-            Level.CellAt(E.Origin, KX, KY);
-        if (KX < 0) or not ReachableWithLockedDoors(Level, SX, SY, KX, KY) or (Seed mod 2 <> 0) then
+            Level.CellAt(E.Origin, KX, KY)
+          else
+          if E.EntClass = 'key_red_key' then
+            Level.CellAt(E.Origin, RX, RY);
+        if Report.KeyDoors = 1 then
+          Ok1 := (KX >= 0) and (RX < 0) and ReachableWithLockedDoors(Level, SX, SY, KX, KY)
+        else
+        begin
+          Ok1 := (KX >= 0) and (RX >= 0) and ReachableWithLockedDoors(Level, SX, SY, RX, RY, [1, 2]) and
+            not ReachableWithLockedDoors(Level, SX, SY, KX, KY, [1, 2]) and
+            ReachableWithLockedDoors(Level, SX, SY, KX, KY, [1]);
+          Inc(Vaults);
+        end;
+        if (not Ok1) or (Seed mod 2 <> 0) then
         begin
           KeyOk := False;
-          Writeln('  seed ', Seed, ': key at ', KX, ' ', KY, ' not reachable with the doors shut');
+          Writeln('  seed ', Seed, ': keys (', Report.KeyDoors, ') blue at ', KX, ' ', KY, ' red at ', RX, ' ', RY,
+            ' in the wrong order');
         end;
       end;
       if (Report.Rooms < 6) or (Monsters < 5) or (UnreachableCells(Level, SX, SY) > 0) or
@@ -1777,6 +1795,7 @@ begin
   Check((Lifts > 0) and (Switches > 0) and (Doors > 0) and (Pools > 0),
     'random levels have lifts, exit switches, doors and pools');
   Check((KeyDoors > 0) and KeyOk, 'even seeds lock the exit with a blue key reachable with the doors shut');
+  Check(Vaults > 0, 'some levels keep the blue key in a vault behind red doors, its red key in the open');
   Check((Slime > 0) and (Teleporters > 0), 'random levels have slime pits and secret room teleporters');
   Check((Ladders > 0) and (Lava > 0) and (Outdoor > 0), 'random levels have ladders, lava pits and outdoor rooms (all reachable)');
 

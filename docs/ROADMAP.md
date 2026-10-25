@@ -20,7 +20,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Audio | 3D sounds, entity channels, merged loop sounds, CD music | Quake 2 attenuation (incl. `ATTN_STATIC`), `CHAN_*` channels, point sounds that outlive entities, loop mixer (one voice per sound, PVS-checked, `SOUND_LOOPATTENUATE`), 32 sources, OGG tracks, named sounds editable in the editor | Stereo panning curve (OpenAL's, not Quake 2's), `s_volume` style master limiter. |
 | Input / options | Key bindings, mouse sensitivity, joystick, skill | Options menu (sensitivity, invert, FOV, volumes), key rebinding, skill selection, saved in `UserConfig`, gamepad (sticks, triggers, menus), touch controls (stick, drag look, buttons, tap menus) | Gamepad button rebinding; gamepad and touch not yet tried on real hardware. |
 | Multiplayer | Deathmatch / coop over UDP | Single player only | Out of scope for now (see below). |
-| Tooling | Console, `+map`, demos | Console, autotest scripts (keys, gamepad, touch), `record` to turn play into a script, screenshot comparison in CI, 288 unit checks, map compatibility report, CGE editor components and designs, F8 inspector, Windows / Linux / Android / WebAssembly builds | Editor property editors. |
+| Tooling | Console, `+map`, demos | Console, autotest scripts (keys, gamepad, touch), `record` to turn play into a script, screenshot comparison in CI, 289 unit checks, map compatibility report, CGE editor components and designs, F8 inspector, Windows / Linux / Android / WebAssembly builds | Editor property editors. |
 | Level making | qbsp / qrad / qvis on brush maps from an editor | Random levels and an in-game grid editor (doors, key doors, lifts, ladders, switches, water, slime, lava, teleporters, sky, hills, themes, entities), compiled at runtime into IBSP v38 maps (BSP, brushes, lightmaps, grid PVS / PHS); `.bsp` export; levels in the CGE editor | Real slopes and free-form brushes; height-aware vis. |
 
 ## Done so far
@@ -31,7 +31,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - **Performance**: PVS + areaportal culling of the world and of entities (`novis` to compare), batched particles.
 - **Editor**: views from designs, `TQuakeMap` building levels in the editor with skybox and entity markers, behaviors with published state, monster types (`data/monsters.castle-transform`) and named sounds (`data/sounds.castle-component`).
 - **Reach**: options menu with key rebinding, skill levels, gamepad, touch controls, Android APK and WebAssembly builds.
-- **Engineering**: CI on Windows / Linux / Android / Web, autotests under Mesa (keyboard, virtual gamepad and simulated touch), screenshot references, culling check (vis vs `novis`), map compatibility report, recorded replays, 288 unit checks.
+- **Engineering**: CI on Windows / Linux / Android / Web, autotests under Mesa (keyboard, virtual gamepad and simulated touch), screenshot references, culling check (vis vs `novis`), map compatibility report, recorded replays, 289 unit checks.
 - **Levels**: random levels from a seed (`QuakeLevelGen`, Quake / Doom layout rules: loops, steps, lifts, doors, pools, an exit switch, pacing) and an in-game level editor (`QuakeLevelEditor`: doors, lifts, switches, water, sky, themes, entities), compiled at runtime into Quake 2 maps (`QuakeBspBuilder`); levels show in the CGE editor through `TQuakeMap`.
 - **Releases**: v0.3.0 to v0.13.0, each with Windows / Linux / Android packages and the browser build ([changelog](CHANGELOG.md)).
 
@@ -39,7 +39,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 
 Phases 1–6 are done as far as the demo data and a headless machine allow; Phase 7 (levels) is in progress; v0.3.0 to v0.13.0 are released. In order of value for effort:
 
-1. **More level content** (Phase 7): a longer key hunt (several keys, red and blue), sloped terrain (real slopes instead of 16-unit steps), the full game's textures as themes when a retail PAK is loaded, windows between rooms.
+1. **More level content** (Phase 7): sloped terrain (real slopes instead of 16-unit steps), the full game's textures as themes when a retail PAK is loaded, windows between rooms.
 2. **Try it on real hardware** (needs a phone, a gamepad and a GPU). Touch, gamepads and GPU speed were only tested headless: install the APK, play with a controller, run on a real GPU with `fps` on. Expected follow-ups: touch button sizes and look speed.
 3. **Android release signing and launcher icon** (needs a key): an `AndroidSigningProperties.txt` release key and a proper icon instead of the debug-signed APK.
 4. **Audio polish**: Quake 2's stereo panning curve and a master limiter, so many loud sounds at once don't clip.
@@ -185,4 +185,5 @@ Out of scope for now: multiplayer (deathmatch / coop), which needs a client-serv
 - [x] Real visibility for compiled levels: a grid PVS (sight lines between the regions through open cells) and the PHS from it, so random and edited levels are culled like the original maps
 - [x] Keys and key doors, slime pits and teleporters in the level editor and the generator (the exit locked by a blue key on even seeds, a teleporter from the secret room back to the start)
 - [x] Ladders, lava (a texture made in memory), four more themes (red, brown, and rock / grass outdoors) and outdoor areas with rolling ground, in the editor (Ladder, Lava, Hills tools) and the generator
+- [x] Key hunt in random levels: the blue key of the exit in a vault behind red doors, the red key in the open
 - [ ] Sloped terrain, the full game's textures as themes
