@@ -49,7 +49,7 @@ function RegisterLevelMap(const Level: TQuakeLevel): String;
 implementation
 
 uses
-  Math, Generics.Collections, CastleLog, QuakeBsp, QuakePak;
+  Math, Generics.Collections, CastleLog, QuakeBsp, QuakePak, QuakePalette;
 
 type
   TPlaneList = specialize TList<TBSPPlane>;
@@ -155,6 +155,12 @@ type
     procedure LightFace(const FaceIdx: Integer; const FA: TFaceAxis; const Dist: Single;
       const SkyCell: Boolean);
     procedure CollectLights;
+    { The ladder box of an open cell (False: no ladder there) }
+    function LadderBox(const X, Y: Integer; out Mins, Maxs: TVector3; out Dir: Integer): Boolean;
+    { Ladder brushes (CONTENTS_SOLID | CONTENTS_LADDER) of a region's cells,
+      listed in its air leaf }
+    procedure AddLadderBrushes(const R: TRegion);
+    procedure AddLadderFaces(const X, Y: Integer);
     { Grid sight from (AX, AY) to (BX, BY), in cells }
     function SightClear(const AX, AY, BX, BY: Double): Boolean;
     function RegionsSee(const A, B: TRegion): Boolean;
@@ -262,7 +268,8 @@ begin
     Result := '#'
   else
     Result := Format('%d,%d,%d,%d,%d,%d,%d', [C^.Floor, C^.Ceil, Ord(C^.Sky), C^.Theme, Ord(C^.Door),
-      IfThen(CellHasWater(C), C^.Water, 0), Ord(CellHasWater(C) and C^.Slime)]);
+      IfThen(CellHasWater(C), C^.Water, 0), Ord(CellHasWater(C) and C^.Slime)]) +
+      Format(',%d,%d', [Ord(CellHasWater(C) and C^.Lava), Ord(C^.Ladder)]);
 end;
 
 function TBuilder.Uniform(const X0, Y0, X1, Y1: Integer): Boolean;
@@ -456,9 +463,11 @@ begin
     begin
       R.Leaf := NewLeaf(False, Vector3(Mins.X, Mins.Y, C^.Water), Vector3(Maxs.X, Maxs.Y, C^.Ceil));
       R.WaterLeaf := NewWaterLeaf(Vector3(Mins.X, Mins.Y, C^.Floor), Vector3(Maxs.X, Maxs.Y, C^.Water),
-        IfThen(C^.Slime, CONTENTS_SLIME, CONTENTS_WATER));
+        IfThen(C^.Lava, CONTENTS_LAVA, IfThen(C^.Slime, CONTENTS_SLIME, CONTENTS_WATER)));
     end else
       R.Leaf := NewLeaf(False, Vector3(Mins.X, Mins.Y, C^.Floor), Vector3(Maxs.X, Maxs.Y, C^.Ceil));
+    if C^.Ladder then
+      AddLadderBrushes(R);
     Regions.Add(R);
 
     N := Default(TBSPNode);
@@ -754,13 +763,21 @@ begin
     { Walls and steps }
     for Y := R.Y0 to R.Y1 - 1 do
       for X := R.X0 to R.X1 - 1 do
+      begin
         AddWalls(X, Y);
+        AddLadderFaces(X, Y);
+      end;
 
     { The water surface, seen from above and from below (warped, no
       lightmap) }
     if R.NodeWater >= 0 then
     begin
-      { Water is translucent; slime (sewage) is opaque }
+      { Water is translucent; slime (sewage) and lava are opaque }
+      if C^.Lava then
+      begin
+        LiquidTex := LevelLavaTexture;
+        LiquidFlags := SURF_WARP;
+      end else
       if C^.Slime then
       begin
         LiquidTex := LevelSlimeTexture;
@@ -1273,12 +1290,99 @@ begin
   Faces[FaceIdx] := F;
 end;
 
+function TBuilder.LadderBox(const X, Y: Integer; out Mins, Maxs: TVector3; out Dir: Integer): Boolean;
+var
+  C: PLevelCell;
+  Top: Integer;
+  X0, Y0, X1, Y1, CX, CY: Single;
+begin
+  Result := False;
+  C := Level.Cell(X, Y);
+  if C^.Solid or not C^.Ladder then
+    Exit;
+  Dir := Level.LadderDir(X, Y);
+  if Dir < 0 then
+    Exit;
+  case Dir of
+    0: Top := Level.Cell(X + 1, Y)^.Floor;
+    1: Top := Level.Cell(X - 1, Y)^.Floor;
+    2: Top := Level.Cell(X, Y + 1)^.Floor;
+    else Top := Level.Cell(X, Y - 1)^.Floor;
+  end;
+  X0 := X * LevelCellSize;
+  Y0 := Y * LevelCellSize;
+  X1 := X0 + LevelCellSize;
+  Y1 := Y0 + LevelCellSize;
+  CX := X0 + LevelCellSize / 2;
+  CY := Y0 + LevelCellSize / 2;
+  { A slab against the wall towards Dir, from the floor to the step's top }
+  case Dir of
+    0: begin Mins := Vector3(X1 - LevelLadderDepth, CY - LevelLadderHalfWidth, C^.Floor);
+         Maxs := Vector3(X1, CY + LevelLadderHalfWidth, Top); end;
+    1: begin Mins := Vector3(X0, CY - LevelLadderHalfWidth, C^.Floor);
+         Maxs := Vector3(X0 + LevelLadderDepth, CY + LevelLadderHalfWidth, Top); end;
+    2: begin Mins := Vector3(CX - LevelLadderHalfWidth, Y1 - LevelLadderDepth, C^.Floor);
+         Maxs := Vector3(CX + LevelLadderHalfWidth, Y1, Top); end;
+    else begin Mins := Vector3(CX - LevelLadderHalfWidth, Y0, C^.Floor);
+         Maxs := Vector3(CX + LevelLadderHalfWidth, Y0 + LevelLadderDepth, Top); end;
+  end;
+  Result := True;
+end;
+
+procedure TBuilder.AddLadderBrushes(const R: TRegion);
+var
+  X, Y, Dir: Integer;
+  Mins, Maxs: TVector3;
+  L: TBSPLeaf;
+begin
+  L := Leafs[R.Leaf];
+  L.FirstLeafBrush := LeafBrushes.Count;
+  L.NumLeafBrushes := 0;
+  for Y := R.Y0 to R.Y1 - 1 do
+    for X := R.X0 to R.X1 - 1 do
+      if LadderBox(X, Y, Mins, Maxs, Dir) then
+      begin
+        LeafBrushes.Add(AddBoxBrush(Mins, Maxs, CONTENTS_SOLID or CONTENTS_LADDER));
+        Inc(L.NumLeafBrushes);
+      end;
+  { Box traces skip leaves whose contents miss the mask (CM_TraceToLeaf):
+    player traces (MASK_PLAYERSOLID has PLAYERCLIP) and the ladder test
+    look in, monsters and shots don't (Quake 2 leaves get the OR of their
+    brushes; SOLID here would make the room solid to point tests) }
+  if L.NumLeafBrushes > 0 then
+    L.Contents := CONTENTS_PLAYERCLIP or CONTENTS_LADDER;
+  Leafs[R.Leaf] := L;
+end;
+
+procedure TBuilder.AddLadderFaces(const X, Y: Integer);
+var
+  Mins, Maxs: TVector3;
+  Dir: Integer;
+  FA: TFaceAxis;
+begin
+  if not LadderBox(X, Y, Mins, Maxs, Dir) then
+    Exit;
+  { The front (away from the wall), both sides and the top }
+  FA.Axis := Dir div 2;
+  FA.Positive := Odd(Dir);
+  AddBoxFace(FA, Mins, Maxs, LevelLadderTexture);
+  FA.Axis := 1 - Dir div 2;
+  FA.Positive := True;
+  AddBoxFace(FA, Mins, Maxs, LevelLadderTexture);
+  FA.Positive := False;
+  AddBoxFace(FA, Mins, Maxs, LevelLadderTexture);
+  FA.Axis := 2;
+  FA.Positive := True;
+  AddBoxFace(FA, Mins, Maxs, LevelLadderTexture);
+end;
+
 procedure TBuilder.CollectLights;
 var
   E: TLevelEntity;
   L: TLight;
   Parts: TStringArray;
   Fmt: TFormatSettings;
+  X, Y: Integer;
 begin
   Fmt := DefaultFormatSettings;
   Fmt.DecimalSeparator := '.';
@@ -1297,6 +1401,17 @@ begin
     SetLength(Lights, Length(Lights) + 1);
     Lights[High(Lights)] := L;
   end;
+  { Lava glows: an orange light over every other lava cell }
+  for Y := 0 to Level.Height - 1 do
+    for X := 0 to Level.Width - 1 do
+      if CellHasWater(Level.Cell(X, Y)) and Level.Cell(X, Y)^.Lava and ((X + Y) mod 2 = 0) then
+      begin
+        L.Origin := Vector3((X + 0.5) * LevelCellSize, (Y + 0.5) * LevelCellSize, Level.Cell(X, Y)^.Water + 40);
+        L.Value := 160;
+        L.Color := Vector3(1, 0.45, 0.15);
+        SetLength(Lights, Length(Lights) + 1);
+        Lights[High(Lights)] := L;
+      end;
 end;
 
 const
@@ -1675,6 +1790,73 @@ begin
   Stats.LightBytes := Lighting.Size;
 end;
 
+{ The textures levels use that the PAKs may lack: a lava WAL (64 x 64,
+  tileable waves of dark red to yellow in the Quake 2 palette) }
+procedure EnsureLevelTextures;
+const
+  Size = 64;
+  Ramp: array[0..3] of TVector3 = ((X: 70; Y: 8; Z: 0), (X: 200; Y: 50; Z: 0),
+    (X: 250; Y: 140; Z: 15), (X: 255; Y: 225; Z: 90));
+var
+  Stream: TMemoryStream;
+  Name: array[0..31] of AnsiChar;
+  Pixels: array of Byte;
+  X, Y, I, Best: Integer;
+  V, T, D, BestD: Single;
+  Col: TVector3;
+  P: TVector4Byte;
+  Path: String;
+begin
+  Path := 'textures/' + LevelLavaTexture + '.wal';
+  if Pak.FileExists(Path) then
+    Exit;
+  if not Palette.HasPalette then
+    Palette.LoadFromPak;
+  SetLength(Pixels, Size * Size);
+  for Y := 0 to Size - 1 do
+    for X := 0 to Size - 1 do
+    begin
+      V := 0.5 + 0.2 * Sin(2 * Pi * (2 * X / Size + 0.35 * Sin(2 * Pi * Y / Size))) +
+        0.2 * Sin(2 * Pi * (3 * Y / Size + 0.3 * Sin(4 * Pi * X / Size))) +
+        0.12 * Sin(2 * Pi * 2 * (X + Y) / Size);
+      V := EnsureRange(V, 0, 0.999) * 3;
+      I := Trunc(V);
+      T := V - I;
+      Col := Ramp[I] * (1 - T) + Ramp[I + 1] * T;
+      { The nearest palette colour (not 255, transparent) }
+      Best := 0;
+      BestD := MaxSingle;
+      if Palette.HasPalette then
+        for I := 0 to 254 do
+        begin
+          P := Palette.Color(I);
+          D := Sqr(P.X - Col.X) + Sqr(P.Y - Col.Y) + Sqr(P.Z - Col.Z);
+          if D < BestD then
+          begin
+            BestD := D;
+            Best := I;
+          end;
+        end;
+      Pixels[Y * Size + X] := Best;
+    end;
+  Stream := TMemoryStream.Create;
+  FillChar(Name, SizeOf(Name), 0);
+  Move(LevelLavaTexture[1], Name[0], Length(LevelLavaTexture));
+  Stream.WriteBuffer(Name, 32);
+  Stream.WriteDWord(Size);
+  Stream.WriteDWord(Size);
+  { One mip level after the 100-byte header (the others point to it) }
+  for I := 0 to 3 do
+    Stream.WriteDWord(100);
+  FillChar(Name, SizeOf(Name), 0);
+  Stream.WriteBuffer(Name, 32);
+  Stream.WriteDWord(SURF_WARP);
+  Stream.WriteDWord(CONTENTS_LAVA);
+  Stream.WriteDWord(0);
+  Stream.WriteBuffer(Pixels[0], Length(Pixels));
+  Pak.AddMemoryFile(Path, Stream);
+end;
+
 function BuildLevelBsp(const Level: TQuakeLevel; out Stats: TBspBuildStats): TMemoryStream;
 var
   B: TBuilder;
@@ -1682,6 +1864,7 @@ var
   WorldModel: TBSPModel;
 begin
   Stats := Default(TBspBuildStats);
+  EnsureLevelTextures;
   Level.Normalize;
   if Level.OpenCellCount = 0 then
     raise Exception.Create('The level has no open cells');

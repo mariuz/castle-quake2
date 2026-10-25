@@ -33,8 +33,12 @@ type
     { Water in the cell, its surface at height Water (above Floor) }
     Wet: Boolean;
     Water: SmallInt;
-    { The liquid is slime (CONTENTS_SLIME, hurts) instead of water }
-    Slime: Boolean;
+    { The liquid is slime (CONTENTS_SLIME, hurts) or lava (CONTENTS_LAVA,
+      hurts a lot) instead of water }
+    Slime, Lava: Boolean;
+    { A ladder against the highest neighbouring step (LadderDir), up to its
+      floor }
+    Ladder: Boolean;
     { A lift (func_plat): a slab moving between Floor and LiftTop; touching
       lift cells with the same heights are one lift }
     Lift: Boolean;
@@ -87,6 +91,9 @@ type
     { All cells solid, no entities }
     procedure Clear;
     function InGrid(const X, Y: Integer): Boolean;
+    { Direction (0 +X, 1 -X, 2 +Y, 3 -Y) of the open neighbour a ladder in
+      (X, Y) climbs to: the highest floor more than a step up; -1 = none }
+    function LadderDir(const X, Y: Integer): Integer;
     { The cell, or a solid one outside the grid (don't change that) }
     function Cell(const X, Y: Integer): PLevelCell;
     procedure SetOpen(const X, Y: Integer; const AFloor, ACeil: Integer; const ATheme: Integer = 0);
@@ -115,7 +122,10 @@ type
   end;
 
 const
-  LevelThemes: array[0..3] of TLevelTheme = (
+  { Themes 0..LevelIndoorThemes - 1 are for rooms and corridors, the rest
+    for outdoor (sky) areas }
+  LevelIndoorThemes = 6;
+  LevelThemes: array[0..7] of TLevelTheme = (
     (Name: 'base'; Floor: 'e1u1/floor3_1'; Wall: 'e1u1/wslt1_1'; Ceil: 'e1u1/ceil1_1';
       Step: 'e1u1/metal3_2'; Light: 'e1u1/plite1_1'),
     (Name: 'metal'; Floor: 'e1u1/grate1_3'; Wall: 'e1u1/metal2_2'; Ceil: 'e1u1/ceil1_3';
@@ -123,13 +133,27 @@ const
     (Name: 'green'; Floor: 'e1u1/florr1_2'; Wall: 'e1u1/grnx2_1'; Ceil: 'e1u1/ceil1_4';
       Step: 'e1u1/grnmt1_1'; Light: 'e1u1/plite1_1'),
     (Name: 'tech'; Floor: 'e1u1/floor3_2'; Wall: 'e1u1/wbasic1_1'; Ceil: 'e1u1/ceil1_7';
-      Step: 'e1u1/metal3_5'; Light: 'e1u1/baselt_2')
+      Step: 'e1u1/metal3_5'; Light: 'e1u1/baselt_2'),
+    (Name: 'red'; Floor: 'e1u1/floor3_3'; Wall: 'e1u1/red1_2'; Ceil: 'e1u1/metal5_1';
+      Step: 'e1u1/metal1_3'; Light: 'e1u1/baselt_3'),
+    (Name: 'brown'; Floor: 'e1u1/c_met7_1'; Wall: 'e1u2/metal13_1'; Ceil: 'e1u1/wtroof4_2';
+      Step: 'e1u1/metal3_3'; Light: 'e1u1/baselt_4'),
+    (Name: 'rock'; Floor: 'e1u1/rocks16_2'; Wall: 'e1u1/rocks19_1'; Ceil: 'e1u1/rocks16_2';
+      Step: 'e1u1/rocks19_1'; Light: 'e1u1/plite1_3'),
+    (Name: 'grass'; Floor: 'e1u1/grass1_7'; Wall: 'e1u1/rocks19_1'; Ceil: 'e1u1/rocks16_2';
+      Step: 'e1u1/rocks16_2'; Light: 'e1u1/plite1_3')
   );
   LevelSkyTexture = 'e1u1/sky1';
   LevelWaterTexture = 'e1u1/bluwter';
   { The demo has no slime texture: its warping sewage stands in }
   LevelSlimeTexture = 'e1u1/sewer1';
   LevelKeyDoorTexture = 'e1u1/keydr1_1';
+  { Made in memory by QuakeBspBuilder (the demo has no lava texture) }
+  LevelLavaTexture = 'castle/lava';
+  LevelLadderTexture = 'e1u1/wsupprt1_3';
+  { A ladder: this deep in front of its wall, this wide }
+  LevelLadderDepth = 8;
+  LevelLadderHalfWidth = 20;
   { Key items of Key = 1, 2 }
   LevelKeyClasses: array[1..2] of String = ('key_blue_key', 'key_red_key');
   LevelDoorTexture = 'e1u1/dr02_1';
@@ -142,6 +166,10 @@ const
 
 { Water in the cell (its surface above the floor) }
 function CellHasWater(const C: PLevelCell): Boolean;
+
+{ Rolling ground: a smooth height 0..64 (16-unit steps) for each cell,
+  for outdoor areas (the Hills tool, the generator's outdoor rooms) }
+function TerrainHeight(const X, Y: Integer): Integer;
 
 { Height above the floor where an entity of this class has its origin:
   its box 1 unit above the floor (an origin that makes the box touch the
@@ -156,9 +184,21 @@ uses
 var
   DotFormat: TFormatSettings;
 
+const
+  LadderDX: array[0..3] of Integer = (1, -1, 0, 0);
+  LadderDY: array[0..3] of Integer = (0, 0, 1, -1);
+
 function CellHasWater(const C: PLevelCell): Boolean;
 begin
   Result := (not C^.Solid) and C^.Wet and (C^.Water > C^.Floor);
+end;
+
+function TerrainHeight(const X, Y: Integer): Integer;
+var
+  H: Single;
+begin
+  H := 32 + 16 * Sin(0.55 * X + 1.3 * Sin(0.31 * Y)) + 16 * Sin(0.47 * Y + 0.9 * Sin(0.37 * X));
+  Result := EnsureRange(Round(H / LevelHeightStep) * LevelHeightStep, 0, 64);
 end;
 
 function EntityFloorOffset(const AClassName: String): Single;
@@ -251,6 +291,30 @@ begin
   Result := (X >= 0) and (Y >= 0) and (X < FWidth) and (Y < FHeight);
 end;
 
+function TQuakeLevel.LadderDir(const X, Y: Integer): Integer;
+var
+  D, Best: Integer;
+  C, N: PLevelCell;
+begin
+  Result := -1;
+  if not InGrid(X, Y) then
+    Exit;
+  C := Cell(X, Y);
+  if C^.Solid then
+    Exit;
+  Best := C^.Floor + LevelHeightStep;
+  for D := 0 to 3 do
+    if InGrid(X + LadderDX[D], Y + LadderDY[D]) then
+    begin
+      N := Cell(X + LadderDX[D], Y + LadderDY[D]);
+      if (not N^.Solid) and (N^.Floor > Best) then
+      begin
+        Best := N^.Floor;
+        Result := D;
+      end;
+    end;
+end;
+
 function TQuakeLevel.Cell(const X, Y: Integer): PLevelCell;
 begin
   if InGrid(X, Y) then
@@ -310,6 +374,11 @@ begin
       else
         C^.Wet := False;
       if not C^.Wet then
+      begin
+        C^.Slime := False;
+        C^.Lava := False;
+      end;
+      if C^.Lava then
         C^.Slime := False;
       { A door under the sky or over water isn't supported }
       if C^.Door and (C^.Sky or C^.Wet) then
@@ -326,6 +395,8 @@ begin
         if C^.Ceil < C^.LiftTop + LevelMinHeadroom then
           C^.Ceil := C^.LiftTop + LevelMinHeadroom;
       end;
+      if C^.Ladder and (C^.Door or C^.Lift or C^.Button or C^.Wet) then
+        C^.Ladder := False;
       if C^.Button and (C^.Door or C^.Lift or C^.Wet) then
         C^.Button := False;
       if C^.Button and (C^.Channel = 0) then
@@ -487,6 +558,10 @@ begin
             Row := Row + ',w' + IntToStr(C^.Water);
           if CellHasWater(C) and C^.Slime then
             Row := Row + ',m';
+          if CellHasWater(C) and C^.Lava then
+            Row := Row + ',v';
+          if C^.Ladder then
+            Row := Row + ',r';
           if C^.Door and (C^.Key > 0) then
             Row := Row + ',k' + IntToStr(C^.Key);
           if C^.Lift then
@@ -591,6 +666,12 @@ begin
             else
             if Vals[I] = 'm' then
               C^.Slime := True
+            else
+            if Vals[I] = 'v' then
+              C^.Lava := True
+            else
+            if Vals[I] = 'r' then
+              C^.Ladder := True
             else
             if Copy(Vals[I], 1, 1) = 'k' then
               C^.Key := StrToIntDef(Copy(Vals[I], 2, MaxInt), 0)

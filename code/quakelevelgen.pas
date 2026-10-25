@@ -44,7 +44,7 @@ type
 
   TLevelGenReport = record
     Rooms, Links, Loops, OpenCells, FixedCells, WalledCells, Monsters, Items, Doors, Pools, Lifts, Switches: Integer;
-    SlimePools, KeyDoors, Teleporters: Integer;
+    SlimePools, KeyDoors, Teleporters, LavaPools, Ladders, OutdoorRooms: Integer;
     StartRoom, ExitRoom, SecretRoom: Integer;
   end;
 
@@ -237,7 +237,10 @@ begin
         NY := CY + DY[D];
         if (not Level.InGrid(NX, NY)) or Reached[NY * Level.Width + NX] then
           Continue;
-        if CanStep(Level.Cell(CX, CY), Level.Cell(NX, NY)) then
+        { A ladder joins its cell and the step it climbs, both ways }
+        if CanStep(Level.Cell(CX, CY), Level.Cell(NX, NY)) or
+           (Level.Cell(CX, CY)^.Ladder and (Level.LadderDir(CX, CY) = D)) or
+           (Level.Cell(NX, NY)^.Ladder and (Level.LadderDir(NX, NY) = D xor 1)) then
         begin
           Reached[NY * Level.Width + NX] := True;
           Queue.Add(NY * Level.Width + NX);
@@ -361,7 +364,7 @@ var
         Continue;
       R := Default(TGenRoom);
       R.X := X; R.Y := Y; R.W := W; R.H := H;
-      R.Theme := Rnd.Int(Length(LevelThemes));
+      R.Theme := Rnd.Int(LevelIndoorThemes);
       R.Sky := Rnd.Chance(0.22);
       SetLength(Rooms, Length(Rooms) + 1);
       Rooms[High(Rooms)] := R;
@@ -493,7 +496,7 @@ var
     Path: specialize TList<TPoint>;
     X, Y, TX, TY, I, Floor, Remaining, CellsLeft, Step, OutCount, Theme, Headroom: Integer;
     OutIndex, LiftIndex, LowFloor, HighFloor: Integer;
-    XFirst, DoorPlaced, NeedLift: Boolean;
+    XFirst, DoorPlaced, NeedLift, UseLadder: Boolean;
     P, Lane: TPoint;
     C, D2: PLevelCell;
 
@@ -524,8 +527,14 @@ var
       C := Level.Cell(CX, CY);
       if C^.Solid then
         Exit;
-      C^.Lift := True;
-      C^.LiftTop := HighFloor;
+      if UseLadder then
+        { A ladder up the step to the high corridor cell (LadderDir) }
+        C^.Ladder := True
+      else
+      begin
+        C^.Lift := True;
+        C^.LiftTop := HighFloor;
+      end;
       C^.Ceil := HighFloor + Headroom;
     end;
 
@@ -551,7 +560,7 @@ var
       for P in Path do
         if CellRoom(P.X, P.Y) < 0 then
           Inc(OutCount);
-      Theme := Rnd.Int(Length(LevelThemes));
+      Theme := Rnd.Int(LevelIndoorThemes);
       { One low ceiling along the corridor (it follows the floor's steps) }
       Headroom := 112 + 16 * Rnd.Int(2);
       Floor := Rooms[A].Floor;
@@ -567,9 +576,16 @@ var
         LiftIndex := 0
       else
         LiftIndex := OutCount - 1;
+      UseLadder := False;
       if NeedLift then
       begin
-        Inc(Report.Lifts);
+        { Every other climb (by seed, not the random generator, so the
+          layouts stay the same) is a ladder instead of a lift }
+        UseLadder := (Seed + Cardinal(Report.Lifts + Report.Ladders)) mod 2 = 0;
+        if UseLadder then
+          Inc(Report.Ladders)
+        else
+          Inc(Report.Lifts);
         if LiftIndex = 0 then
           DoorPlaced := True; { the lift is where the door would be }
       end;
@@ -681,6 +697,14 @@ var
               C^.Slime := True;
               C^.Water := Rooms[I].Floor - 16;
             end else
+            if (Seed + Cardinal(I)) mod 3 = 1 then
+            begin
+              { A third: a lava pit (hurts a lot; walk round it) }
+              C^.Floor := Rooms[I].Floor - 2 * LevelHeightStep;
+              C^.Wet := True;
+              C^.Lava := True;
+              C^.Water := Rooms[I].Floor - 16;
+            end else
             begin
               C^.Floor := Rooms[I].Floor - 64;
               C^.Wet := True;
@@ -688,9 +712,65 @@ var
             end;
           end;
         if (Seed + Cardinal(I)) mod 3 = 0 then
-          Inc(Report.SlimePools);
+          Inc(Report.SlimePools)
+        else
+        if (Seed + Cardinal(I)) mod 3 = 1 then
+          Inc(Report.LavaPools);
         Inc(Report.Pools);
       end;
+    end;
+  end;
+
+  { Big sky rooms become outdoor areas: rock or grass, rolling ground
+    (TerrainHeight) that is flat at the room's edge (where corridors join)
+    and rises at most a step per cell }
+  procedure MakeOutdoor;
+  var
+    I, X, Y, D, Edge, Theme: Integer;
+    C, N: PLevelCell;
+    Changed: Boolean;
+  begin
+    for I := 0 to High(Rooms) do
+    begin
+      if (not Rooms[I].Sky) or (Rooms[I].W < 6) or (Rooms[I].H < 6) then
+        Continue;
+      Theme := LevelIndoorThemes + Integer((Seed + Cardinal(I)) mod Cardinal(Length(LevelThemes) - LevelIndoorThemes));
+      for Y := Rooms[I].Y to Rooms[I].Y + Rooms[I].H - 1 do
+        for X := Rooms[I].X to Rooms[I].X + Rooms[I].W - 1 do
+        begin
+          C := Level.Cell(X, Y);
+          if C^.Solid or (CellRoom(X, Y) <> I) then
+            Continue;
+          C^.Theme := Theme;
+          if (C^.Floor <> Rooms[I].Floor) or C^.Wet then
+            Continue;
+          Edge := Min(Min(X - Rooms[I].X, Rooms[I].X + Rooms[I].W - 1 - X),
+            Min(Y - Rooms[I].Y, Rooms[I].Y + Rooms[I].H - 1 - Y));
+          C^.Floor := Rooms[I].Floor + Min(TerrainHeight(X, Y), Edge * LevelHeightStep);
+          C^.Ceil := Max(C^.Ceil, C^.Floor + 160);
+        end;
+      { Walkable: lower cells more than a step above a room neighbour }
+      repeat
+        Changed := False;
+        for Y := Rooms[I].Y to Rooms[I].Y + Rooms[I].H - 1 do
+          for X := Rooms[I].X to Rooms[I].X + Rooms[I].W - 1 do
+          begin
+            C := Level.Cell(X, Y);
+            if C^.Solid or C^.Wet or (CellRoom(X, Y) <> I) or (C^.Floor <= Rooms[I].Floor) then
+              Continue;
+            for D := 0 to 3 do
+            begin
+              N := Level.Cell(X + DX[D], Y + DY[D]);
+              if (not N^.Solid) and (CellRoom(X + DX[D], Y + DY[D]) = I) and
+                 (C^.Floor > N^.Floor + LevelHeightStep) then
+              begin
+                C^.Floor := N^.Floor + LevelHeightStep;
+                Changed := True;
+              end;
+            end;
+          end;
+      until not Changed;
+      Inc(Report.OutdoorRooms);
     end;
   end;
 
@@ -753,7 +833,8 @@ var
       CX := Rooms[R].X + Rnd.Range(Min(Margin, Rooms[R].W div 2), Max(Min(Margin, Rooms[R].W div 2), Rooms[R].W - 1 - Margin));
       CY := Rooms[R].Y + Rnd.Range(Min(Margin, Rooms[R].H div 2), Max(Min(Margin, Rooms[R].H div 2), Rooms[R].H - 1 - Margin));
       if Level.Cell(CX, CY)^.Solid or not Reached[CY * Level.Width + CX] or CellHasWater(Level.Cell(CX, CY)) or
-         Level.Cell(CX, CY)^.Door or Level.Cell(CX, CY)^.Lift or Level.Cell(CX, CY)^.Button then
+         Level.Cell(CX, CY)^.Door or Level.Cell(CX, CY)^.Lift or Level.Cell(CX, CY)^.Button or
+         Level.Cell(CX, CY)^.Ladder then
         Continue;
       if Level.EntityAtCell(CX, CY) >= 0 then
         Continue;
@@ -1066,7 +1147,7 @@ var
           if not Next then
             Continue;
           { Lifts, water and sky can't hold a door: then no switch }
-          if C^.Lift or C^.Wet or C^.Sky or C^.Button then
+          if C^.Lift or C^.Wet or C^.Sky or C^.Button or C^.Ladder then
             Exit;
           Entrances.Add(Y * Level.Width + X);
         end;
@@ -1215,6 +1296,7 @@ begin
   for I := 0 to High(Links) do
     CarveCorridor(Links[I].A, Links[I].B);
   Furnish;
+  MakeOutdoor;
 
   { Start in room 0 (the root of the heights); the exit is the deepest room }
   StartRoom := 0;
@@ -1277,10 +1359,10 @@ begin
     if IsRandomMapName(Name, Seed) then
     begin
       Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
-      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools (%d slime), %d lifts, %d switches, %d key doors, %d teleporters, %d monsters, %d items, secret room %d',
+      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools (%d slime), %d lifts, %d ladders, %d switches, %d key doors, %d teleporters, %d lava pits, %d outdoor rooms, %d monsters, %d items, secret room %d',
         [Name, Report.Rooms, Report.Links, Report.Loops, Report.OpenCells, Report.FixedCells,
-         Report.WalledCells, Report.Doors, Report.Pools, Report.SlimePools, Report.Lifts, Report.Switches,
-         Report.KeyDoors, Report.Teleporters, Report.Monsters,
+         Report.WalledCells, Report.Doors, Report.Pools, Report.SlimePools, Report.Lifts, Report.Ladders, Report.Switches,
+         Report.KeyDoors, Report.Teleporters, Report.LavaPools, Report.OutdoorRooms, Report.Monsters,
          Report.Items, Report.SecretRoom]);
     end else
     if UriExists(LevelFileUrl(Name)) = ueFile then

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Ladders, lava and outdoor areas in levels. The level editor has a **Ladder** tool (R): a ladder goes up the highest step next to the cell, and you climb it like Quake 2's (walk into it, look up). The **Lava** tool (I) makes glowing lava pools that hurt a lot. Quake 2's demo has no lava texture, so the game draws its own. The **Hills** tool paints rolling ground for outdoor areas.
+- Four more themes: red and brown indoors, rock and grass outdoors.
+- Random levels use ladders for some of the big climbs, have lava pits as well as slime pits, and turn big sky rooms into outdoor areas with grass or rock and rolling ground.
 - Keys, slime and teleporters in levels. The level editor has a **Key** tool (K; Y switches between the blue and red key): those doors stay shut ("You need the Blue Key") until you bring the key, which then opens all doors of its colour. It also has a **Slime** tool (M): a damaging green pool. Keys and teleporters are in the entity palette; each teleporter takes you to the teleporter destination of the same number.
 - Random levels lock the exit with the blue key on even seeds (with the switch on odd ones), turn a third of the pools into shallow slime pits, and put a teleporter in the secret room that takes you back to the start.
 - Teleporters show their pad (the `dmspot` model), as in Quake 2.

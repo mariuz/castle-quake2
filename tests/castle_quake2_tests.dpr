@@ -1514,6 +1514,80 @@ begin
   end;
 end;
 
+{ Ladders (a solid ladder brush against the step, for the player only)
+  and lava (CONTENTS_LAVA, a texture made in memory) }
+procedure TestLevelLaddersLava;
+const
+  Mins: TVector3 = (X: -16; Y: -16; Z: -24);
+  Maxs: TVector3 = (X: 16; Y: 16; Z: 32);
+var
+  Level, Loaded: TQuakeLevel;
+  Bsp: TQuakeBsp;
+  Col: TQuakeCollision;
+  T: TQuakeTrace;
+  X, Y: Integer;
+  Stream: TMemoryStream;
+begin
+  { Room A (1..4, floor 0), a ledge (6..8, floor 128) beyond x 5; a ladder
+    in (4, 3) up the ledge's step at x 5 (floor 128 too); lava in (2, 5) }
+  Level := TQuakeLevel.Create(10, 8);
+  try
+    Level.Name := 'unittest_ladder';
+    for Y := 1 to 6 do
+    begin
+      for X := 1 to 4 do
+        Level.SetOpen(X, Y, 0, 256);
+      for X := 5 to 8 do
+        Level.SetOpen(X, Y, 128, 256);
+    end;
+    Level.Cell(4, 3)^.Ladder := True;
+    Level.Cell(2, 5)^.Floor := -32;
+    Level.Cell(2, 5)^.Wet := True;
+    Level.Cell(2, 5)^.Lava := True;
+    Level.Cell(2, 5)^.Water := -16;
+    Level.AddEntityAtCell('info_player_start', 2, 2);
+    Check(Level.LadderDir(4, 3) = 0, 'the ladder climbs to the higher neighbour (+X)');
+    Check(Level.LadderDir(2, 2) = -1, 'no ladder direction without a step');
+
+    Stream := TMemoryStream.Create;
+    Loaded := TQuakeLevel.Create(3, 3);
+    try
+      Level.SaveToStream(Stream);
+      Stream.Position := 0;
+      Loaded.LoadFromStream(Stream);
+      Check(Loaded.Cell(4, 3)^.Ladder and Loaded.Cell(2, 5)^.Lava and CellHasWater(Loaded.Cell(2, 5)) and
+        not Loaded.Cell(2, 5)^.Slime, 'ladders and lava save and load');
+    finally
+      Loaded.Free;
+      Stream.Free;
+    end;
+
+    RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Check(Bsp.LoadFromPak('maps/unittest_ladder.bsp') and Pak.FileExists('textures/' + LevelLavaTexture + '.wal'),
+        'the ladder / lava level loads, with the lava texture made in memory');
+      Check((Bsp.PointContents(Vector3(2.5 * 64, 5.5 * 64, -24)) and CONTENTS_LAVA) <> 0, 'lava cells are CONTENTS_LAVA');
+      Check(Bsp.PointInLadder(Vector3(5 * 64 - 4, 3.5 * 64, 64)) and not Bsp.PointInLadder(Vector3(5 * 64 - 4, 3.5 * 64, 140)),
+        'the ladder brush stands against the step, up to its top');
+      Col := TQuakeCollision.Create(Bsp);
+      try
+        T := Col.BoxTrace(Vector3(4 * 64, 3.5 * 64, 40), Vector3(5 * 64, 3.5 * 64, 40), Mins, Maxs, 0, MASK_PLAYERSOLID);
+        Check(SameValue(T.EndPos.X, 5 * 64 - LevelLadderDepth - 16, 0.2) and ((T.Contents and CONTENTS_LADDER) <> 0),
+          'the player bumps into the ladder (CONTENTS_LADDER, Quake 2''s ladder test)');
+        T := Col.BoxTrace(Vector3(4 * 64, 3.5 * 64, 40), Vector3(5 * 64, 3.5 * 64, 40), Mins, Maxs, 0, MASK_MONSTERSOLID);
+        Check(SameValue(T.EndPos.X, 5 * 64 - 16, 0.2), 'monsters walk up to the wall behind it');
+      finally
+        Col.Free;
+      end;
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+end;
+
 procedure TestLevelLiftsSwitches;
 const
   Mins: TVector3 = (X: -16; Y: -16; Z: -24);
@@ -1625,6 +1699,7 @@ var
   Start: TLevelEntity;
   E: TLevelEntity;
   SX, SY, KX, KY, Monsters, Lifts, Switches, Doors, Pools, KeyDoors, Slime, Teleporters: Integer;
+  Ladders, Lava, Outdoor: Integer;
   KeyOk: Boolean;
   A, B: TMemoryStream;
   Bsp: TQuakeBsp;
@@ -1640,6 +1715,9 @@ begin
   KeyDoors := 0;
   Slime := 0;
   Teleporters := 0;
+  Ladders := 0;
+  Lava := 0;
+  Outdoor := 0;
   KeyOk := True;
   for Seed := 1 to 12 do
   begin
@@ -1651,6 +1729,9 @@ begin
     Inc(KeyDoors, Report.KeyDoors);
     Inc(Slime, Report.SlimePools);
     Inc(Teleporters, Report.Teleporters);
+    Inc(Ladders, Report.Ladders);
+    Inc(Lava, Report.LavaPools);
+    Inc(Outdoor, Report.OutdoorRooms);
     try
       Start := nil;
       Monsters := 0;
@@ -1697,6 +1778,7 @@ begin
     'random levels have lifts, exit switches, doors and pools');
   Check((KeyDoors > 0) and KeyOk, 'even seeds lock the exit with a blue key reachable with the doors shut');
   Check((Slime > 0) and (Teleporters > 0), 'random levels have slime pits and secret room teleporters');
+  Check((Ladders > 0) and (Lava > 0) and (Outdoor > 0), 'random levels have ladders, lava pits and outdoor rooms (all reachable)');
 
   { The same seed makes the same level }
   A := TMemoryStream.Create;
@@ -2038,6 +2120,7 @@ begin
   TestLevelVis;
   TestLevelDoorsWater;
   TestLevelKeysSlime;
+  TestLevelLaddersLava;
   TestLevelLiftsSwitches;
   TestLevelGen;
   TestMapLevelUrl;

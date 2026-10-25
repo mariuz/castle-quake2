@@ -28,7 +28,7 @@ uses
 
 type
   TLevelEditTool = (etFloor, etWall, etRaise, etLower, etCeilUp, etCeilDown, etSky, etTheme,
-    etEntity, etErase, etDoor, etWater, etLift, etButton, etSlime, etKeyDoor);
+    etEntity, etErase, etDoor, etWater, etLift, etButton, etSlime, etKeyDoor, etLava, etLadder, etHills);
   TLevelEditCommand = (ecNew, ecGenerate, ecSave, ecLoad, ecPlay, ecExport, ecClose);
 
   TLevelEditorEvent = procedure(const Level: TQuakeLevel) of object;
@@ -111,9 +111,9 @@ type
 
 const
   ToolNames: array[TLevelEditTool] of String = ('Floor', 'Wall', 'Raise', 'Lower', 'Ceil+', 'Ceil-',
-    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water', 'Lift', 'Button', 'Slime', 'Key');
+    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water', 'Lift', 'Button', 'Slime', 'Key', 'Lava', 'Ladder', 'Hills');
   ToolKeys: array[TLevelEditTool] of String = ('1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'O', 'U',
-    'H', 'J', 'M', 'K');
+    'H', 'J', 'M', 'K', 'I', 'R', '');
   CommandNames: array[TLevelEditCommand] of String = ('New', 'Generate', 'Save', 'Load', 'Play',
     'Export', 'Close');
   { What the Entity tool places; "exit" is a trigger with a changelevel }
@@ -713,6 +713,43 @@ begin
           C^.Button := False;
         end;
       end;
+    etLava:
+      if not C^.Solid then
+      begin
+        { Lava FBrushWater deep (or none again) }
+        if CellHasWater(C) then
+          C^.Wet := False
+        else
+        begin
+          C^.Wet := True;
+          C^.Lava := True;
+          C^.Slime := False;
+          C^.Water := Min(C^.Floor + FBrushWater, C^.Ceil - 8);
+          C^.Door := False;
+          C^.Ladder := False;
+        end;
+      end;
+    etLadder:
+      if not C^.Solid then
+      begin
+        { A ladder up the highest neighbouring step (or none again) }
+        C^.Ladder := not C^.Ladder;
+        if C^.Ladder then
+        begin
+          C^.Door := False;
+          C^.Lift := False;
+          C^.Button := False;
+          C^.Wet := False;
+        end;
+      end;
+    etHills:
+      if not C^.Solid then
+      begin
+        { Rolling ground around the brush floor (TerrainHeight, the same
+          everywhere for a cell, so neighbouring strokes fit together) }
+        C^.Floor := FBrushFloor + TerrainHeight(X, Y);
+        C^.Ceil := Max(C^.Ceil, C^.Floor + LevelMinHeadroom);
+      end;
     etSlime:
       if not C^.Solid then
       begin
@@ -723,6 +760,7 @@ begin
         begin
           C^.Wet := True;
           C^.Slime := True;
+          C^.Lava := False;
           C^.Water := Min(C^.Floor + FBrushWater, C^.Ceil - 8);
           C^.Door := False;
         end;
@@ -766,6 +804,7 @@ begin
         begin
           C^.Wet := True;
           C^.Slime := False;
+          C^.Lava := False;
           C^.Water := Min(C^.Floor + FBrushWater, C^.Ceil - 8);
           C^.Door := False;
         end;
@@ -907,6 +946,12 @@ begin
   else
   if Event.IsKey(keyK) then
     FTool := etKeyDoor
+  else
+  if Event.IsKey(keyI) then
+    FTool := etLava
+  else
+  if Event.IsKey(keyR) then
+    FTool := etLadder
   else
   if Event.IsKey(keyY) then
     FBrushKey := FBrushKey mod High(LevelKeyClasses) + 1
@@ -1068,6 +1113,9 @@ begin
           Col := Vector4(Col.XYZ * 0.6 + Vector3(0.1, 0.2, 0.45), 1);
       end;
       DrawRectangle(R, Col);
+      if CellHasWater(C) and C^.Lava then
+        DrawRectangle(R, Vector4(1, 0.4, 0.05, 0.65))
+      else
       if CellHasWater(C) and C^.Slime then
         DrawRectangle(R, Vector4(0.45, 0.75, 0.1, 0.55))
       else
@@ -1086,6 +1134,13 @@ begin
         DrawRectangle(FloatRectangle(R.Left + R.Width * 0.2, R.Bottom, R.Width * 0.6, R.Height),
           Vector4(KeyCol.XYZ * 0.75, 0.85));
         DrawRectangleOutline(R, KeyCol);
+      end;
+      if C^.Ladder and not C^.Solid then
+      begin
+        { Rungs }
+        for I := 1 to 3 do
+          DrawRectangle(FloatRectangle(R.Left + R.Width * 0.2, R.Bottom + R.Height * I / 4 - R.Height * 0.05,
+            R.Width * 0.6, R.Height * 0.1), Vector4(0.9, 0.85, 0.6, 0.9));
       end;
       if C^.Lift and not C^.Solid then
       begin
@@ -1143,7 +1198,7 @@ begin
     { Toolbar }
     DrawRectangle(ToolbarRect, Vector4(0.09, 0.09, 0.1, 1));
     for T := Low(TLevelEditTool) to High(TLevelEditTool) do
-      Button(ToolButtonRect(Ord(T)), ToolKeys[T] + ' ' + ToolNames[T], T = FTool);
+      Button(ToolButtonRect(Ord(T)), Trim(ToolKeys[T] + ' ' + ToolNames[T]), T = FTool);
     for Cmd := Low(TLevelEditCommand) to High(TLevelEditCommand) do
       Button(CommandButtonRect(Ord(Cmd)), CommandNames[Cmd], False);
 
@@ -1173,7 +1228,8 @@ begin
           StrUtils.IfThen(C^.Door, ' door', '') + StrUtils.IfThen(C^.Lift, ' lift to ' + IntToStr(C^.LiftTop), '') +
             StrUtils.IfThen(C^.Button, ' button', '') + StrUtils.IfThen(C^.Channel > 0, ' channel ' + IntToStr(C^.Channel), '') +
             StrUtils.IfThen(C^.Key = 1, ' blue key', '') + StrUtils.IfThen(C^.Key = 2, ' red key', ''),
-          StrUtils.IfThen(CellHasWater(C), StrUtils.IfThen(C^.Slime, ' slime ', ' water ') + IntToStr(C^.Water), '')]);
+          StrUtils.IfThen(C^.Ladder, ' ladder', '') +
+          StrUtils.IfThen(CellHasWater(C), StrUtils.IfThen(C^.Lava, ' lava ', StrUtils.IfThen(C^.Slime, ' slime ', ' water ')) + IntToStr(C^.Water), '')]);
       I := FLevel.EntityAtCell(FHover.X, FHover.Y);
       if I >= 0 then
         HoverInfo := HoverInfo + ' - ' + FLevel.Entities[I].EntClass;
