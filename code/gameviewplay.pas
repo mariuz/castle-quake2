@@ -258,6 +258,8 @@ begin
 end;
 
 procedure TViewPlay.OpenEditor;
+var
+  ConsoleParent: TCastleUserInterface;
 begin
   EnsureLevelThemes;
   if FEditor = nil then
@@ -267,8 +269,13 @@ begin
     FEditor.OnPlay := @EditorPlay;
     FEditor.OnClose := @EditorClose;
     InsertFront(FEditor);
-    { The console stays usable over the editor }
-    Console.Parent.InsertFront(Console);
+    { The console stays usable over the editor: move it to the front
+      (removed first: inserting a control that is already in the list adds
+      it twice, and the stale entry was written to after the console was
+      freed, crashing on exit) }
+    ConsoleParent := Console.Parent;
+    ConsoleParent.RemoveControl(Console);
+    ConsoleParent.InsertFront(Console);
   end;
   Menu.Exists := False;
   FEditor.Exists := True;
