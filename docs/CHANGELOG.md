@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.14.0 — 2026-10-26
+
+Real slopes, breakable glass windows, a key hunt, the full game's textures as themes, and audio polish. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - The full game's textures as themes: with the retail Quake 2 PAKs, every texture set (e1u2, e2u3...) becomes a level theme for the editor and the random levels. Level files remember theme names, so they still load on the demo.
 - Breakable glass: windows shatter when shot, with Quake 2's glass sound and debris. Quake 2's breakable walls only explode now if they are meant to (`dmg`), and always throw debris.
