@@ -203,14 +203,15 @@ jobs:
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest rand8 test_output/hunt --demo 'O:notarget,W:1,E:keylock2,E:keylock1,W:0.3,K,W:0.2,E:keylock2,E:keylock1,W:2,V,Q' > test_output/hunt.log 2>&1
           L=test_output/hunt.log
           grep -q "Generated rand8: .* 2 key doors" $L && grep -q 'trigger_key "keylock2": you need the Red Key' $L && grep -q 'trigger_key "keylock2" unlocks "keydoor2"' $L && grep -q 'trigger_key "keylock1" unlocks "keydoor1"' $L && ! grep -q Exception $L || { echo "::error::The key hunt of rand8 failed (see hunt.log)"; exit 1; }
-          # Sound mixer: with OpenAL Soft writing to a wave file, rapid rocket
-          # fire pushes the summed gain over the threshold, the limiter
-          # turns the master volume down and lets it back up afterwards
+          # Sound mixer: with OpenAL Soft writing to a wave file, a chain of
+          # exploding barrels in a quiet editor room pushes the summed gain
+          # over the threshold (the limiter turns the master volume down),
+          # then the room goes silent and it comes back to full
           printf 'drivers = wave\n[wave]\nfile = test_output/mix.wav\n[general]\nsample-type = int16\n' > test_output/alsoft.conf
-          ALSOFT_CONF=test_output/alsoft.conf timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/mix --demo 'O:notarget,Y,W:1,V,K,C:7,W:1,H,W:0.5,V,W:0.3,V,H,W:6,V,Q' > test_output/mix.log 2>&1
+          ALSOFT_CONF=test_output/alsoft.conf timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/mix --demo 'W:1,O:editor new,O:editor brush 0 256 0,O:editor tool floor,O:editor fill 20 13 26 18,O:editor entity info_player_start,O:editor fill 21 15 21 15,O:editor entity light,O:editor fill 23 16 23 16,O:editor name quiet,O:editor save,W:0.2,O:editor play,W:1,O:notarget,Y,K,C:7,W:1,A:0,O:spawn misc_explobox origin "1600 992 1",O:spawn misc_explobox origin "1600 940 1",O:spawn misc_explobox origin "1600 1044 1",O:spawn misc_explobox origin "1650 992 1",W:0.5,V,X,W:0.6,V,W:0.3,V,W:4,V,Q' > test_output/mix.log 2>&1
           L=test_output/mix.log
           grep -E "Sound mixer" $L
-          grep -oE "Sound mixer: .* limiter [0-9.]+" $L | awk '{ g = $NF; if (NR == 1 || g < min) min = g; last = g } END { print "limiter min " min ", last " last; exit !(NR >= 3 && min < 0.85 && (last > min + 0.1 || last >= 0.95)) }' && ! grep -q Exception $L || { echo "::error::The sound limiter did not engage / recover (see mix.log)"; exit 1; }
+          grep -oE "Sound mixer: .* limiter [0-9.]+" $L | awk '{ g = $NF; if (NR == 1 || g < min) min = g; last = g } END { print "limiter min " min ", last " last; exit !(NR >= 3 && min < 0.95 && last >= 0.98) }' && ! grep -q Exception $L || { echo "::error::The sound limiter did not engage / recover (see mix.log)"; exit 1; }
           # Ramps of the level editor: walking forward up a four-cell ramp
           # (0 to 128) reaches the upper room at full speed
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/ramptest --demo 'W:1,O:editor new,O:editor brush 0 320 0,O:editor tool floor,O:editor fill 20 13 24 18,O:editor fill 25 17 28 17,O:editor brush 0 320 1,O:editor fill 25 14 25 16,O:editor brush 32 320 1,O:editor fill 26 14 26 16,O:editor brush 64 320 1,O:editor fill 27 14 27 16,O:editor brush 96 320 1,O:editor fill 28 14 28 16,O:editor brush 128 320 2,O:editor fill 29 13 31 18,O:editor tool ramp,O:editor fill 25 14 28 16,O:editor entity info_player_start,O:editor fill 22 15 22 15,O:editor entity light,O:editor fill 26 15 26 15,O:editor name ramptest,O:editor save,W:0.2,O:editor play,W:1,O:notarget,G:1440 992 25,A:0,W:0.3,GP:0 1 0 0 0 0,W:2.7,GP:,W:0.5,V,S,Q' > test_output/ramptest.log 2>&1
