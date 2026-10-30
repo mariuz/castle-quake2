@@ -151,6 +151,7 @@ The script holds one `IN:` line per change of the view or the held keys, timed o
 
 ## License
 
-- Code: MIT License (matching Castle Game Engine and mariuz/castle-quake1).
+- Code: MIT License (the same as mariuz/castle-quake1). This covers this project's own code only.
+- Castle Game Engine, which the game is built with, is not MIT: its units (the ones linked into the game) are under the LGPL with a static linking exception, like the FPC run-time library. That exception means a game made with it can use any license, open source or proprietary, MIT included. See <https://castle-engine.io/license>.
 - `data/paks/quake2_demo.pak` is the unmodified Quake 2 demo data © id Software, redistributed electronically free of charge under the id Software demo license in `data/paks/QUAKE2_DEMO_LICENSE.txt`, which must accompany it.
 - Quake is a registered trademark of id Software / ZeniMax Media.
