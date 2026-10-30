@@ -127,6 +127,14 @@ type
     { A plane of any direction (types 3..5 by its largest axis) }
     function SlopePlane(const Normal: TVector3; const Dist: Single): Integer;
     { The plane of a ramp region's floor (normal up), False when flat }
+    { The diagonal wall's plane of a cell (normal into the open half,
+      through the middle), False when it has none }
+    function DiagonalPlane(const X, Y: Integer; out Normal: TVector3; out Dist: Single): Boolean;
+    { The solid prism behind a diagonal wall: a leaf with its brush }
+    function NewPrismLeaf(const X, Y: Integer; const Plane: Integer): Integer;
+    { The open triangle of a diagonal cell at height Z }
+    procedure DiagonalTriangle(const X, Y: Integer; const Z: Single; out A, B, C: TVector3);
+    procedure AddDiagonalWall(const X, Y: Integer);
     function RampPlane(const X0, Y0, X1, Y1: Integer; out Normal: TVector3; out Dist: Single): Boolean;
     { A solid leaf under a ramp: its brush is a wedge (box sides, bottom and
       the slope on top) }
@@ -287,7 +295,8 @@ begin
   else
     Result := Format('%d,%d,%d,%d,%d,%d,%d', [C^.Floor, C^.Ceil, Ord(C^.Sky), C^.Theme, Ord(C^.Door),
       IfThen(CellHasWater(C), C^.Water, 0), Ord(CellHasWater(C) and C^.Slime)]) +
-      Format(',%d,%d,%d', [Ord(CellHasWater(C) and C^.Lava), Ord(C^.Ladder), Level.RampDir(X, Y)]) + StrUtils.IfThen(C^.Window, ',g', '');
+      Format(',%d,%d,%d', [Ord(CellHasWater(C) and C^.Lava), Ord(C^.Ladder), Level.RampDir(X, Y)]) + StrUtils.IfThen(C^.Window, ',g', '') +
+      StrUtils.IfThen(C^.Diagonal > 0, Format(',x%d@%d,%d', [C^.Diagonal, X, Y]), '');
 end;
 
 function TBuilder.Uniform(const X0, Y0, X1, Y1: Integer): Boolean;
@@ -458,8 +467,8 @@ var
   N: TBSPNode;
   R: TRegion;
   Front, Back: Integer;
-  SlopeN: TVector3;
-  SlopeD: Single;
+  SlopeN, DiagN: TVector3;
+  SlopeD, DiagD: Single;
 begin
   Mins := Vector3(X0 * LevelCellSize, Y0 * LevelCellSize, ZMin);
   Maxs := Vector3(X1 * LevelCellSize, Y1 * LevelCellSize, ZMax);
@@ -530,6 +539,19 @@ begin
     end;
     SetNodeBounds(N, Mins, Vector3(Maxs.X, Maxs.Y, C^.Ceil));
     Nodes[NodeFloor] := N;
+    { A diagonal wall: its plane first, the open half in front, the solid
+      prism behind }
+    if DiagonalPlane(X0, Y0, DiagN, DiagD) then
+    begin
+      Result := NewNode;
+      N := Default(TBSPNode);
+      N.PlaneNum := SlopePlane(DiagN, DiagD);
+      N.Children[0] := NodeCeil;
+      N.Children[1] := -(NewPrismLeaf(X0, Y0, N.PlaneNum) + 1);
+      SetNodeBounds(N, Mins, Maxs);
+      Nodes[Result] := N;
+      Exit;
+    end;
     Exit(NodeCeil);
   end;
 
@@ -613,6 +635,109 @@ begin
   P.PlaneType := 3 + A;
   Result := Planes.Add(P);
   PlaneIndex.Add(Key, Result);
+end;
+
+function TBuilder.DiagonalPlane(const X, Y: Integer; out Normal: TVector3; out Dist: Single): Boolean;
+var
+  D: Integer;
+  SX, SY: Single;
+begin
+  D := Level.Cell(X, Y)^.Diagonal;
+  Result := (D >= 1) and (D <= 4) and not Level.Cell(X, Y)^.Solid;
+  if not Result then
+    Exit;
+  SX := IfThen(D in [1, 4], 1, -1);
+  SY := IfThen(D in [1, 2], 1, -1);
+  Normal := Vector3(-SX, -SY, 0).Normalize;
+  Dist := Normal.X * (X + 0.5) * LevelCellSize + Normal.Y * (Y + 0.5) * LevelCellSize;
+end;
+
+function TBuilder.NewPrismLeaf(const X, Y: Integer; const Plane: Integer): Integer;
+var
+  L: TBSPLeaf;
+  B: TBSPBrush;
+  I, D: Integer;
+  Sides: array[0..4] of Integer;
+  S: TBSPBrushSide;
+  Mins, Maxs: TVector3;
+begin
+  D := Level.Cell(X, Y)^.Diagonal;
+  Mins := Vector3(X * LevelCellSize, Y * LevelCellSize, ZMin);
+  Maxs := Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, ZMax);
+  L := Default(TBSPLeaf);
+  for I := 0 to 2 do
+  begin
+    L.Mins[I] := ClampShort(Mins.Data[I]);
+    L.Maxs[I] := ClampShort(Maxs.Data[I]);
+  end;
+  L.Contents := CONTENTS_SOLID;
+  L.Cluster := -1;
+  { The triangle: the cell's two sides at the solid corner and the
+    diagonal (its outward side faces the open half), floor to top }
+  if D in [1, 4] then
+    Sides[0] := AddPlane(0, True, Maxs.X)
+  else
+    Sides[0] := AddPlane(0, False, Mins.X);
+  if D in [1, 2] then
+    Sides[1] := AddPlane(1, True, Maxs.Y)
+  else
+    Sides[1] := AddPlane(1, False, Mins.Y);
+  Sides[2] := Plane;
+  Sides[3] := AddPlane(2, True, Maxs.Z);
+  Sides[4] := AddPlane(2, False, Mins.Z);
+  B.FirstSide := BrushSides.Count;
+  B.NumSides := 5;
+  B.Contents := CONTENTS_SOLID;
+  for I := 0 to 4 do
+  begin
+    S.PlaneNum := Sides[I];
+    S.TexInfo := 0;
+    BrushSides.Add(S);
+  end;
+  L.FirstLeafBrush := LeafBrushes.Count;
+  L.NumLeafBrushes := 1;
+  LeafBrushes.Add(Brushes.Add(B));
+  Result := Leafs.Add(L);
+end;
+
+procedure TBuilder.DiagonalTriangle(const X, Y: Integer; const Z: Single; out A, B, C: TVector3);
+var
+  D: Integer;
+  X0, Y0, X1, Y1: Single;
+begin
+  D := Level.Cell(X, Y)^.Diagonal;
+  X0 := X * LevelCellSize; Y0 := Y * LevelCellSize;
+  X1 := X0 + LevelCellSize; Y1 := Y0 + LevelCellSize;
+  { The three corners other than the solid one }
+  case D of
+    1: begin A := Vector3(X0, Y0, Z); B := Vector3(X1, Y0, Z); C := Vector3(X0, Y1, Z); end;
+    2: begin A := Vector3(X1, Y0, Z); B := Vector3(X1, Y1, Z); C := Vector3(X0, Y0, Z); end;
+    3: begin A := Vector3(X1, Y1, Z); B := Vector3(X0, Y1, Z); C := Vector3(X1, Y0, Z); end;
+    else begin A := Vector3(X0, Y1, Z); B := Vector3(X0, Y0, Z); C := Vector3(X1, Y1, Z); end;
+  end;
+end;
+
+procedure TBuilder.AddDiagonalWall(const X, Y: Integer);
+var
+  N, A, B, C: TVector3;
+  Dist: Single;
+  Z, ZTop, FaceIdx: Integer;
+  Cell: PLevelCell;
+begin
+  if not DiagonalPlane(X, Y, N, Dist) then
+    Exit;
+  Cell := Level.Cell(X, Y);
+  { The diagonal's ends: the open triangle's corners next to the solid one }
+  DiagonalTriangle(X, Y, 0, A, B, C);
+  Z := Cell^.Floor;
+  while Z < Cell^.Ceil do
+  begin
+    ZTop := Min(Cell^.Ceil, Z + 256);
+    FaceIdx := AddPolyFace([Vector3(B.X, B.Y, Z), Vector3(C.X, C.Y, Z), Vector3(C.X, C.Y, ZTop),
+      Vector3(B.X, B.Y, ZTop)], N, SlopePlane(N, Dist), 0, 0, LevelThemes[Cell^.Theme].Wall, 0);
+    LightFacePlane(FaceIdx, N, Dist, 0, Cell^.Sky);
+    Z := ZTop;
+  end;
 end;
 
 function TBuilder.RampPlane(const X0, Y0, X1, Y1: Integer; out Normal: TVector3; out Dist: Single): Boolean;
@@ -877,6 +1002,9 @@ begin
   for D := 0 to 3 do
   begin
     N := Level.Cell(X + DX[D], Y + DY[D]);
+    { Behind this cell's own diagonal wall: nothing to see }
+    if Level.DiagonalSolidSide(X, Y, D) then
+      Continue;
     { The wall faces back into this cell }
     if DX[D] <> 0 then
     begin
@@ -895,7 +1023,7 @@ begin
       else
         Dist := Y * LevelCellSize;
     end;
-    if N^.Solid then
+    if N^.Solid or Level.DiagonalSolidSide(X + DX[D], Y + DY[D], D xor 1) then
       Wall(C^.Floor, C^.Ceil, Theme.Wall)
     else
     begin
@@ -926,7 +1054,7 @@ var
   LiquidFlags: Integer;
   HasLight, IsRamp: Boolean;
   LX, LY: Integer;
-  SlopeN: TVector3;
+  SlopeN, TA, TB, TC: TVector3;
   SlopeD: Single;
 begin
   for I := 0 to Regions.Count - 1 do
@@ -944,6 +1072,13 @@ begin
     IsRamp := RampPlane(R.X0, R.Y0, R.X1, R.Y1, SlopeN, SlopeD);
     for Y := R.Y0 to R.Y1 - 1 do
       for X := R.X0 to R.X1 - 1 do
+        if Level.Cell(X, Y)^.Diagonal in [1..4] then
+        begin
+          { A diagonal cell: its open triangle }
+          DiagonalTriangle(X, Y, C^.Floor, TA, TB, TC);
+          FaceIdx := AddPolyFace([TA, TB, TC], Vector3(0, 0, 1), AxialPlane(2, C^.Floor), 0, 2, Theme.Floor, 0);
+          LightFacePlane(FaceIdx, Vector3(0, 0, 1), C^.Floor, 2, C^.Sky);
+        end else
         if IsRamp then
         begin
           { A sloped quad, its corners on the ramp }
@@ -984,11 +1119,21 @@ begin
           CeilTex := Theme.Light
         else
           CeilTex := Theme.Ceil;
-        FaceIdx := AddFace(FA, C^.Ceil, Vector3(X * LevelCellSize, Y * LevelCellSize, 0),
-          Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, 0), CeilTex,
-          IfThen(C^.Sky, SURF_SKY, 0));
-        if not C^.Sky then
-          LightFace(FaceIdx, FA, C^.Ceil, False);
+        if Level.Cell(X, Y)^.Diagonal in [1..4] then
+        begin
+          DiagonalTriangle(X, Y, C^.Ceil, TA, TB, TC);
+          FaceIdx := AddPolyFace([TA, TB, TC], Vector3(0, 0, -1), AxialPlane(2, C^.Ceil), 1, 2, CeilTex,
+            IfThen(C^.Sky, SURF_SKY, 0));
+          if not C^.Sky then
+            LightFacePlane(FaceIdx, Vector3(0, 0, -1), -C^.Ceil, 2, False);
+        end else
+        begin
+          FaceIdx := AddFace(FA, C^.Ceil, Vector3(X * LevelCellSize, Y * LevelCellSize, 0),
+            Vector3((X + 1) * LevelCellSize, (Y + 1) * LevelCellSize, 0), CeilTex,
+            IfThen(C^.Sky, SURF_SKY, 0));
+          if not C^.Sky then
+            LightFace(FaceIdx, FA, C^.Ceil, False);
+        end;
       end;
     N.NumFaces := Faces.Count - N.FirstFace;
     Nodes[R.NodeCeil] := N;
@@ -999,6 +1144,7 @@ begin
       begin
         AddWalls(X, Y);
         AddLadderFaces(X, Y);
+        AddDiagonalWall(X, Y);
       end;
 
     { The water surface, seen from above and from below (warped, no

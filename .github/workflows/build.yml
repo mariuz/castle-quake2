@@ -224,6 +224,11 @@ jobs:
           # No UI control may be inserted twice (CGE: "the result is undefined";
           # the editor's console once was, and the game crashed on exit)
           if grep -l "Inserting to the UI list" test_output/*.log; then echo "::error::A UI control was inserted into a UI list twice (see the logs above)"; exit 1; fi
+          # Diagonal walls of the level editor: walking north-east into a cut
+          # corner stops against the 45-degree wall (x + y = 2848 for the box)
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/diagtest --demo 'W:1,O:editor new,O:editor brush 0 192 0,O:editor tool floor,O:editor fill 20 13 26 18,O:editor tool diagonal,O:editor fill 20 13 20 13,O:editor fill 26 18 26 18,O:editor fill 26 13 26 13,O:editor fill 20 18 20 18,O:editor entity info_player_start,O:editor fill 23 15 23 15,O:editor entity light,O:editor fill 23 16 23 16,O:editor name diagtest,O:editor save,W:0.2,O:editor play,W:1,O:notarget,G:1600 1120 25,A:45,W:0.3,GP:0 1 0 0 0 0,W:1.5,GP:,V,S,Q' > test_output/diagtest.log 2>&1
+          L=test_output/diagtest.log
+          grep -oE "Player at [0-9.]+ [0-9.]+ -[0-9.]+" $L | tail -1 | awk '{ s = $3 - $5; print "x + y = " s; exit !(s > 2846 && s < 2849) }' && ! grep -q Exception $L || { echo "::error::Diagonal walls of the level editor failed (see diagtest.log)"; exit 1; }
           # Ladders and lava of the level editor: walking forward (looking up)
           # into the ladder climbs the 128-unit ledge; lava hurts
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/laddertest --demo 'W:1,O:editor new,O:editor brush 0 256 0,O:editor tool floor,O:editor fill 20 13 26 18,O:editor brush 128 256 1,O:editor fill 27 13 30 18,O:editor tool ladder,O:editor fill 26 15 26 15,O:editor brush -48 256 0,O:editor tool floor,O:editor fill 21 17 22 18,O:editor tool lava,O:editor fill 21 17 22 18,O:editor entity info_player_start,O:editor fill 23 15 23 15,O:editor entity light,O:editor fill 24 14 24 14,O:editor fill 28 16 28 16,O:editor name laddertest,O:editor save,W:0.2,O:editor play,W:1,O:notarget,G:1632 992 25,A:0,P:30,W:0.3,V,GP:0 1 0 0 0 0,W:3,GP:,W:0.5,V,S,G:1376 1120 25,W:0.5,V,Q' > test_output/laddertest.log 2>&1

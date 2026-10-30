@@ -44,7 +44,7 @@ type
 
   TLevelGenReport = record
     Rooms, Links, Loops, OpenCells, FixedCells, WalledCells, Monsters, Items, Doors, Pools, Lifts, Switches: Integer;
-    SlimePools, KeyDoors, Teleporters, LavaPools, Ladders, OutdoorRooms, Ramps, Windows: Integer;
+    SlimePools, KeyDoors, Teleporters, LavaPools, Ladders, OutdoorRooms, Ramps, Windows, Diagonals: Integer;
     StartRoom, ExitRoom, SecretRoom: Integer;
   end;
 
@@ -784,6 +784,45 @@ var
     end;
   end;
 
+  { Diagonal walls across room corners (two rooms in three, 5 x 5 and up):
+    a corner whose outer neighbours are all wall, so no corridor ends
+    there }
+  procedure CutRoomCorners;
+  var
+    I, K, X, Y, SX, SY: Integer;
+    C: PLevelCell;
+  begin
+    for I := 0 to High(Rooms) do
+    begin
+      if Rooms[I].Secret or (Rooms[I].W < 5) or (Rooms[I].H < 5) or ((Seed + Cardinal(I)) mod 3 = 0) then
+        Continue;
+      for K := 0 to 3 do
+      begin
+        if K in [0, 3] then
+        begin
+          X := Rooms[I].X + Rooms[I].W - 1; SX := 1;
+        end else
+        begin
+          X := Rooms[I].X; SX := -1;
+        end;
+        if K in [0, 1] then
+        begin
+          Y := Rooms[I].Y + Rooms[I].H - 1; SY := 1;
+        end else
+        begin
+          Y := Rooms[I].Y; SY := -1;
+        end;
+        C := Level.Cell(X, Y);
+        if C^.Solid or C^.Wet or C^.Door or C^.Lift or C^.Button or C^.Ladder or (CellRoom(X, Y) <> I) or
+           not Level.Cell(X + SX, Y)^.Solid or not Level.Cell(X, Y + SY)^.Solid or
+           not Level.Cell(X + SX, Y + SY)^.Solid then
+          Continue;
+        C^.Diagonal := K + 1;
+        Inc(Report.Diagonals);
+      end;
+    end;
+  end;
+
   { Steps become slopes: corridor cells and outdoor ground with a higher
     neighbour (at most LevelRampMaxRise up) are ramps }
   procedure AddRamps;
@@ -795,7 +834,7 @@ var
       for X := 1 to Level.Width - 2 do
       begin
         C := Level.Cell(X, Y);
-        if C^.Solid or C^.Wet or C^.Door or C^.Lift or C^.Button or C^.Ladder then
+        if C^.Solid or C^.Wet or C^.Door or C^.Lift or C^.Button or C^.Ladder or (C^.Diagonal > 0) then
           Continue;
         R := CellRoom(X, Y);
         if (R >= 0) and not (Rooms[R].Sky and (Rooms[R].W >= 6) and (Rooms[R].H >= 6)) then
@@ -1489,6 +1528,7 @@ begin
     CarveCorridor(Links[I].A, Links[I].B);
   Furnish;
   MakeOutdoor;
+  CutRoomCorners;
 
   { Start in room 0 (the root of the heights); the exit is the deepest room }
   StartRoom := 0;
@@ -1553,10 +1593,10 @@ begin
     if IsRandomMapName(Name, Seed) then
     begin
       Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
-      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools (%d slime), %d lifts, %d ladders, %d switches, %d key doors, %d teleporters, %d lava pits, %d outdoor rooms, %d ramps, %d windows, %d monsters, %d items, secret room %d',
+      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools (%d slime), %d lifts, %d ladders, %d switches, %d key doors, %d teleporters, %d lava pits, %d outdoor rooms, %d ramps, %d windows, %d diagonal walls, %d monsters, %d items, secret room %d',
         [Name, Report.Rooms, Report.Links, Report.Loops, Report.OpenCells, Report.FixedCells,
          Report.WalledCells, Report.Doors, Report.Pools, Report.SlimePools, Report.Lifts, Report.Ladders, Report.Switches,
-         Report.KeyDoors, Report.Teleporters, Report.LavaPools, Report.OutdoorRooms, Report.Ramps, Report.Windows, Report.Monsters,
+         Report.KeyDoors, Report.Teleporters, Report.LavaPools, Report.OutdoorRooms, Report.Ramps, Report.Windows, Report.Diagonals, Report.Monsters,
          Report.Items, Report.SecretRoom]);
     end else
     if UriExists(LevelFileUrl(Name)) = ueFile then

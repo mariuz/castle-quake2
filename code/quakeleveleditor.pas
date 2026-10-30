@@ -28,7 +28,7 @@ uses
 
 type
   TLevelEditTool = (etFloor, etWall, etRaise, etLower, etCeilUp, etCeilDown, etSky, etTheme,
-    etEntity, etErase, etDoor, etWater, etLift, etButton, etSlime, etKeyDoor, etLava, etLadder, etHills, etRamp, etWindow);
+    etEntity, etErase, etDoor, etWater, etLift, etButton, etSlime, etKeyDoor, etLava, etLadder, etHills, etRamp, etWindow, etDiagonal);
   TLevelEditCommand = (ecNew, ecGenerate, ecSave, ecLoad, ecPlay, ecExport, ecClose);
 
   TLevelEditorEvent = procedure(const Level: TQuakeLevel) of object;
@@ -111,9 +111,9 @@ type
 
 const
   ToolNames: array[TLevelEditTool] of String = ('Floor', 'Wall', 'Raise', 'Lower', 'Ceil+', 'Ceil-',
-    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water', 'Lift', 'Button', 'Slime', 'Key', 'Lava', 'Ladder', 'Hills', 'Ramp', 'Window');
+    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water', 'Lift', 'Button', 'Slime', 'Key', 'Lava', 'Ladder', 'Hills', 'Ramp', 'Window', 'Diagonal');
   ToolKeys: array[TLevelEditTool] of String = ('1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'O', 'U',
-    'H', 'J', 'M', 'K', 'I', 'R', '', '', '');
+    'H', 'J', 'M', 'K', 'I', 'R', '', '', '', '');
   CommandNames: array[TLevelEditCommand] of String = ('New', 'Generate', 'Save', 'Load', 'Play',
     'Export', 'Close');
   { What the Entity tool places; "exit" is a trigger with a changelevel }
@@ -742,6 +742,27 @@ begin
           C^.Wet := False;
         end;
       end;
+    etDiagonal:
+      if not C^.Solid then
+      begin
+        { A 45-degree wall closing the corner between two walls (or none
+          again) }
+        if C^.Diagonal > 0 then
+          C^.Diagonal := 0
+        else
+        begin
+          C^.Diagonal := FLevel.DiagonalCornerFor(X, Y);
+          if C^.Diagonal = 0 then
+            C^.Diagonal := 1;
+          C^.Door := False;
+          C^.Lift := False;
+          C^.Button := False;
+          C^.Wet := False;
+          C^.Ladder := False;
+          C^.Ramp := False;
+          C^.Window := False;
+        end;
+      end;
     etWindow:
       if not C^.Solid then
       begin
@@ -1097,6 +1118,7 @@ var
   X, Y, I, CX, CY: Integer;
   C: PLevelCell;
   Col, KeyCol: TCastleColor;
+  Tri: array of TVector2;
   Tint: TVector3;
   E: TLevelEntity;
   Txt, HoverInfo: String;
@@ -1167,6 +1189,17 @@ begin
         DrawRectangle(FloatRectangle(R.Left + R.Width * 0.2, R.Bottom, R.Width * 0.6, R.Height),
           Vector4(KeyCol.XYZ * 0.75, 0.85));
         DrawRectangleOutline(R, KeyCol);
+      end;
+      if (C^.Diagonal in [1..4]) and not C^.Solid then
+      begin
+        { The solid half: a dark triangle at its corner }
+        case C^.Diagonal of
+          1: Tri := [Vector2(R.Right, R.Bottom), Vector2(R.Right, R.Top), Vector2(R.Left, R.Top)];
+          2: Tri := [Vector2(R.Right, R.Top), Vector2(R.Left, R.Top), Vector2(R.Left, R.Bottom)];
+          3: Tri := [Vector2(R.Left, R.Top), Vector2(R.Left, R.Bottom), Vector2(R.Right, R.Bottom)];
+          else Tri := [Vector2(R.Left, R.Bottom), Vector2(R.Right, R.Bottom), Vector2(R.Right, R.Top)];
+        end;
+        DrawPrimitive2D(pmTriangles, Tri, Vector4(0.08, 0.08, 0.08, 1));
       end;
       if C^.Window and not C^.Solid then
       begin
@@ -1281,7 +1314,7 @@ begin
           StrUtils.IfThen(C^.Door, ' door', '') + StrUtils.IfThen(C^.Lift, ' lift to ' + IntToStr(C^.LiftTop), '') +
             StrUtils.IfThen(C^.Button, ' button', '') + StrUtils.IfThen(C^.Channel > 0, ' channel ' + IntToStr(C^.Channel), '') +
             StrUtils.IfThen(C^.Key = 1, ' blue key', '') + StrUtils.IfThen(C^.Key = 2, ' red key', ''),
-          StrUtils.IfThen(C^.Ladder, ' ladder', '') + StrUtils.IfThen(C^.Ramp, ' ramp', '') + StrUtils.IfThen(C^.Window, ' window', '') +
+          StrUtils.IfThen(C^.Ladder, ' ladder', '') + StrUtils.IfThen(C^.Ramp, ' ramp', '') + StrUtils.IfThen(C^.Window, ' window', '') + StrUtils.IfThen(C^.Diagonal > 0, ' diagonal', '') +
           StrUtils.IfThen(CellHasWater(C), StrUtils.IfThen(C^.Lava, ' lava ', StrUtils.IfThen(C^.Slime, ' slime ', ' water ')) + IntToStr(C^.Water), '')]);
       I := FLevel.EntityAtCell(FHover.X, FHover.Y);
       if I >= 0 then

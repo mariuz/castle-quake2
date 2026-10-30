@@ -46,6 +46,10 @@ type
       cell between its open sides (WindowAxis), from Floor (the sill) to
       Ceil }
     Window: Boolean;
+    { A diagonal wall: the half of the cell at this corner is solid, cut at
+      45 degrees (1 north-east = +X +Y, 2 north-west, 3 south-west, 4
+      south-east); 0 = none }
+    Diagonal: Byte;
     { A lift (func_plat): a slab moving between Floor and LiftTop; touching
       lift cells with the same heights are one lift }
     Lift: Boolean;
@@ -109,6 +113,12 @@ type
     { The axis a window looks along (0 X: open to the west and east, 1 Y),
       -1 when it isn't between two open cells }
     function WindowAxis(const X, Y: Integer): Integer;
+    { Is the edge of (X, Y) towards D (0 +X, 1 -X, 2 +Y, 3 -Y) closed by the
+      solid half of a diagonal cell? }
+    function DiagonalSolidSide(const X, Y, D: Integer): Boolean;
+    { The corner a diagonal wall would close: the one between two solid
+      neighbours (1..4, as Diagonal), 0 when none }
+    function DiagonalCornerFor(const X, Y: Integer): Integer;
     { The floor of (X, Y) at a point of the cell (Quake coordinates; a ramp
       slopes, other cells are flat) }
     function FloorAt(const X, Y: Integer; const PX, PY: Single): Single;
@@ -530,6 +540,45 @@ begin
   Result := (X >= 0) and (Y >= 0) and (X < FWidth) and (Y < FHeight);
 end;
 
+const
+  { The solid corner of each Diagonal value, as signs along X and Y }
+  DiagonalSX: array[1..4] of Integer = (1, -1, -1, 1);
+  DiagonalSY: array[1..4] of Integer = (1, 1, -1, -1);
+
+function TQuakeLevel.DiagonalSolidSide(const X, Y, D: Integer): Boolean;
+var
+  C: PLevelCell;
+begin
+  Result := False;
+  if not InGrid(X, Y) then
+    Exit;
+  C := Cell(X, Y);
+  if C^.Solid or (C^.Diagonal < 1) or (C^.Diagonal > 4) then
+    Exit;
+  case D of
+    0: Result := DiagonalSX[C^.Diagonal] > 0;
+    1: Result := DiagonalSX[C^.Diagonal] < 0;
+    2: Result := DiagonalSY[C^.Diagonal] > 0;
+    3: Result := DiagonalSY[C^.Diagonal] < 0;
+  end;
+end;
+
+function TQuakeLevel.DiagonalCornerFor(const X, Y: Integer): Integer;
+
+  function SolidAt(const NX, NY: Integer): Boolean;
+  begin
+    Result := (not InGrid(NX, NY)) or Cell(NX, NY)^.Solid;
+  end;
+
+var
+  K: Integer;
+begin
+  for K := 1 to 4 do
+    if SolidAt(X + DiagonalSX[K], Y) and SolidAt(X, Y + DiagonalSY[K]) then
+      Exit(K);
+  Result := 0;
+end;
+
 function TQuakeLevel.WindowAxis(const X, Y: Integer): Integer;
 
   function Open(const NX, NY: Integer): Boolean;
@@ -705,6 +754,9 @@ begin
         C^.Ramp := False;
       if C^.Window and (C^.Door or C^.Lift or C^.Button or C^.Wet or C^.Ladder or C^.Ramp or C^.Sky) then
         C^.Window := False;
+      if (C^.Diagonal > 4) or ((C^.Diagonal > 0) and (C^.Door or C^.Lift or C^.Button or C^.Wet or
+         C^.Ladder or C^.Ramp or C^.Window)) then
+        C^.Diagonal := 0;
       if C^.Button and (C^.Door or C^.Lift or C^.Wet) then
         C^.Button := False;
       if C^.Button and (C^.Channel = 0) then
@@ -740,6 +792,12 @@ var
   P: TVector3;
 begin
   P := CellFloorCenter(X, Y);
+  { In a diagonal cell: the middle of its open half }
+  if (Cell(X, Y)^.Diagonal >= 1) and (Cell(X, Y)^.Diagonal <= 4) then
+  begin
+    P.X := P.X - DiagonalSX[Cell(X, Y)^.Diagonal] * LevelCellSize / 6;
+    P.Y := P.Y - DiagonalSY[Cell(X, Y)^.Diagonal] * LevelCellSize / 6;
+  end;
   { On a ramp: the floor's highest point under a 32-unit box }
   P.Z := Max(Max(FloorAt(X, Y, P.X - 16, P.Y - 16), FloorAt(X, Y, P.X + 16, P.Y - 16)),
     Max(FloorAt(X, Y, P.X - 16, P.Y + 16), FloorAt(X, Y, P.X + 16, P.Y + 16)));
@@ -886,6 +944,8 @@ begin
             Row := Row + ',p';
           if C^.Window then
             Row := Row + ',g';
+          if C^.Diagonal > 0 then
+            Row := Row + ',x' + IntToStr(C^.Diagonal);
           if C^.Door and (C^.Key > 0) then
             Row := Row + ',k' + IntToStr(C^.Key);
           if C^.Lift then
@@ -1008,6 +1068,9 @@ begin
             else
             if Vals[I] = 'g' then
               C^.Window := True
+            else
+            if Copy(Vals[I], 1, 1) = 'x' then
+              C^.Diagonal := StrToIntDef(Copy(Vals[I], 2, MaxInt), 0)
             else
             if Copy(Vals[I], 1, 1) = 'k' then
               C^.Key := StrToIntDef(Copy(Vals[I], 2, MaxInt), 0)

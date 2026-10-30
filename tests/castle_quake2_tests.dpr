@@ -1827,6 +1827,82 @@ begin
   end;
 end;
 
+{ Diagonal walls: a cell cut at 45 degrees, solid behind }
+procedure TestLevelDiagonals;
+const
+  Mins: TVector3 = (X: -16; Y: -16; Z: -24);
+  Maxs: TVector3 = (X: 16; Y: 16; Z: 32);
+var
+  Level, Loaded: TQuakeLevel;
+  Bsp: TQuakeBsp;
+  Col: TQuakeCollision;
+  T: TQuakeTrace;
+  X, Y, Diagonals: Integer;
+  Stream: TMemoryStream;
+  E: TLevelEntity;
+  Report: TLevelGenReport;
+  Seed: Cardinal;
+begin
+  { A room (1..5, 1..4) with its north-east corner (5, 4) cut }
+  Level := TQuakeLevel.Create(7, 6);
+  try
+    Level.Name := 'unittest_diagonal';
+    for Y := 1 to 4 do
+      for X := 1 to 5 do
+        Level.SetOpen(X, Y, 0, 160);
+    Check((Level.DiagonalCornerFor(5, 4) = 1) and (Level.DiagonalCornerFor(1, 1) = 3) and
+      (Level.DiagonalCornerFor(3, 2) = 0), 'the editor picks the corner between two walls');
+    Level.Cell(5, 4)^.Diagonal := 1;
+    Check(Level.DiagonalSolidSide(5, 4, 0) and Level.DiagonalSolidSide(5, 4, 2) and
+      not Level.DiagonalSolidSide(5, 4, 1), 'a north-east diagonal closes the east and north sides');
+    Level.AddEntityAtCell('info_player_start', 2, 2);
+    E := Level.AddEntityAtCell('item_health', 5, 4);
+    Check((E.Origin.X < 5.5 * 64) and (E.Origin.Y < 4.5 * 64), 'an entity in a diagonal cell stands in its open half');
+    Stream := TMemoryStream.Create;
+    Loaded := TQuakeLevel.Create(3, 3);
+    try
+      Level.SaveToStream(Stream);
+      Stream.Position := 0;
+      Loaded.LoadFromStream(Stream);
+      Check(Loaded.Cell(5, 4)^.Diagonal = 1, 'diagonal walls save and load');
+    finally
+      Loaded.Free;
+      Stream.Free;
+    end;
+
+    RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Check(Bsp.LoadFromPak('maps/unittest_diagonal.bsp'), 'the diagonal level loads');
+      Check(((Bsp.PointContents(Vector3(5.8 * 64, 4.8 * 64, 64)) and CONTENTS_SOLID) <> 0) and
+        ((Bsp.PointContents(Vector3(5.2 * 64, 4.2 * 64, 64)) and CONTENTS_SOLID) = 0),
+        'behind the diagonal is solid, in front is open');
+      Col := TQuakeCollision.Create(Bsp);
+      try
+        T := Col.BoxTrace(Vector3(4 * 64, 3 * 64, 40), Vector3(6 * 64, 5 * 64, 40), Mins, Maxs, 0, MASK_PLAYERSOLID);
+        Check((T.Fraction < 1) and SameValue(T.Normal.X, -Sqrt(0.5), 0.01) and SameValue(T.Normal.Y, -Sqrt(0.5), 0.01) and
+          SameValue(T.EndPos.X + T.EndPos.Y, (5.5 + 4.5) * 64 - 32, 0.3),
+          'walking into the corner meets the 45-degree wall (the box touches it)');
+      finally
+        Col.Free;
+      end;
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+
+  Diagonals := 0;
+  for Seed := 1 to 12 do
+  begin
+    Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
+    Inc(Diagonals, Report.Diagonals);
+    Level.Free;
+  end;
+  Check(Diagonals > 0, 'random levels cut room corners with diagonal walls');
+end;
+
 procedure TestLevelLiftsSwitches;
 const
   Mins: TVector3 = (X: -16; Y: -16; Z: -24);
@@ -2381,6 +2457,7 @@ begin
   TestLevelLaddersLava;
   TestLevelRamps;
   TestLevelWindows;
+  TestLevelDiagonals;
   TestSoundMixer;
   TestLevelLiftsSwitches;
   TestLevelGen;
