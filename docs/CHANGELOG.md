@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.16.0 — 2026-10-30
+
+Round rooms, an entity inspector in the level editor and a launcher icon. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - An entity inspector in the level editor: the **Inspect** tool selects a placed entity and shows its keys; Q / E turn it, and `editor set <key> <value>` / `editor unset <key>` in the console change its light level, colour, spawnflags, targets and so on.
 - A launcher icon for Android, Windows and Linux (original artwork: a castle tower with a glowing 2).
