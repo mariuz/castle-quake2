@@ -41,7 +41,7 @@ Phases 1–6 are done as far as the demo data and a headless machine allow; Phas
 
 1. **More level content** (Phase 7): check the discovered themes on a retail `baseq2` (they are tested with a simulated texture directory).
 2. **Try it on real hardware** (needs a phone, a gamepad and a GPU). Touch, gamepads and GPU speed were only tested headless: install the APK, play with a controller, run on a real GPU with `fps` on. Expected follow-ups: touch button sizes and look speed.
-3. **Android release signing and launcher icon** (needs a key): an `AndroidSigningProperties.txt` release key and a proper icon instead of the debug-signed APK.
+3. **Android release signing** (needs a key): an `AndroidSigningProperties.txt` release key instead of the debug-signed APK (the launcher icon is done).
 4. **Full game monsters** (needs the retail PAK): attack and move tables (`QuakeMonsterAttacks`, `QuakeMonsterMoves`) for gladiator, chick, mutant, brain, floater, hover, flipper, medic and the bosses; supertank / Makron / Jorg behaviour. Run `--map-report` on a retail `baseq2` to order the work.
 5. **CGE editor property editors** (needs the Lazarus-built editor): a map dropdown and a reload verb for `TQuakeMap`, selectable entities with their key / value pairs.
 
@@ -113,7 +113,8 @@ Out of scope for now: multiplayer (deathmatch / coop), which needs a client-serv
 - [x] Monster steering around obstacles (±45° / ±90° detours) and ledge checks
 - [x] `path_corner` patrols and `point_combat` (hold) combat points; player-clip doesn't block monsters
 - [x] Attacks happen partway through the attack animation (wind-up; pain cancels the shot)
-- [ ] Medic revive, bosses, real pathfinding (needs the full game data: no medic or bosses in the demo)
+- [x] Medic revive (tested with a model-less medic)
+- [ ] Bosses, real pathfinding (needs the full game data: no bosses in the demo)
 - [x] Hand grenades (cook, throw speed by hold time, explode in hand), chaingun spin-up
 
 ### Phase 3 – Flow
@@ -128,7 +129,7 @@ Out of scope for now: multiplayer (deathmatch / coop), which needs a client-serv
 - [x] `TQuakeMap`, HUD, console and menu as registered editor components (`editor_units`)
 - [x] Monsters, items and movers as `TCastleBehavior`s with named transforms (F8 inspector)
 - [ ] Map dropdown / reload verb property editors
-- [ ] Selectable entities with key/value inspection in the editor
+- [ ] Selectable entities with key/value inspection in the CGE editor (the in-game level editor has it: the *Inspect* tool, `editor select / set / unset`)
 - [x] Design-time skybox (`TQuakeMap.Background`) and entity markers (`PreviewMarkers`: player starts, paths, speakers, trigger volumes)
 - [x] Monster types (`data/monsters.castle-transform`) and named sounds (`data/sounds.castle-component`) editable in the editor
 - [x] CI autotests with screenshots (Linux, xvfb + Mesa)
@@ -156,7 +157,8 @@ Out of scope for now: multiplayer (deathmatch / coop), which needs a client-serv
 ### Phase 6 – Hardware, consistency, full game (next)
 - [ ] Try Android touch, a gamepad and a real GPU; tune touch controls
 - [x] Menu, console and HUD text sized for phone screens (*Interface Size* option, larger on touch screens; checked with 2400 × 1080 screenshots)
-- [ ] Release signing key and launcher icon for Android
+- [x] Launcher icon (`art/icon.png` / `.ico`, original artwork) for Android, Windows and Linux
+- [ ] Release signing key for Android
 - [x] Monster movement on the BSP traces (`SV_movestep`, `M_CheckBottom`, Quake 2 monster boxes, `M_droptofloor`)
 - [x] Monster walk / run frames with Quake 2's per-frame distances (`ai_walk` / `ai_run` tables of the demo monsters)
 - [x] Hitscan, projectiles (grenades bounce off the hit plane), monster sight, lasers and the player trail on the BSP traces; barrels solid again

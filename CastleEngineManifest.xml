@@ -18,6 +18,11 @@
   screen_orientation="landscape"
 >
   <version value="0.15.0" code="16" />
+  <!-- Launcher / window icon (art/, original artwork; not id Software's) -->
+  <icons>
+    <icon path="art/icon.png" />
+    <icon path="art/icon.ico" />
+  </icons>
   <compiler_options>
     <search_paths>
       <path value="code/" />

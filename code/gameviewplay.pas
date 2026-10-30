@@ -331,7 +331,7 @@ end;
 procedure TViewPlay.EditorCommand(const Args: String);
 var
   Words: TStringList;
-  Cmd: String;
+  Cmd, Value: String;
   T: TLevelEditTool;
   I: Integer;
 begin
@@ -400,6 +400,27 @@ begin
     if (Cmd = 'lift') and (Words.Count > 1) then
       FEditor.BrushLift := Max(32, StrToIntDef(Words[1], 96))
     else
+    if (Cmd = 'select') and (Words.Count > 2) then
+    begin
+      FEditor.Tool := etInspect;
+      FEditor.SelectAt(StrToIntDef(Words[1], 0), StrToIntDef(Words[2], 0));
+    end else
+    if (Cmd = 'set') and (Words.Count > 2) then
+    begin
+      { The value: the rest of the words (a target name, a light level...) }
+      Value := Words[2];
+      for I := 3 to Words.Count - 1 do
+        Value := Value + ' ' + Words[I];
+      if FEditor.SetSelectedKey(Words[1], Value) then
+        WritelnLog('LevelEditor', 'Entity: ' + FEditor.SelectedText)
+      else
+        Console.Print('editor set: select an entity first (editor select x y); not classname / origin');
+    end else
+    if (Cmd = 'unset') and (Words.Count > 1) then
+    begin
+      if FEditor.SetSelectedKey(Words[1], '') then
+        WritelnLog('LevelEditor', 'Entity: ' + FEditor.SelectedText);
+    end else
     if (Cmd = 'round') and (Words.Count > 4) then
       FEditor.RoundRect(StrToIntDef(Words[1], 0), StrToIntDef(Words[2], 0), StrToIntDef(Words[3], 0),
         StrToIntDef(Words[4], 0))
@@ -414,7 +435,7 @@ begin
       FEditor.BrushCeil := StrToIntDef(Words[2], 160);
       FEditor.BrushTheme := EnsureRange(StrToIntDef(Words[3], 0), 0, High(LevelThemes));
     end else
-      Console.Print('editor [new|generate [seed]|save [name]|load <name>|play|export|close|name <n>|tool <t>|entity <class>|brush <floor> <ceil> <theme>|channel <0-9>|lift <height>|key <blue|red>|fill <x0> <y0> <x1> <y1>|round <x0> <y0> <x1> <y1>]');
+      Console.Print('editor [new|generate [seed]|save [name]|load <name>|play|export|close|name <n>|tool <t>|entity <class>|brush <floor> <ceil> <theme>|channel <0-9>|lift <height>|key <blue|red>|fill <x0> <y0> <x1> <y1>|round <x0> <y0> <x1> <y1>|select <x> <y>|set <key> <value>|unset <key>]');
   finally
     Words.Free;
   end;

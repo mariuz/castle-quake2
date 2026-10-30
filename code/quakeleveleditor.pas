@@ -28,7 +28,7 @@ uses
 
 type
   TLevelEditTool = (etFloor, etWall, etRaise, etLower, etCeilUp, etCeilDown, etSky, etTheme,
-    etEntity, etErase, etDoor, etWater, etLift, etButton, etSlime, etKeyDoor, etLava, etLadder, etHills, etRamp, etWindow, etDiagonal);
+    etEntity, etErase, etDoor, etWater, etLift, etButton, etSlime, etKeyDoor, etLava, etLadder, etHills, etRamp, etWindow, etDiagonal, etInspect);
   TLevelEditCommand = (ecNew, ecGenerate, ecSave, ecLoad, ecPlay, ecExport, ecClose);
 
   TLevelEditorEvent = procedure(const Level: TQuakeLevel) of object;
@@ -41,6 +41,8 @@ type
     { Key of the Key tool's doors: 1 blue, 2 red }
     FBrushKey: Integer;
     FEntityIndex: Integer;
+    { The entity the Inspect tool picked (index in FLevel.Entities), -1 }
+    FSelected: Integer;
     FEntityAngle: Single;
     FZoom: Single;
     FPan: TVector2;
@@ -102,6 +104,15 @@ type
     property BrushCeil: Integer read FBrushCeil write FBrushCeil;
     property BrushTheme: Integer read FBrushTheme write FBrushTheme;
     property EntityIndex: Integer read FEntityIndex write FEntityIndex;
+    { The inspected entity (nil: none) }
+    function SelectedEntity: TLevelEntity;
+    { Pick the entity in a cell (False: none there) }
+    function SelectAt(const X, Y: Integer): Boolean;
+    { Set a key of the inspected entity ('' removes it; "angle" sets its
+      facing); False when none is selected or the key can't be set }
+    function SetSelectedKey(const AName, AValue: String): Boolean;
+    { "class (x,y) angle a | key=value ..." of the inspected entity }
+    function SelectedText: String;
     property BrushLift: Integer read FBrushLift write FBrushLift;
     property BrushChannel: Integer read FBrushChannel write FBrushChannel;
     property BrushKey: Integer read FBrushKey write FBrushKey;
@@ -114,9 +125,9 @@ type
 
 const
   ToolNames: array[TLevelEditTool] of String = ('Floor', 'Wall', 'Raise', 'Lower', 'Ceil+', 'Ceil-',
-    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water', 'Lift', 'Button', 'Slime', 'Key', 'Lava', 'Ladder', 'Hills', 'Ramp', 'Window', 'Diagonal');
+    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water', 'Lift', 'Button', 'Slime', 'Key', 'Lava', 'Ladder', 'Hills', 'Ramp', 'Window', 'Diagonal', 'Inspect');
   ToolKeys: array[TLevelEditTool] of String = ('1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'O', 'U',
-    'H', 'J', 'M', 'K', 'I', 'R', '', '', '', '');
+    'H', 'J', 'M', 'K', 'I', 'R', '', '', '', '', '');
   CommandNames: array[TLevelEditCommand] of String = ('New', 'Generate', 'Save', 'Load', 'Play',
     'Export', 'Close');
   { What the Entity tool places; "exit" is a trigger with a changelevel }
@@ -251,6 +262,7 @@ begin
   FBrushWater := 48;
   FBrushLift := 96;
   FBrushKey := 1;
+  FSelected := -1;
   FZoom := 20;
   FHover := Point(-1, -1);
   FLoadIndex := -1;
@@ -556,6 +568,7 @@ procedure TQuakeLevelEditor.RunCommand(const Command: TLevelEditCommand);
 var
   Names: TStringList;
 begin
+  FSelected := -1;
   case Command of
     ecNew:
       begin
@@ -609,6 +622,62 @@ begin
     for X := Min(X0, X1) to Max(X0, X1) do
       ApplyTool(X, Y, False);
   FStrokeCells.Clear;
+end;
+
+function TQuakeLevelEditor.SelectedEntity: TLevelEntity;
+begin
+  if (FSelected >= 0) and (FSelected < FLevel.Entities.Count) then
+    Result := FLevel.Entities[FSelected]
+  else
+    Result := nil;
+end;
+
+function TQuakeLevelEditor.SelectAt(const X, Y: Integer): Boolean;
+begin
+  FSelected := FLevel.EntityAtCell(X, Y);
+  Result := FSelected >= 0;
+  if Result then
+    ShowStatus(SelectedText)
+  else
+    ShowStatus(Format('No entity in (%d,%d)', [X, Y]));
+end;
+
+function TQuakeLevelEditor.SetSelectedKey(const AName, AValue: String): Boolean;
+var
+  E: TLevelEntity;
+  N: String;
+begin
+  E := SelectedEntity;
+  N := LowerCase(Trim(AName));
+  Result := (E <> nil) and (N <> '') and (N <> 'classname') and (N <> 'origin') and (Pos(' ', N) = 0) and
+    (Pos('"', AValue) = 0);
+  if not Result then
+    Exit;
+  PushUndo;
+  if N = 'angle' then
+    E.Angle := StrToFloatDef(AValue, 0)
+  else
+  if AValue = '' then
+  begin
+    if E.Keys.IndexOfName(N) >= 0 then
+      E.Keys.Delete(E.Keys.IndexOfName(N));
+  end else
+    E.Keys.Values[N] := AValue;
+  ShowStatus(SelectedText);
+end;
+
+function TQuakeLevelEditor.SelectedText: String;
+var
+  E: TLevelEntity;
+  X, Y, I: Integer;
+begin
+  E := SelectedEntity;
+  if E = nil then
+    Exit('No entity selected');
+  FLevel.CellAt(E.Origin, X, Y);
+  Result := Format('%s (%d,%d) angle %d', [E.EntClass, X, Y, Round(E.Angle)]);
+  for I := 0 to E.Keys.Count - 1 do
+    Result := Result + ' | ' + E.Keys.Names[I] + '=' + E.Keys.ValueFromIndex[I];
 end;
 
 procedure TQuakeLevelEditor.RoundRect(const X0, Y0, X1, Y1: Integer);
@@ -686,6 +755,8 @@ begin
         C^.Theme := FBrushTheme;
     etEntity:
       PlaceEditorEntity(FLevel, EditorEntityClasses[FEntityIndex], X, Y, FEntityAngle);
+    etInspect:
+      SelectAt(X, Y);
     etErase:
       RemoveCellEntities(FLevel, X, Y);
     etDoor:
@@ -962,6 +1033,7 @@ begin
       Stream := TStringStream.Create(FUndo[FUndo.Count - 1]);
       try
         FLevel.LoadFromStream(Stream);
+        FSelected := -1;
       finally
         Stream.Free;
       end;
@@ -1034,6 +1106,12 @@ begin
   else
   if Event.IsKey(keyB) then
     FBrushWater := Max(8, FBrushWater - 8)
+  else
+  if Event.IsKey(keyQ) and (FTool = etInspect) and (SelectedEntity <> nil) then
+    SetSelectedKey('angle', IntToStr(Round(SelectedEntity.Angle + 45) mod 360))
+  else
+  if Event.IsKey(keyE) and (FTool = etInspect) and (SelectedEntity <> nil) then
+    SetSelectedKey('angle', IntToStr(Round(SelectedEntity.Angle + 315) mod 360))
   else
   if Event.IsKey(keyQ) then
     FEntityAngle := Round(FEntityAngle + 45) mod 360
@@ -1271,6 +1349,8 @@ begin
     H := Max(4, FZoom * 0.7);
     B := FloatRectangle(R.Left + (R.Width - H) / 2, R.Bottom + (R.Height - H) / 2, H, H);
     DrawRectangle(B, EntityColors[EntityKind(E.EntClass)]);
+    if E = SelectedEntity then
+      DrawRectangleOutline(B.Grow(Max(2, FZoom * 0.12)), Yellow, Max(2, FZoom * 0.08));
     if FZoom >= 14 then
       UIFont.Print(B.Left + (B.Width - UIFont.TextWidth(EntityLetter(E.EntClass))) / 2,
         B.Bottom + (B.Height - UIFont.Height) / 2, Black, EntityLetter(E.EntClass));
@@ -1332,6 +1412,9 @@ begin
     end;
     if FStatusTime > 0 then
       Txt := FStatus
+    else
+    if (FTool = etInspect) and (SelectedEntity <> nil) then
+      Txt := 'Inspect | ' + SelectedText + ' | Q / E turn, console: editor set <key> <value>, editor unset <key>'
     else
       Txt := Format('%s | %s | floor %d ceiling %d water %d lift %d channel %d key %s theme %s | entity %s %d° | %s',
         [FLevel.Name, ToolNames[FTool], FBrushFloor, FBrushCeil, FBrushWater, FBrushLift, FBrushChannel,

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- An entity inspector in the level editor: the **Inspect** tool selects a placed entity and shows its keys; Q / E turn it, and `editor set <key> <value>` / `editor unset <key>` in the console change its light level, colour, spawnflags, targets and so on.
+- A launcher icon for Android, Windows and Linux (original artwork: a castle tower with a glowing 2).
 - Curved walls: round rooms. Random levels make some big rooms round, with walls of 45-degree facets, and the level editor carves one with `editor round x0 y0 x1 y1` in the console.
 - Fixed: monsters in random levels could start stuck in a wall: a tank next to a pillar or a step, or anything placed in a cell with a diagonal wall. The tests now compile 12 random levels and check every monster's starting spot.
 
