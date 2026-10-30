@@ -96,6 +96,8 @@ type
     procedure DoSelectWeapon(const Slot: Integer);
     procedure DoUse;
     procedure DoToggleHelp;
+    { padbind [<action> <button> | reset]: list or change the gamepad buttons }
+    procedure PadBindCommand(const Args: String);
     { Look along Quake yaw / pitch (pitch positive looks down), keeping the velocity }
     procedure SetLook(const YawDeg, PitchDeg: Single);
     procedure UpdateDeathView(const SecondsPassed: Single);
@@ -964,6 +966,17 @@ begin
     end else
       WritelnWarning('Demo', 'Unknown gamepad button "%s"', [Param]);
   end else
+  if Action = 'GH' then { Hold / release a gamepad button (toggle), e.g. "GH:south" }
+  begin
+    if GamepadButtonFromName(Param, Button) then
+    begin
+      if Button in VirtualGamepad.Held then
+        Exclude(VirtualGamepad.Held, Button)
+      else
+        Include(VirtualGamepad.Held, Button);
+    end else
+      WritelnWarning('Demo', 'Unknown gamepad button "%s"', [Param]);
+  end else
   if Action = 'SY' then { Correct the drift of recorded IN positions: SY:1 (default) / SY:0 }
     FDemoNoSync := Param = '0'
   else
@@ -1366,6 +1379,54 @@ begin
   FWorld.ActivateUse(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
 end;
 
+procedure TViewPlay.PadBindCommand(const Args: String);
+const
+  ShortNames: array[TPadAction] of String = ('jump', 'crouch', 'use', 'grenade',
+    'help', 'next', 'prev');
+var
+  Parts: TStringArray;
+  A, Found: TPadAction;
+  HasAction: Boolean;
+  Button: TGameControllerButton;
+begin
+  Parts := Trim(Args).Split([' '], TStringSplitOptions.ExcludeEmpty);
+  if (Length(Parts) = 1) and SameText(Parts[0], 'reset') then
+    Settings.ResetPadButtons
+  else
+  if Length(Parts) = 2 then
+  begin
+    HasAction := False;
+    Found := paJump;
+    for A := Low(TPadAction) to High(TPadAction) do
+      if SameText(ShortNames[A], Parts[0]) then
+      begin
+        Found := A;
+        HasAction := True;
+      end;
+    if not HasAction then
+    begin
+      Console.Print('Unknown action "' + Parts[0] + '" (jump, crouch, use, grenade, help, next, prev)');
+      Exit;
+    end;
+    if not (PadButtonFromName(Parts[1], Button) and Settings.BindPadButton(Found, Button)) then
+    begin
+      Console.Print('Cannot bind "' + Parts[1] + '" (south, east, west, north, lb, rb, ls, rs, left, right, view, share)');
+      Exit;
+    end;
+    Settings.Save;
+  end else
+  if Length(Parts) <> 0 then
+  begin
+    Console.Print('Usage: padbind [<action> <button> | reset]');
+    Exit;
+  end;
+  for A := Low(TPadAction) to High(TPadAction) do
+  begin
+    Console.Print(Format('%s: %s', [ShortNames[A], PadButtonNames[Settings.PadButtons[A]]]));
+    WritelnLog('Gamepad', '%s: %s', [ShortNames[A], PadButtonNames[Settings.PadButtons[A]]]);
+  end;
+end;
+
 procedure TViewPlay.DoToggleHelp;
 begin
   RecordCommand('F');
@@ -1597,6 +1658,7 @@ const
 var
   Slot: Integer;
   MenuEvent: TInputPressRelease;
+  PadAction: TPadAction;
 begin
   Result := False;
 
@@ -1628,7 +1690,8 @@ begin
     { The menu uses Escape to go back from a page or cancel a key binding }
     { Game controller buttons act as the menu keys }
     MenuEvent := GamepadMenuEvent(Event);
-    if Menu.Press(MenuEvent) then
+    { The raw event: the Gamepad page binds controller buttons }
+    if Menu.Press(Event) then
       Exit(True);
     if MenuEvent.IsKey(keyEscape) then
     begin
@@ -1659,11 +1722,13 @@ begin
       CycleWeapon(GamepadWeaponCycle(Event.Controller.Button));
       Exit(True);
     end;
-    case Event.Controller.Button of
-      gbWest: DoUse;
-      gbNorth: DoSelectWeapon(11); { hand grenades }
-      gbView: DoToggleHelp;
-      else Exit(False);
+    if not Settings.PadActionOf(Event.Controller.Button, PadAction) then
+      Exit(False);
+    case PadAction of
+      QuakeSettings.paUse: DoUse;
+      QuakeSettings.paGrenade: DoSelectWeapon(11); { hand grenades }
+      QuakeSettings.paHelp: DoToggleHelp;
+      else Exit(False); { jump / crouch are held: ReadGamepads }
     end;
     Exit(True);
   end;
@@ -1873,6 +1938,9 @@ begin
     else
       Console.Print('Usage: lightstyle <0..255> <pattern a..z>');
   end else
+  if Cmd = 'padbind' then
+    PadBindCommand(Args)
+  else
   if Cmd = 'skill' then
   begin
     { Like Quake 2: takes effect when a map is (re)loaded }

@@ -518,6 +518,11 @@ begin
   try
     S.BindKey(qaForward, keyA);
     Check((S.Keys[qaForward] = keyA) and (S.Keys[qaMoveLeft] = keyW), 'binding a used key swaps the keys');
+    Check(S.BindPadButton(paUse, gbSouth) and (S.PadButtons[paUse] = gbSouth) and
+      (S.PadButtons[paJump] = gbWest), 'binding a used gamepad button swaps the buttons');
+    Check(not S.BindPadButton(paJump, gbMenu) and not S.BindPadButton(paJump, gbDPadUp) and
+      (S.PadButtons[paJump] = gbWest), 'Menu and D-pad up / down can not be bound');
+    Check(S.BindPadButton(paNextWeapon, gbDPadRight), 'D-pad right can be bound');
     S.Skill := 3;
     S.MouseSensitivity := 1.75;
     S.InvertMouse := True;
@@ -541,6 +546,9 @@ begin
     Check((S.Keys[qaForward] = keyA) and (S.Keys[qaMoveLeft] = keyW) and (S.Keys[qaFire] = keyCtrl),
       'key bindings survive save / load');
     Check(S.InterfaceSize = 3, 'interface size survives save / load');
+    Check((S.PadButtons[paUse] = gbSouth) and (S.PadButtons[paJump] = gbWest) and
+      (S.PadButtons[paNextWeapon] = gbDPadRight) and (S.PadButtons[paCrouch] = gbEast),
+      'gamepad bindings survive save / load');
     Check(SameValue(InterfaceScaleFor(0, False), 1) and SameValue(InterfaceScaleFor(0, True), TouchInterfaceScale),
       'auto interface size: normal on desktop, larger on touch screens');
     Check(SameValue(InterfaceScaleFor(2, True), 1) and (InterfaceScaleFor(4, False) > InterfaceScaleFor(3, False)) and
@@ -2423,6 +2431,7 @@ var
   V: TVector2;
   F, S, Yaw, Pitch, Yaw2, Pitch2: Single;
   E: TInputPressRelease;
+  B: TGameControllerButton;
 begin
   { Deadzone: small drift ignored, output starts at 0 and reaches 1 }
   Check(ApplyDeadZone(Vector2(0.15, 0.1)).IsZero, 'stick drift inside the deadzone ignored');
@@ -2453,6 +2462,25 @@ begin
   Check(GamepadMenuEvent(E).IsKey(keyArrowUp), 'D-pad up is the up arrow in menus');
   CheckEquals(1, GamepadWeaponCycle(gbRightBumper), 'right bumper selects the next weapon');
   CheckEquals(-1, GamepadWeaponCycle(gbLeftBumper), 'left bumper selects the previous weapon');
+  { Rebound buttons (the D-pad up / down stay weapon cycling) }
+  Settings.BindPadButton(paNextWeapon, gbNorth);
+  CheckEquals(1, GamepadWeaponCycle(gbNorth), 'a rebound button cycles weapons');
+  CheckEquals(0, GamepadWeaponCycle(gbRightBumper), 'the old button no longer does');
+  CheckEquals(1, GamepadWeaponCycle(gbDPadUp), 'D-pad up always selects the next weapon');
+  Check(GamepadButtonFromName('Share', B) and (B = gbShare) and not GamepadButtonFromName('trigger', B),
+    'gamepad button names');
+  Settings.BindPadButton(paJump, gbLeftBumper);
+  VirtualGamepad.Held := [gbLeftBumper];
+  Check(ReadGamepads(0.01, 1, False).Jump, 'holding the button bound to jump jumps');
+  VirtualGamepad.Held := [gbSouth];
+  Check(not ReadGamepads(0.01, 1, False).Jump, 'the old jump button (now previous weapon) does not');
+  VirtualGamepad.Held := [gbLeftStickClick];
+  Check(ReadGamepads(0.01, 1, False).Crouch, 'an unbound left stick click crouches');
+  Settings.BindPadButton(paUse, gbLeftStickClick);
+  Check(not ReadGamepads(0.01, 1, False).Crouch, 'but not once it is bound to use');
+  VirtualGamepad.Held := [];
+  Settings.ResetPadButtons;
+  CheckEquals(1, GamepadWeaponCycle(gbRightBumper), 'reset restores the right bumper');
 end;
 
 procedure TestPlayerTrail;

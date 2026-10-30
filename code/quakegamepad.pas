@@ -9,6 +9,10 @@
     bumpers, D-pad up / down                cycle weapons
     Menu (start)     menu                   View (back)    help computer
   In menus: D-pad / left stick to choose, A to confirm, B to go back.
+  The face buttons, bumpers, View, stick clicks and D-pad left / right can be
+  rebound (Settings.PadButtons, Options -> Controls -> Gamepad); the sticks,
+  triggers, Menu and D-pad up / down are fixed. A left stick click also
+  crouches while no action is bound to it.
 
   The mapping functions are plain code so the unit tests can check them
   without a device. }
@@ -69,7 +73,8 @@ function GamepadMenuKey(const Button: TGameControllerButton): TKey;
   returned unchanged }
 function GamepadMenuEvent(const Event: TInputPressRelease): TInputPressRelease;
 
-{ Weapon cycle direction of a button: 1 next, -1 previous, 0 none }
+{ Weapon cycle direction of a button: 1 next, -1 previous, 0 none
+  (Settings.PadButtons, plus the fixed D-pad up / down) }
 function GamepadWeaponCycle(const Button: TGameControllerButton): Integer;
 
 type
@@ -78,6 +83,8 @@ type
     Active: Boolean;
     Left, Right: TVector2;
     LeftTrigger, RightTrigger: Single;
+    { Buttons held down (GH: demo action) }
+    Held: set of TGameControllerButton;
   end;
 
 var
@@ -89,7 +96,7 @@ function ReadGamepads(const SecondsPassed, Sensitivity: Single;
   const Invert: Boolean): TGamepadInput;
 
 { Button from a short name (south, east, west, north, lb, rb, up, down, left,
-  right, menu, view, ls, rs); False if unknown }
+  right, menu, view, ls, rs, guide, share); False if unknown }
 function GamepadButtonFromName(const Name: String; out Button: TGameControllerButton): Boolean;
 
 { Start polling controllers; CGE then sends button presses as input events }
@@ -98,7 +105,7 @@ procedure InitializeGamepads;
 implementation
 
 uses
-  SysUtils, Math, CastleGameControllers, CastleLog;
+  SysUtils, Math, CastleGameControllers, CastleLog, QuakeSettings;
 
 function ApplyDeadZone(const Stick: TVector2; const DeadZone: Single): TVector2;
 var
@@ -180,12 +187,29 @@ begin
 end;
 
 function GamepadWeaponCycle(const Button: TGameControllerButton): Integer;
+var
+  A: TPadAction;
 begin
   case Button of
-    gbRightBumper, gbDPadUp: Result := 1;
-    gbLeftBumper, gbDPadDown: Result := -1;
-    else Result := 0;
+    gbDPadUp: Exit(1);
+    gbDPadDown: Exit(-1);
   end;
+  Result := 0;
+  if Settings.PadActionOf(Button, A) then
+    case A of
+      paNextWeapon: Result := 1;
+      paPrevWeapon: Result := -1;
+    end;
+end;
+
+{ Is a held button jump / crouch, by the bindings }
+procedure HeldActions(const Down: array of Boolean; out JumpHeld, CrouchHeld: Boolean);
+var
+  A: TPadAction;
+begin
+  JumpHeld := Down[Ord(Settings.PadButtons[paJump])];
+  CrouchHeld := Down[Ord(Settings.PadButtons[paCrouch])] or
+    ((not Settings.PadActionOf(gbLeftStickClick, A)) and Down[Ord(gbLeftStickClick)]);
 end;
 
 function ReadGamepads(const SecondsPassed, Sensitivity: Single;
@@ -215,41 +239,37 @@ var
 var
   I: Integer;
   C: TGameController;
+  B: TGameControllerButton;
+  Down: array[TGameControllerButton] of Boolean;
+  JumpHeld, CrouchHeld: Boolean;
 begin
   R := Default(TGamepadInput);
   if Controllers.Initialized then
     for I := 0 to Controllers.Count - 1 do
     begin
       C := Controllers[I];
+      for B := Low(B) to High(B) do
+        Down[B] := C.Pressed[B];
+      HeldActions(Down, JumpHeld, CrouchHeld);
       AddController(C.AxisLeft, C.AxisRight, C.AxisLeftTrigger, C.AxisRightTrigger,
-        C.Pressed[gbSouth], C.Pressed[gbEast] or C.Pressed[gbLeftStickClick]);
+        JumpHeld, CrouchHeld);
     end;
-  if VirtualGamepad.Active then
+  if VirtualGamepad.Active or (VirtualGamepad.Held <> []) then
+  begin
+    for B := Low(B) to High(B) do
+      Down[B] := B in VirtualGamepad.Held;
+    HeldActions(Down, JumpHeld, CrouchHeld);
     AddController(VirtualGamepad.Left, VirtualGamepad.Right, VirtualGamepad.LeftTrigger,
-      VirtualGamepad.RightTrigger, False, False);
+      VirtualGamepad.RightTrigger, JumpHeld, CrouchHeld);
+  end;
   Result := R;
   Result.Forward := EnsureRange(Result.Forward, -1, 1);
   Result.Side := EnsureRange(Result.Side, -1, 1);
 end;
 
 function GamepadButtonFromName(const Name: String; out Button: TGameControllerButton): Boolean;
-const
-  Names: array[0..13] of String = ('south', 'east', 'west', 'north', 'lb', 'rb',
-    'up', 'down', 'left', 'right', 'menu', 'view', 'ls', 'rs');
-  Buttons: array[0..13] of TGameControllerButton = (gbSouth, gbEast, gbWest, gbNorth,
-    gbLeftBumper, gbRightBumper, gbDPadUp, gbDPadDown, gbDPadLeft, gbDPadRight,
-    gbMenu, gbView, gbLeftStickClick, gbRightStickClick);
-var
-  I: Integer;
 begin
-  for I := Low(Names) to High(Names) do
-    if SameText(Names[I], Name) then
-    begin
-      Button := Buttons[I];
-      Exit(True);
-    end;
-  Button := gbSouth;
-  Result := False;
+  Result := PadButtonFromName(Name, Button);
 end;
 
 procedure InitializeGamepads;
