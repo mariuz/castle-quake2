@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.15.0 — 2026-10-30
+
+Diagonal walls in random and edited levels. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - Diagonal walls: the level editor has a **Diagonal** tool that cuts a corner at 45 degrees (it picks the corner between two walls), and random levels cut the corners of most bigger rooms.
 - README: the license section no longer suggests Castle Game Engine is MIT (it is LGPL with a static linking exception, which lets games use any license).
