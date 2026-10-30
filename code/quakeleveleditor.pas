@@ -91,6 +91,9 @@ type
     procedure ShowStatus(const Text: String);
     { Apply the current tool to every cell of a rectangle (scripts) }
     procedure FillRect(const X0, Y0, X1, Y1: Integer);
+    { A round room: the ellipse in the rectangle, opened with the brush
+      heights and theme, its edges smoothed with diagonal walls }
+    procedure RoundRect(const X0, Y0, X1, Y1: Integer);
     { Saved level names (castle-config:/levels) }
     function SavedLevels: TStringList;
     property Level: TQuakeLevel read FLevel;
@@ -606,6 +609,13 @@ begin
     for X := Min(X0, X1) to Max(X0, X1) do
       ApplyTool(X, Y, False);
   FStrokeCells.Clear;
+end;
+
+procedure TQuakeLevelEditor.RoundRect(const X0, Y0, X1, Y1: Integer);
+begin
+  PushUndo;
+  FLevel.CarveEllipse(Min(X0, X1), Min(Y0, Y1), Max(X0, X1), Max(Y0, Y1), FBrushFloor,
+    Max(FBrushCeil, FBrushFloor + LevelMinHeadroom), FBrushTheme);
 end;
 
 procedure TQuakeLevelEditor.PickCell(const X, Y: Integer);

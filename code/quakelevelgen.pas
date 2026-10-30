@@ -37,6 +37,8 @@ type
     X, Y, W, H: Integer;
     Floor, Ceil, Theme: Integer;
     Sky, Secret: Boolean;
+    { An ellipse in its rectangle, the edges smoothed with diagonal walls }
+    Round: Boolean;
     { Steps from the start room in the room graph, and 0..1 along the way }
     Depth: Integer;
     Rank: Single;
@@ -44,7 +46,7 @@ type
 
   TLevelGenReport = record
     Rooms, Links, Loops, OpenCells, FixedCells, WalledCells, Monsters, Items, Doors, Pools, Lifts, Switches: Integer;
-    SlimePools, KeyDoors, Teleporters, LavaPools, Ladders, OutdoorRooms, Ramps, Windows, Diagonals: Integer;
+    SlimePools, KeyDoors, Teleporters, LavaPools, Ladders, OutdoorRooms, Ramps, Windows, Diagonals, RoundRooms: Integer;
     StartRoom, ExitRoom, SecretRoom: Integer;
   end;
 
@@ -486,14 +488,24 @@ var
     C: PLevelCell;
   begin
     for I := 0 to High(Rooms) do
+    begin
+      { A round room in one big room in four (by seed and number, not the
+        random generator, so the other rooms stay the same) }
+      Rooms[I].Round := (Rooms[I].W >= 7) and (Rooms[I].H >= 7) and ((Seed + Cardinal(I)) mod 4 = 2);
+      if Rooms[I].Round then
+        Inc(Report.RoundRooms);
       for Y := Rooms[I].Y to Rooms[I].Y + Rooms[I].H - 1 do
         for X := Rooms[I].X to Rooms[I].X + Rooms[I].W - 1 do
         begin
+          if Rooms[I].Round and not Level.InEllipse(X, Y, Rooms[I].X, Rooms[I].Y,
+             Rooms[I].X + Rooms[I].W - 1, Rooms[I].Y + Rooms[I].H - 1) then
+            Continue;
           Level.SetOpen(X, Y, Rooms[I].Floor, Rooms[I].Ceil, Rooms[I].Theme);
           C := Level.Cell(X, Y);
           C^.Sky := Rooms[I].Sky;
           InRoom[Y * Level.Width + X] := I;
         end;
+    end;
   end;
 
   { A 2-cell corridor from room A to room B: along X then Y (or Y then X),
@@ -794,6 +806,23 @@ var
   begin
     for I := 0 to High(Rooms) do
     begin
+      { Round rooms: every outer corner of their own cells }
+      if Rooms[I].Round then
+      begin
+        for Y := Rooms[I].Y to Rooms[I].Y + Rooms[I].H - 1 do
+          for X := Rooms[I].X to Rooms[I].X + Rooms[I].W - 1 do
+          begin
+            if CellRoom(X, Y) <> I then
+              Continue;
+            K := Level.DiagonalCornerFor(X, Y);
+            if Level.CanCutCorner(X, Y, K) then
+            begin
+              Level.Cell(X, Y)^.Diagonal := K;
+              Inc(Report.Diagonals);
+            end;
+          end;
+        Continue;
+      end;
       if Rooms[I].Secret or (Rooms[I].W < 5) or (Rooms[I].H < 5) or ((Seed + Cardinal(I)) mod 3 = 0) then
         Continue;
       for K := 0 to 3 do
@@ -907,13 +936,30 @@ var
       CY := Rooms[R].Y + Rnd.Range(Min(Margin, Rooms[R].H div 2), Max(Min(Margin, Rooms[R].H div 2), Rooms[R].H - 1 - Margin));
       if Level.Cell(CX, CY)^.Solid or not Reached[CY * Level.Width + CX] or CellHasWater(Level.Cell(CX, CY)) or
          Level.Cell(CX, CY)^.Door or Level.Cell(CX, CY)^.Lift or Level.Cell(CX, CY)^.Button or
-         Level.Cell(CX, CY)^.Ladder then
+         Level.Cell(CX, CY)^.Ladder or (Level.Cell(CX, CY)^.Diagonal > 0) then
         Continue;
       if Level.EntityAtCell(CX, CY) >= 0 then
         Continue;
       Exit(True);
     end;
     Result := False;
+  end;
+
+  { The 8 cells around (CX, CY) are open, flat and no higher, without
+    diagonal walls }
+  function RoomyCell(const CX, CY: Integer): Boolean;
+  var
+    DX2, DY2: Integer;
+    N: PLevelCell;
+  begin
+    for DY2 := -1 to 1 do
+      for DX2 := -1 to 1 do
+      begin
+        N := Level.Cell(CX + DX2, CY + DY2);
+        if N^.Solid or (N^.Diagonal > 0) or N^.Ramp or (N^.Floor > Level.Cell(CX, CY)^.Floor) then
+          Exit(False);
+      end;
+    Result := True;
   end;
 
   function AngleTo(const FromX, FromY, ToX, ToY: Integer): Single;
@@ -1037,6 +1083,10 @@ var
         if not FreeCell(R, CX, CY) then
           Break;
         Monster := PickMonster(Rooms[R].Rank, (Rooms[R].W >= 8) and (Rooms[R].H >= 8));
+        { The tank's box is a whole cell wide: it needs open cells all round
+          (a pillar or a diagonal wall next to it would hold it in solid) }
+        if (Monster = 'monster_tank') and not RoomyCell(CX, CY) then
+          Monster := 'monster_gunner';
         E := Level.AddEntityAtCell(Monster, CX, CY, AngleTo(CX, CY, RoomCenterX(R), RoomCenterY(R)) + 180);
         if E.Angle >= 360 then
           E.Angle := E.Angle - 360;
@@ -1419,7 +1469,7 @@ var
     function Plain(const N: PLevelCell): Boolean;
     begin
       Result := (not N^.Solid) and not (N^.Door or N^.Lift or N^.Button or N^.Wet or N^.Ladder or
-        N^.Ramp or N^.Window);
+        N^.Ramp or N^.Window or (N^.Diagonal > 0));
     end;
 
   begin
@@ -1593,10 +1643,10 @@ begin
     if IsRandomMapName(Name, Seed) then
     begin
       Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
-      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools (%d slime), %d lifts, %d ladders, %d switches, %d key doors, %d teleporters, %d lava pits, %d outdoor rooms, %d ramps, %d windows, %d diagonal walls, %d monsters, %d items, secret room %d',
+      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools (%d slime), %d lifts, %d ladders, %d switches, %d key doors, %d teleporters, %d lava pits, %d outdoor rooms, %d ramps, %d windows, %d diagonal walls, %d round rooms, %d monsters, %d items, secret room %d',
         [Name, Report.Rooms, Report.Links, Report.Loops, Report.OpenCells, Report.FixedCells,
          Report.WalledCells, Report.Doors, Report.Pools, Report.SlimePools, Report.Lifts, Report.Ladders, Report.Switches,
-         Report.KeyDoors, Report.Teleporters, Report.LavaPools, Report.OutdoorRooms, Report.Ramps, Report.Windows, Report.Diagonals, Report.Monsters,
+         Report.KeyDoors, Report.Teleporters, Report.LavaPools, Report.OutdoorRooms, Report.Ramps, Report.Windows, Report.Diagonals, Report.RoundRooms, Report.Monsters,
          Report.Items, Report.SecretRoom]);
     end else
     if UriExists(LevelFileUrl(Name)) = ueFile then

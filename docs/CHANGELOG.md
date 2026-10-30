@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Curved walls: round rooms. Random levels make some big rooms round, with walls of 45-degree facets, and the level editor carves one with `editor round x0 y0 x1 y1` in the console.
+- Fixed: monsters in random levels could start stuck in a wall: a tank next to a pillar or a step, or anything placed in a cell with a diagonal wall. The tests now compile 12 random levels and check every monster's starting spot.
+
 ## v0.15.0 — 2026-10-30
 
 Diagonal walls in random and edited levels. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.

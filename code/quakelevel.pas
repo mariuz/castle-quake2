@@ -119,6 +119,18 @@ type
     { The corner a diagonal wall would close: the one between two solid
       neighbours (1..4, as Diagonal), 0 when none }
     function DiagonalCornerFor(const X, Y: Integer): Integer;
+    { Can (X, Y) take a diagonal wall at Corner without closing a way: open
+      and plain (no door, lift, button, liquid, ladder, ramp, window), and
+      the cell across the corner is solid too }
+    function CanCutCorner(const X, Y, Corner: Integer): Boolean;
+    { Open the cells of the ellipse inscribed in X0..X1, Y0..Y1 (inclusive)
+      and cut its staircase edges with diagonal walls: a round room }
+    procedure CarveEllipse(const X0, Y0, X1, Y1, AFloor, ACeil, ATheme: Integer);
+    { Diagonal walls on every plain open cell in the rectangle that is an
+      outer corner (two solid neighbours and the cell across); their count }
+    function SmoothCorners(const X0, Y0, X1, Y1: Integer): Integer;
+    { Is (X, Y) inside the ellipse inscribed in X0..X1, Y0..Y1? }
+    function InEllipse(const X, Y, X0, Y0, X1, Y1: Integer): Boolean;
     { The floor of (X, Y) at a point of the cell (Quake coordinates; a ramp
       slopes, other cells are flat) }
     function FloorAt(const X, Y: Integer; const PX, PY: Single): Single;
@@ -579,6 +591,65 @@ begin
   Result := 0;
 end;
 
+function TQuakeLevel.CanCutCorner(const X, Y, Corner: Integer): Boolean;
+var
+  C, N: PLevelCell;
+begin
+  Result := False;
+  if (Corner < 1) or (Corner > 4) or not InGrid(X, Y) then
+    Exit;
+  C := Cell(X, Y);
+  if C^.Solid or C^.Door or C^.Lift or C^.Button or C^.Wet or C^.Ladder or C^.Ramp or C^.Window then
+    Exit;
+  if InGrid(X + DiagonalSX[Corner], Y + DiagonalSY[Corner]) then
+  begin
+    N := Cell(X + DiagonalSX[Corner], Y + DiagonalSY[Corner]);
+    if not N^.Solid then
+      Exit;
+  end;
+  Result := True;
+end;
+
+function TQuakeLevel.InEllipse(const X, Y, X0, Y0, X1, Y1: Integer): Boolean;
+var
+  RX, RY, DX, DY: Single;
+begin
+  RX := (X1 - X0 + 1) / 2;
+  RY := (Y1 - Y0 + 1) / 2;
+  DX := (X + 0.5 - (X0 + RX)) / RX;
+  DY := (Y + 0.5 - (Y0 + RY)) / RY;
+  Result := Sqr(DX) + Sqr(DY) <= 1.05;
+end;
+
+procedure TQuakeLevel.CarveEllipse(const X0, Y0, X1, Y1, AFloor, ACeil, ATheme: Integer);
+var
+  X, Y: Integer;
+begin
+  for Y := Y0 to Y1 do
+    for X := X0 to X1 do
+      if InGrid(X, Y) and InEllipse(X, Y, X0, Y0, X1, Y1) then
+        SetOpen(X, Y, AFloor, ACeil, ATheme);
+  SmoothCorners(X0, Y0, X1, Y1);
+end;
+
+function TQuakeLevel.SmoothCorners(const X0, Y0, X1, Y1: Integer): Integer;
+var
+  X, Y, K: Integer;
+begin
+  Result := 0;
+  for Y := Y0 to Y1 do
+    for X := X0 to X1 do
+      if InGrid(X, Y) and (not Cell(X, Y)^.Solid) and (Cell(X, Y)^.Diagonal = 0) then
+      begin
+        K := DiagonalCornerFor(X, Y);
+        if CanCutCorner(X, Y, K) then
+        begin
+          Cell(X, Y)^.Diagonal := K;
+          Inc(Result);
+        end;
+      end;
+end;
+
 function TQuakeLevel.WindowAxis(const X, Y: Integer): Integer;
 
   function Open(const NX, NY: Integer): Boolean;
@@ -795,8 +866,9 @@ begin
   { In a diagonal cell: the middle of its open half }
   if (Cell(X, Y)^.Diagonal >= 1) and (Cell(X, Y)^.Diagonal <= 4) then
   begin
-    P.X := P.X - DiagonalSX[Cell(X, Y)^.Diagonal] * LevelCellSize / 6;
-    P.Y := P.Y - DiagonalSY[Cell(X, Y)^.Diagonal] * LevelCellSize / 6;
+    { 18 along each axis: a 32-unit box clears the 45-degree wall }
+    P.X := P.X - DiagonalSX[Cell(X, Y)^.Diagonal] * 18;
+    P.Y := P.Y - DiagonalSY[Cell(X, Y)^.Diagonal] * 18;
   end;
   { On a ramp: the floor's highest point under a 32-unit box }
   P.Z := Max(Max(FloorAt(X, Y, P.X - 16, P.Y - 16), FloorAt(X, Y, P.X + 16, P.Y - 16)),

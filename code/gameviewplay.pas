@@ -400,6 +400,10 @@ begin
     if (Cmd = 'lift') and (Words.Count > 1) then
       FEditor.BrushLift := Max(32, StrToIntDef(Words[1], 96))
     else
+    if (Cmd = 'round') and (Words.Count > 4) then
+      FEditor.RoundRect(StrToIntDef(Words[1], 0), StrToIntDef(Words[2], 0), StrToIntDef(Words[3], 0),
+        StrToIntDef(Words[4], 0))
+    else
     if (Cmd = 'fill') and (Words.Count > 4) then
       FEditor.FillRect(StrToIntDef(Words[1], 0), StrToIntDef(Words[2], 0), StrToIntDef(Words[3], 0),
         StrToIntDef(Words[4], 0))
@@ -410,7 +414,7 @@ begin
       FEditor.BrushCeil := StrToIntDef(Words[2], 160);
       FEditor.BrushTheme := EnsureRange(StrToIntDef(Words[3], 0), 0, High(LevelThemes));
     end else
-      Console.Print('editor [new|generate [seed]|save [name]|load <name>|play|export|close|name <n>|tool <t>|entity <class>|brush <floor> <ceil> <theme>|channel <0-9>|lift <height>|key <blue|red>|fill <x0> <y0> <x1> <y1>]');
+      Console.Print('editor [new|generate [seed]|save [name]|load <name>|play|export|close|name <n>|tool <t>|entity <class>|brush <floor> <ceil> <theme>|channel <0-9>|lift <height>|key <blue|red>|fill <x0> <y0> <x1> <y1>|round <x0> <y0> <x1> <y1>]');
   finally
     Words.Free;
   end;
@@ -1056,7 +1060,11 @@ begin
         if Assigned(EntityTrace) and EntityTrace(FWorld.Monsters[J].Origin, FWorld.Monsters[J].Origin,
            FWorld.Monsters[J].BoxMins, FWorld.Monsters[J].BoxMaxs, MASK_MONSTERSOLID,
            FWorld.Monsters[J]).StartSolid then
+        begin
           Inc(SolidCount);
+          WritelnLog('Demo', 'Monster %d %s in solid at %s', [J, FWorld.Monsters[J].Def^.ClassName,
+            FWorld.Monsters[J].Origin.ToString]);
+        end;
       end;
     WritelnLog('Demo', 'Monsters: %d alerted of %d alive, %d in solid', [P, Round(Val), SolidCount]);
     for J := 0 to FWorld.Monsters.Count - 1 do

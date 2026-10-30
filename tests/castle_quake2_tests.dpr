@@ -1842,6 +1842,8 @@ var
   E: TLevelEntity;
   Report: TLevelGenReport;
   Seed: Cardinal;
+  Solid: Integer;
+  BMins, BMaxs: TVector3;
 begin
   { A room (1..5, 1..4) with its north-east corner (5, 4) cut }
   Level := TQuakeLevel.Create(7, 6);
@@ -1874,6 +1876,13 @@ begin
     Bsp := TQuakeBsp.Create;
     try
       Check(Bsp.LoadFromPak('maps/unittest_diagonal.bsp'), 'the diagonal level loads');
+      Col := TQuakeCollision.Create(Bsp);
+      try
+        T := Col.BoxTrace(E.Origin, E.Origin, Vector3(-16, -16, -16), Vector3(16, 16, 16), 0, MASK_PLAYERSOLID);
+        Check(not T.StartSolid, 'an entity in a diagonal cell is clear of the wall (its 32-unit box)');
+      finally
+        Col.Free;
+      end;
       Check(((Bsp.PointContents(Vector3(5.8 * 64, 4.8 * 64, 64)) and CONTENTS_SOLID) <> 0) and
         ((Bsp.PointContents(Vector3(5.2 * 64, 4.2 * 64, 64)) and CONTENTS_SOLID) = 0),
         'behind the diagonal is solid, in front is open');
@@ -1901,6 +1910,65 @@ begin
     Level.Free;
   end;
   Check(Diagonals > 0, 'random levels cut room corners with diagonal walls');
+
+  { Round rooms: an ellipse, its staircase cut into 45-degree facets }
+  Level := TQuakeLevel.Create(16, 14);
+  try
+    Level.CarveEllipse(2, 2, 12, 11, 0, 160, 0);
+    Check(Level.Cell(7, 6)^.Solid = False, 'the middle of a round room is open');
+    Check(Level.Cell(2, 2)^.Solid and Level.Cell(12, 11)^.Solid and Level.Cell(12, 2)^.Solid,
+      'its rectangle''s corners stay solid');
+    Diagonals := 0;
+    for Y := 0 to Level.Height - 1 do
+      for X := 0 to Level.Width - 1 do
+        if Level.Cell(X, Y)^.Diagonal > 0 then
+          Inc(Diagonals);
+    Check(Diagonals >= 8, 'its staircase edges are cut with diagonal walls');
+  finally
+    Level.Free;
+  end;
+  Diagonals := 0;
+  for Seed := 1 to 12 do
+  begin
+    Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
+    Inc(Diagonals, Report.RoundRooms);
+    Level.Free;
+  end;
+  Check(Diagonals > 0, 'random levels have round rooms (reachable: the level check above)');
+
+  { Every monster of the random levels starts clear of the brushes (its
+    Quake 2 box; the tank's fills a cell) }
+  Solid := 0;
+  for Seed := 1 to 12 do
+  begin
+    Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
+    try
+      Level.Name := 'unittest_monsters';
+      RegisterLevelMap(Level);
+      Bsp := TQuakeBsp.Create;
+      Col := nil;
+      try
+        Bsp.LoadFromPak('maps/unittest_monsters.bsp');
+        Col := TQuakeCollision.Create(Bsp);
+        for E in Level.Entities do
+          if Copy(E.EntClass, 1, 8) = 'monster_' then
+          begin
+            MonsterBoxSize(E.EntClass, BMins, BMaxs);
+            if Col.BoxTrace(E.Origin, E.Origin, BMins, BMaxs, 0, MASK_MONSTERSOLID).StartSolid then
+            begin
+              Inc(Solid);
+              Writeln('  seed ', Seed, ': ', E.EntClass, ' in solid at ', E.Origin.ToString);
+            end;
+          end;
+      finally
+        Col.Free;
+        Bsp.Free;
+      end;
+    finally
+      Level.Free;
+    end;
+  end;
+  Check(Solid = 0, 'monsters of random levels start clear of walls, steps and diagonal walls');
 end;
 
 procedure TestLevelLiftsSwitches;
