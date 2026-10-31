@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.20.0 — 2026-10-31
+
+Flickering, pulsing and switchable lights in compiled levels. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - Light styles in compiled levels: lights of the level editor and random levels can flicker, pulse or be switched (a light's `style`, or a `targetname` for a switchable light, like Quake 2's qrad). Random levels have rooms with flickering, fluorescent or pulsing lights.
 
