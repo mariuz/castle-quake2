@@ -58,6 +58,13 @@ type
     { Make sure PAK, palette and URL protocols are ready (also in the editor). }
     procedure EnsureData;
 
+    { Rebuild from PakUrl, MapName and LevelUrl (the editor's "Reload Map"
+      verb: after the PAK or a level file changed on disk) }
+    procedure ReloadMap;
+    { Maps of the loaded PAKs (names without maps/ and .bsp), sorted;
+      the caller frees the list. For the editor's MapName dropdown. }
+    function AvailableMaps: TStringList;
+
     { (Re)load a map, even if MapName didn't change (e.g. to restart a level).
       Returns False if the map couldn't be loaded. }
     function LoadMap(const AMapName: String): Boolean;
@@ -148,6 +155,35 @@ begin
     Pak.AddFile(FPakUrl);
   if not Palette.HasPalette then
     Palette.LoadFromPak;
+end;
+
+procedure TQuakeMap.ReloadMap;
+begin
+  EnsureData;
+  Rebuild;
+end;
+
+function TQuakeMap.AvailableMaps: TStringList;
+var
+  Files: TStringList;
+  I: Integer;
+  Name: String;
+begin
+  EnsureData;
+  Result := TStringList.Create;
+  Result.Sorted := True;
+  Result.Duplicates := dupIgnore;
+  Files := Pak.FindFiles('maps/', '.bsp');
+  try
+    for I := 0 to Files.Count - 1 do
+    begin
+      Name := ChangeFileExt(Copy(Files[I], Length('maps/') + 1, MaxInt), '');
+      if (Name <> '') and (Pos('/', Name) = 0) then
+        Result.Add(Name);
+    end;
+  finally
+    Files.Free;
+  end;
 end;
 
 procedure TQuakeMap.ClearPreview;
