@@ -2078,6 +2078,72 @@ begin
   end;
 end;
 
+procedure TestLevelLightStyles;
+var
+  Level: TQuakeLevel;
+  Bsp: TQuakeBsp;
+  MapName: String;
+  I, K, Flicker, Switch, Plain: Integer;
+  Ent: TQuakeEntity;
+  Report: TLevelGenReport;
+  Styled: Integer;
+  E: TLevelEntity;
+begin
+  { A flickering light (style 1) at one end, a switchable one (a
+    targetname: style 32) at the other }
+  Level := MakeTestLevel;
+  try
+    Level.Name := 'unittest_styles';
+    Level.AddEntityAtCell('light', 4, 5).SetKey('style', '1');
+    Level.Entities.Last.SetKey('light', '250');
+    Level.AddEntityAtCell('light', 7, 2).SetKey('targetname', 'lamp');
+    Level.Entities.Last.SetKey('light', '250');
+    MapName := RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Bsp.LoadFromPak('maps/' + MapName + '.bsp');
+      Flicker := 0;
+      Switch := 0;
+      Plain := 0;
+      for I := 0 to Bsp.FaceCount - 1 do
+        for K := 0 to 3 do
+          case Bsp.Faces[I].Styles[K] of
+            1: Inc(Flicker);
+            32: Inc(Switch);
+            0: Inc(Plain);
+          end;
+      Check((Flicker > 0) and (Switch > 0) and (Plain > Flicker) and (Plain > Switch),
+        'compiled lightmaps have blocks for the flickering (style 1) and switchable (style 32) lights');
+      Ent := nil;
+      for I := 0 to Bsp.Entities.Count - 1 do
+        if Bsp.Entities[I].TargetName = 'lamp' then
+          Ent := Bsp.Entities[I];
+      Check((Ent <> nil) and (Ent.GetInt('style') = 32), 'a light with a targetname gets style 32 (like qrad)');
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+  { Random levels: some rooms flicker }
+  Styled := 0;
+  for I := 1 to 6 do
+  begin
+    Level := GenerateLevel(I, DefaultLevelGenOptions, Report);
+    try
+      for E in Level.Entities do
+        if (E.EntClass = 'light') and (E.Key('style') <> '') then
+        begin
+          Inc(Styled);
+          Break;
+        end;
+    finally
+      Level.Free;
+    end;
+  end;
+  Check(Styled >= 2, 'random levels have rooms with flickering or pulsing lights');
+end;
+
 procedure TestLevelAmbushes;
 var
   Level: TQuakeLevel;
@@ -2665,6 +2731,7 @@ begin
   TestLevelLiftsSwitches;
   TestLevelGen;
   TestLevelAmbushes;
+  TestLevelLightStyles;
   TestMapLevelUrl;
   TestRecord;
   TestGun;

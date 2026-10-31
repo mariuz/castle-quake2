@@ -77,6 +77,9 @@ type
     Origin: TVector3;
     Value: Single;
     Color: TVector3;
+    { Light style: 0 steady, 1..11 Quake 2's patterns (flicker, pulse...),
+      32+ switchable (lights with a targetname, like qrad) }
+    Style: Integer;
   end;
 
   { Where a face is: axis of its normal (0 x, 1 y, 2 z) and sign }
@@ -175,7 +178,8 @@ type
     procedure AddWalls(const X, Y: Integer);
     procedure BuildFaces;
     function Blocked(const A, B: TVector3): Boolean;
-    function LightAt(const P, N: TVector3; const SkyCell: Boolean): TVector3;
+    { Light of one style at P (the ambient and sky light are style 0) }
+    function LightAt(const P, N: TVector3; const SkyCell: Boolean; const Style: Integer = 0): TVector3;
     procedure LightFace(const FaceIdx: Integer; const FA: TFaceAxis; const Dist: Single;
       const SkyCell: Boolean);
     procedure CollectLights;
@@ -1572,18 +1576,24 @@ begin
   Result := False;
 end;
 
-function TBuilder.LightAt(const P, N: TVector3; const SkyCell: Boolean): TVector3;
+function TBuilder.LightAt(const P, N: TVector3; const SkyCell: Boolean; const Style: Integer): TVector3;
 var
   I: Integer;
   ToLight: TVector3;
   Dist, Dot, V: Single;
 begin
+  Result := TVector3.Zero;
   { A little ambient, more under the open sky }
-  Result := Vector3(14, 14, 14);
-  if SkyCell then
-    Result := Result + Vector3(70, 70, 76);
+  if Style = 0 then
+  begin
+    Result := Vector3(14, 14, 14);
+    if SkyCell then
+      Result := Result + Vector3(70, 70, 76);
+  end;
   for I := 0 to High(Lights) do
   begin
+    if Lights[I].Style <> Style then
+      Continue;
     ToLight := Lights[I].Origin - P;
     Dist := ToLight.Length;
     if (Dist >= Lights[I].Value) or (Dist < 0.01) then
@@ -1619,6 +1629,12 @@ var
   V, P, Col, FMin, FMax: TVector3;
   B: array[0..2] of Byte;
   BMinS, BMinT: Integer;
+  Styles: array[0..3] of Integer;
+  StyleCount, K, J: Integer;
+  Samples: array[0..3] of array of TVector3;
+  Points: array of TVector3;
+  Reaches: Boolean;
+  Lit: Boolean;
 begin
   F := Faces[FaceIdx];
   T := TexInfos[F.TexInfoId];
@@ -1643,7 +1659,30 @@ begin
   A1 := (TexAxis + 1) mod 3;
   A2 := (TexAxis + 2) mod 3;
   F.LightmapOffset := Lighting.Position;
-  F.Styles[0] := 0;
+  { Styles reaching the face: 0 always, then up to 3 more (Quake 2's
+    MAXLIGHTMAPS), each a block of samples after the previous }
+  Styles[0] := 0;
+  StyleCount := 1;
+  for I := 0 to High(Lights) do
+  begin
+    if (Lights[I].Style = 0) or (StyleCount = 4) then
+      Continue;
+    Reaches := (Lights[I].Origin.X > FMin.X - Lights[I].Value) and (Lights[I].Origin.X < FMax.X + Lights[I].Value) and
+      (Lights[I].Origin.Y > FMin.Y - Lights[I].Value) and (Lights[I].Origin.Y < FMax.Y + Lights[I].Value) and
+      (Lights[I].Origin.Z > FMin.Z - Lights[I].Value) and (Lights[I].Origin.Z < FMax.Z + Lights[I].Value);
+    if not Reaches then
+      Continue;
+    Lit := False;
+    for K := 0 to StyleCount - 1 do
+      if Styles[K] = Lights[I].Style then
+        Lit := True;
+    if not Lit then
+    begin
+      Styles[StyleCount] := Lights[I].Style;
+      Inc(StyleCount);
+    end;
+  end;
+  SetLength(Points, W * H);
   for TI := 0 to H - 1 do
     for SI := 0 to W - 1 do
     begin
@@ -1675,7 +1714,37 @@ begin
       P.Data[TexAxis] := (Dist - Normal.Data[A1] * P.Data[A1] - Normal.Data[A2] * P.Data[A2]) /
         Normal.Data[TexAxis];
       P := P + Normal;
-      Col := LightAt(P, Normal, SkyCell);
+      Points[TI * W + SI] := P;
+    end;
+  { Sample each style; drop styles that light nothing here }
+  J := 0;
+  for K := 0 to StyleCount - 1 do
+  begin
+    SetLength(Samples[J], W * H);
+    Lit := K = 0;
+    for I := 0 to W * H - 1 do
+    begin
+      Col := LightAt(Points[I], Normal, SkyCell, Styles[K]);
+      Samples[J][I] := Col;
+      if Max(Col.X, Max(Col.Y, Col.Z)) >= 1 then
+        Lit := True;
+    end;
+    if Lit then
+    begin
+      Styles[J] := Styles[K];
+      Inc(J);
+    end;
+  end;
+  StyleCount := J;
+  for K := 0 to 3 do
+    if K < StyleCount then
+      F.Styles[K] := Styles[K]
+    else
+      F.Styles[K] := 255;
+  for K := 0 to StyleCount - 1 do
+    for I := 0 to W * H - 1 do
+    begin
+      Col := Samples[K][I];
       B[0] := EnsureRange(Round(Col.X), 0, 255);
       B[1] := EnsureRange(Round(Col.Y), 0, 255);
       B[2] := EnsureRange(Round(Col.Z), 0, 255);
@@ -1883,15 +1952,29 @@ var
   L: TLight;
   Parts: TStringArray;
   Fmt: TFormatSettings;
-  X, Y: Integer;
+  X, Y, I: Integer;
+  Switchable: TStringList;
 begin
   Fmt := DefaultFormatSettings;
   Fmt.DecimalSeparator := '.';
   Lights := nil;
+  Switchable := TStringList.Create;
+  try
   for E in Level.Entities do
   begin
     if E.EntClass <> 'light' then
       Continue;
+    { qrad: lights with a targetname share a style from 32 on (the game
+      switches it); the entity gets the "style" key }
+    L.Style := EnsureRange(StrToIntDef(E.Key('style', '0'), 0), 0, 63);
+    if E.Key('targetname') <> '' then
+    begin
+      I := Switchable.IndexOf(E.Key('targetname'));
+      if I < 0 then
+        I := Switchable.Add(E.Key('targetname'));
+      L.Style := 32 + I;
+      E.SetKey('style', IntToStr(L.Style));
+    end;
     L.Origin := E.Origin;
     L.Value := StrToFloatDef(E.Key('light', '300'), 300, Fmt);
     L.Color := Vector3(1, 1, 1);
@@ -1902,6 +1985,10 @@ begin
     SetLength(Lights, Length(Lights) + 1);
     Lights[High(Lights)] := L;
   end;
+  finally
+    Switchable.Free;
+  end;
+  L.Style := 0;
   { Lava glows: an orange light over every other lava cell }
   for Y := 0 to Level.Height - 1 do
     for X := 0 to Level.Width - 1 do

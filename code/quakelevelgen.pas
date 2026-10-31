@@ -49,6 +49,8 @@ type
     SlimePools, KeyDoors, Teleporters, LavaPools, Ladders, OutdoorRooms, Ramps, Windows, Diagonals, RoundRooms: Integer;
     { Rooms whose extra monsters appear when the player walks in, and those monsters }
     Ambushes, AmbushMonsters: Integer;
+    { Rooms whose lights flicker or pulse (Quake 2 light styles) }
+    FlickeringRooms: Integer;
     StartRoom, ExitRoom, SecretRoom: Integer;
   end;
 
@@ -315,6 +317,8 @@ var
   { Random state of the ambushes, apart from Rnd, so adding them changes
     nothing else of a seed's level }
   AmbushState: Cardinal;
+  { Same for the light styles of the rooms }
+  LightStyleState: Cardinal;
   Level: TQuakeLevel;
   Rooms: array of TGenRoom;
   Links: array of TLink;
@@ -1176,13 +1180,29 @@ var
   end;
 
   procedure AddLights;
+  const
+    { Quake 2's light styles: flicker, fluorescent flicker, gentle pulse }
+    RoomStyles: array[0..2] of Integer = (1, 10, 5);
   var
-    I, X, Y, Step: Integer;
+    I, X, Y, Step, Style: Integer;
     C: PLevelCell;
     Count: Integer;
+    MainState: Cardinal;
+    E: TLevelEntity;
   begin
     for I := 0 to High(Rooms) do
     begin
+      { Some rooms' lights flicker or pulse (their own random state: the
+        rest of the seed's level stays the same) }
+      MainState := Rnd.State;
+      Rnd.State := LightStyleState;
+      Style := 0;
+      if (I > 0) and Rnd.Chance(0.25) then
+        Style := RoomStyles[Rnd.Int(Length(RoomStyles))];
+      LightStyleState := Rnd.State;
+      Rnd.State := MainState;
+      if Style <> 0 then
+        Inc(Report.FlickeringRooms);
       Step := 4;
       Y := Rooms[I].Y + 1;
       while Y < Rooms[I].Y + Rooms[I].H do
@@ -1192,8 +1212,12 @@ var
         begin
           C := Level.Cell(X, Y);
           if not C^.Solid then
-            Level.AddEntityAtCell('light', X, Y).SetKey('light',
-              IntToStr(Round16(Rooms[I].Ceil - Rooms[I].Floor + 180)));
+          begin
+            E := Level.AddEntityAtCell('light', X, Y);
+            E.SetKey('light', IntToStr(Round16(Rooms[I].Ceil - Rooms[I].Floor + 180)));
+            if Style <> 0 then
+              E.SetKey('style', IntToStr(Style));
+          end;
           Inc(X, Step);
         end;
         Inc(Y, Step);
@@ -1618,6 +1642,7 @@ begin
   EnsureLevelThemes;
   Rnd.State := SeedState(Seed);
   AmbushState := SeedState(Seed xor $5A17C3E9);
+  LightStyleState := SeedState(Seed xor $1F2E3D4C);
   for I := 1 to 8 do
     Rnd.Next;
   Level := TQuakeLevel.Create(Options.Width, Options.Height);
@@ -1704,11 +1729,11 @@ begin
     if IsRandomMapName(Name, Seed) then
     begin
       Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
-      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools (%d slime), %d lifts, %d ladders, %d switches, %d key doors, %d teleporters, %d lava pits, %d outdoor rooms, %d ramps, %d windows, %d diagonal walls, %d round rooms, %d monsters, %d ambushes (%d monsters), %d items, secret room %d',
+      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools (%d slime), %d lifts, %d ladders, %d switches, %d key doors, %d teleporters, %d lava pits, %d outdoor rooms, %d ramps, %d windows, %d diagonal walls, %d round rooms, %d monsters, %d ambushes (%d monsters), %d flickering rooms, %d items, secret room %d',
         [Name, Report.Rooms, Report.Links, Report.Loops, Report.OpenCells, Report.FixedCells,
          Report.WalledCells, Report.Doors, Report.Pools, Report.SlimePools, Report.Lifts, Report.Ladders, Report.Switches,
          Report.KeyDoors, Report.Teleporters, Report.LavaPools, Report.OutdoorRooms, Report.Ramps, Report.Windows, Report.Diagonals, Report.RoundRooms, Report.Monsters,
-         Report.Ambushes, Report.AmbushMonsters, Report.Items, Report.SecretRoom]);
+         Report.Ambushes, Report.AmbushMonsters, Report.FlickeringRooms, Report.Items, Report.SecretRoom]);
     end else
     if UriExists(LevelFileUrl(Name)) = ueFile then
     begin
