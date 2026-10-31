@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.17.0 — 2026-10-31
+
+Gamepad button rebinding. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - Gamepad buttons can be rebound: *Options → Controls → Gamepad Buttons* (press the button to use for jump, crouch, use, hand grenades, help, next or previous weapon) or `padbind <action> <button>` in the console. Bindings are saved with the other options.
 
