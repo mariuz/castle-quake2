@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.19.0 — 2026-10-31
+
+Ambushes in random levels and selectable map entities in the CGE editor. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - Ambushes in random levels: in some later rooms, extra monsters appear when you walk in (Quake 2's trigger-spawned monsters and a `trigger_once` over the room).
 - Box triggers of compiled levels (the exit, ambushes) are real Quake 2 brush models now, so exported `.bsp` files work in Quake 2 itself.
