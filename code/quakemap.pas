@@ -167,7 +167,7 @@ function TQuakeMap.AvailableMaps: TStringList;
 var
   Files: TStringList;
   I: Integer;
-  Name: String;
+  MapId: String;
 begin
   EnsureData;
   Result := TStringList.Create;
@@ -177,9 +177,9 @@ begin
   try
     for I := 0 to Files.Count - 1 do
     begin
-      Name := ChangeFileExt(Copy(Files[I], Length('maps/') + 1, MaxInt), '');
-      if (Name <> '') and (Pos('/', Name) = 0) then
-        Result.Add(Name);
+      MapId := ChangeFileExt(Copy(Files[I], Length('maps/') + 1, MaxInt), '');
+      if (MapId <> '') and (Pos('/', MapId) = 0) then
+        Result.Add(MapId);
     end;
   finally
     Files.Free;
