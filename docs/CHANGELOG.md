@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- CGE editor: map entities are selectable. With *PreviewEntities* / *PreviewMarkers* on, every entity is listed under *EntityPreview*; selecting one shows its class, targetname, target, spawnflags and all its keys.
+- Fixed: saving a design in the CGE editor wrote the whole generated map (world, movers) into the file. Only `TQuakeMap`'s own properties are saved now.
+
 ## v0.18.0 — 2026-10-31
 
 CGE editor property editors for the Quake 2 map, and the custom editor builds again. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.

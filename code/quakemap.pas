@@ -15,9 +15,38 @@ interface
 uses
   SysUtils, Classes, Generics.Collections, Math,
   CastleVectors, CastleTransform, CastleClassUtils, CastleLog, CastleScene,
+  { TCastleToolTransform }
+  CastleInternalPhysicsVisualization,
   QuakeBsp, QuakeGeometry, QuakeMd2;
 
 type
+  { One previewed map entity (TQuakeMap.PreviewEntities / PreviewMarkers):
+    holds its model or marker box. Select it in the CGE editor to see the
+    entity's keys in the inspector (read-only: the map file owns them).
+    A TCastleToolTransform: the editor shows and selects it although it is
+    transient (never saved, not deletable). }
+  TQuakeEntityTransform = class(TCastleToolTransform)
+  strict private
+    FEntityIndex: Integer;
+    FEntityClass, FTargetName, FTarget: String;
+    FSpawnFlags: Integer;
+    FFields: TStringList;
+  public
+    constructor Create(AOwner: TComponent); override;
+    destructor Destroy; override;
+    function PropertySections(const PropertyName: String): TPropertySections; override;
+    { Copy the keys of an entity (Index: its place in the map's entity list) }
+    procedure AssignEntity(const Ent: TQuakeEntity; const Index: Integer);
+  published
+    property EntityIndex: Integer read FEntityIndex;
+    property EntityClass: String read FEntityClass;
+    property TargetName: String read FTargetName;
+    property Target: String read FTarget;
+    property SpawnFlags: Integer read FSpawnFlags;
+    { All keys as key=value lines, sorted }
+    property Fields: TStringList read FFields;
+  end;
+
   TQuakeMap = class(TCastleTransform)
   strict private
     FPakUrl: String;
@@ -47,6 +76,8 @@ type
     procedure Rebuild;
     procedure ClearPreview;
     procedure BuildPreview;
+    function AddEntityTransform(const Ent: TQuakeEntity; const Index: Integer;
+      const Pos: TVector3): TQuakeEntityTransform;
   protected
     procedure Loaded; override;
     procedure Notification(AComponent: TComponent; Operation: TOperation); override;
@@ -123,6 +154,59 @@ uses
   QuakePak, QuakePalette, QuakeLight, QuakeEntities, QuakeLevel, QuakeBspBuilder,
   { (its MissingMapHook builds rand<seed> maps, also in the editor) }
   QuakeLevelGen;
+
+{ TQuakeEntityTransform }
+
+constructor TQuakeEntityTransform.Create(AOwner: TComponent);
+begin
+  inherited Create(AOwner);
+  FFields := TStringList.Create;
+  FEntityIndex := -1;
+  SetTransient;
+end;
+
+destructor TQuakeEntityTransform.Destroy;
+begin
+  FreeAndNil(FFields);
+  inherited Destroy;
+end;
+
+function TQuakeEntityTransform.PropertySections(const PropertyName: String): TPropertySections;
+begin
+  if (PropertyName = 'EntityIndex') or (PropertyName = 'EntityClass') or
+     (PropertyName = 'TargetName') or (PropertyName = 'Target') or
+     (PropertyName = 'SpawnFlags') or (PropertyName = 'Fields') then
+    Result := [psBasic]
+  else
+    Result := inherited PropertySections(PropertyName);
+end;
+
+procedure TQuakeEntityTransform.AssignEntity(const Ent: TQuakeEntity; const Index: Integer);
+var
+  Pair: specialize TPair<String, String>;
+begin
+  FEntityIndex := Index;
+  FEntityClass := Ent.ClassName;
+  FTargetName := Ent.TargetName;
+  FTarget := Ent.Target;
+  FSpawnFlags := Ent.SpawnFlags;
+  FFields.Clear;
+  for Pair in Ent.Fields do
+    FFields.Add(Pair.Key + '=' + Pair.Value);
+  FFields.Sort;
+end;
+
+{ TQuakeMap }
+
+function TQuakeMap.AddEntityTransform(const Ent: TQuakeEntity; const Index: Integer;
+  const Pos: TVector3): TQuakeEntityTransform;
+begin
+  Result := TQuakeEntityTransform.Create(FPreview);
+  Result.Name := Format('Entity%d_%s', [Index, Ent.ClassName]);
+  Result.AssignEntity(Ent, Index);
+  Result.Translation := Pos;
+  FPreview.Add(Result);
+end;
 
 constructor TQuakeMap.Create(AOwner: TComponent);
 begin
@@ -204,17 +288,19 @@ end;
 
 procedure TQuakeMap.BuildPreview;
 var
+  I: Integer;
   Ent: TQuakeEntity;
   ItemDef: PQuakeItemDef;
   MonsterDef: PQuakeMonsterDef;
   Model: TQuakeMd2Instance;
-  Holder: TCastleTransform;
+  Holder: TQuakeEntityTransform;
   Pos: TVector3;
 begin
   ClearPreview;
   if (FBsp = nil) or not (FPreviewEntities or FPreviewMarkers) then
     Exit;
-  FPreview := TCastleTransform.Create(nil);
+  { A tool transform, so the editor lists the entities below it }
+  FPreview := TCastleToolTransform.Create(nil);
   FPreview.Name := 'EntityPreview';
   FPreview.SetTransient;
   Add(FPreview);
@@ -222,8 +308,9 @@ begin
     BuildMarkers;
   if not FPreviewEntities then
     Exit;
-  for Ent in FBsp.Entities do
+  for I := 0 to FBsp.Entities.Count - 1 do
   begin
+    Ent := FBsp.Entities[I];
     ItemDef := FindItemDef(Ent.ClassName);
     MonsterDef := FindMonsterDef(Ent.ClassName);
     if ItemDef <> nil then
@@ -237,14 +324,13 @@ begin
       Continue;
     Pos := QuakeToCge(Ent.Origin);
     Model.Scene.Collides := False;
-    Model.Scene.Pickable := False;
+    { Pickable and transient: clicking the model in the CGE editor selects
+      its TQuakeEntityTransform }
+    Model.Scene.SetTransient;
     Model.SetTint(Lighting.SampleLight(Pos));
-    Holder := TCastleTransform.Create(FPreview);
-    Holder.Name := 'Preview_' + Ent.ClassName + '_' + IntToStr(FPreviewModels.Count);
-    Holder.Translation := Pos;
+    Holder := AddEntityTransform(Ent, I, Pos);
     Holder.Rotation := Vector4(0, 1, 0, DegToRad(Ent.Angle));
     Holder.Add(Model.Scene);
-    FPreview.Add(Holder);
     FPreviewModels.Add(Model);
   end;
 end;
@@ -466,17 +552,20 @@ procedure TQuakeMap.BuildMarkers;
   procedure AddMarker(const Ent: TQuakeEntity; const Index: Integer;
     const Center, Size: TVector3; const Color: TCastleColor);
   var
+    Holder: TQuakeEntityTransform;
     Box: TCastleBox;
   begin
-    Box := TCastleBox.Create(FPreview);
-    Box.Name := Format('Marker_%s_%d', [Ent.ClassName, Index]);
-    Box.Translation := Center;
+    Holder := AddEntityTransform(Ent, Index, Center);
+    Box := TCastleBox.Create(Holder);
+    Box.Name := Format('Marker%d', [Index]);
     Box.Size := Size;
     Box.Color := Color;
     Box.Material := pmUnlit; { the map has no real-time lights }
     Box.Collides := False;
-    Box.Pickable := False;
-    FPreview.Add(Box);
+    { Pickable and transient: clicking the marker in the CGE editor
+      selects its TQuakeEntityTransform }
+    Box.SetTransient;
+    Holder.Add(Box);
   end;
 
 var

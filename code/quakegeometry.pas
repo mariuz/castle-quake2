@@ -893,6 +893,7 @@ begin
 
   Transform := TCastleTransform.Create(nil);
   Transform.Name := Format('Mover%.2d_%s', [ModelIndex, CName]);
+  Transform.SetTransient;
   Scene := TCastleScene.Create(nil);
   Scene.Name := Transform.Name + '_Scene';
   Scene.PreciseCollisions := True;
@@ -1368,6 +1369,8 @@ begin
   FDLightEffects := TQuakeDLightEffectList.Create(True);
   FWorldTransform := TCastleTransform.Create(nil);
   FWorldTransform.Name := 'World';
+  { Built from the map: never saved in a design (and hidden in the CGE editor) }
+  FWorldTransform.SetTransient;
   FWorldTransform.Add(FSceneWorld);
   FWorldTransform.Add(FSceneSkyClip);
   FWorldTransform.Add(FSceneLiquids);

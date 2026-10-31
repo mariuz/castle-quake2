@@ -2231,6 +2231,11 @@ var
   Map: TQuakeMap;
   Maps: TStringList;
   Faces: Integer;
+  C: TComponent;
+  I: Integer;
+  Preview: TCastleTransform;
+  Found, Found2: TQuakeEntityTransform;
+  Json: String;
 begin
   { What the CGE editor shows: a level file through TQuakeMap.LevelUrl, a
     random level through MapName }
@@ -2259,6 +2264,41 @@ begin
     Faces := Map.FaceCount;
     Map.ReloadMap;
     Check((Map.Bsp <> nil) and (Map.FaceCount = Faces), 'Reload Map rebuilds the same map');
+    { Saving the design keeps only TQuakeMap's properties: the generated
+      world, movers and previews are not written }
+    Json := ComponentToString(Map);
+    Check((Pos('"World"', Json) = 0) and (Pos('Mover', Json) = 0) and (Pos('"Children"', Json) = 0),
+      'saving a design with a TQuakeMap does not write its generated children');
+    { Entities selectable in the editor: one TQuakeEntityTransform each,
+      with the entity's keys }
+    Map.MapName := 'demo1';
+    Map.PreviewMarkers := True;
+    Map.PreviewEntities := True;
+    Found := nil;
+    Found2 := nil;
+    Preview := nil;
+    for I := 0 to Map.Count - 1 do
+      if Map[I].Name = 'EntityPreview' then
+        Preview := Map[I];
+    if Preview <> nil then
+      for I := 0 to Preview.Count - 1 do
+      begin
+        C := Preview[I];
+        if (C is TQuakeEntityTransform) and (TQuakeEntityTransform(C).EntityClass = 'info_player_start') then
+          Found := TQuakeEntityTransform(C)
+        else
+        if (C is TQuakeEntityTransform) and (Copy(TQuakeEntityTransform(C).EntityClass, 1, 8) = 'monster_') then
+          Found2 := TQuakeEntityTransform(C);
+      end;
+    Check((Found <> nil) and (Found.Fields.Values['classname'] = 'info_player_start') and
+      (Found.Fields.Values['origin'] <> '') and (Found.EntityIndex > 0) and (Found.Count = 1),
+      'a player start marker shows its keys in the editor');
+    Check((Found2 <> nil) and (Found2.Count = 1) and
+      ((Found2.Fields.IndexOfName('spawnflags') >= 0) = (Found2.SpawnFlags <> 0)),
+      'a previewed monster holds its model and keys');
+    Json := ComponentToString(Map);
+    Check((Pos('TQuakeEntityTransform', Json) = 0) and (Pos('"Children"', Json) = 0) and (Pos('"PreviewMarkers" : true', Json) > 0),
+      'previews are not saved either (only the PreviewMarkers switch)');
   finally
     Map.Free;
   end;
