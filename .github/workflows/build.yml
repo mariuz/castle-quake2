@@ -74,6 +74,23 @@ jobs:
           path: "*.apk"
           if-no-files-found: error
 
+  build-editor:
+    name: CGE editor with custom components
+    # Builds the CGE editor with editor_units (Lazarus), like "Project ->
+    # Restart Editor (With Custom Components)": catches units the editor
+    # can't use (e.g. CastleWindow) and errors in the property editors
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container: kambi/castle-engine-cloud-builds-tools:cge-unstable
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the custom editor
+        run: |
+          lazbuild --version
+          castle-engine editor-rebuild-if-needed
+          ls -l castle-engine-output/editor/castle-editor-new
+
   autotest:
     name: Autotest (Linux, Mesa software OpenGL)
     runs-on: ubuntu-latest

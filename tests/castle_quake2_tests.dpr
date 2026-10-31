@@ -2229,6 +2229,8 @@ procedure TestMapLevelUrl;
 var
   Level: TQuakeLevel;
   Map: TQuakeMap;
+  Maps: TStringList;
+  Faces: Integer;
 begin
   { What the CGE editor shows: a level file through TQuakeMap.LevelUrl, a
     random level through MapName }
@@ -2247,6 +2249,16 @@ begin
     Map.MapName := RandomMapName(3);
     Check((Map.Bsp <> nil) and (Map.Bsp.MapName = 'rand3') and (Map.FaceCount > 100),
       'TQuakeMap.MapName rand3 shows random level 3');
+    Maps := Map.AvailableMaps;
+    try
+      Check((Maps.IndexOf('demo1') >= 0) and (Maps.IndexOf('demo2') >= 0) and
+        (Maps.IndexOf('demo3') >= 0), 'the editor''s MapName list has the demo maps');
+    finally
+      Maps.Free;
+    end;
+    Faces := Map.FaceCount;
+    Map.ReloadMap;
+    Check((Map.Bsp <> nil) and (Map.FaceCount = Faces), 'Reload Map rebuilds the same map');
   finally
     Map.Free;
   end;

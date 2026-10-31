@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- CGE editor: `TQuakeMap.MapName` has a dropdown of the PAK's maps, `PakUrl` and `LevelUrl` open file dialogs, and right-clicking the map in the hierarchy offers *Reload Map*.
+- Fixed: *Restart Editor (With Custom Components)* failed to compile because the console unit used `CastleWindow`, which the editor doesn't have. CI now builds the custom editor.
+
 ## v0.17.0 — 2026-10-31
 
 Gamepad button rebinding. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
