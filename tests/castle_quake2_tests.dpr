@@ -2144,6 +2144,53 @@ begin
   Check(Styled >= 2, 'random levels have rooms with flickering or pulsing lights');
 end;
 
+procedure TestLevelSecretDoors;
+var
+  Level, Loaded: TQuakeLevel;
+  Report: TLevelGenReport;
+  Bsp: TQuakeBsp;
+  Ent: TQuakeEntity;
+  I: Integer;
+  MapName: String;
+  Stream: TMemoryStream;
+begin
+  Level := GenerateLevel(3, DefaultLevelGenOptions, Report);
+  try
+    Check((Report.SecretDoorX >= 0) and Level.Cell(Report.SecretDoorX, Report.SecretDoorY)^.Door and
+      Level.Cell(Report.SecretDoorX, Report.SecretDoorY)^.SecretDoor,
+      'random level 3 hides its secret passage behind a secret door');
+    Stream := TMemoryStream.Create;
+    Loaded := TQuakeLevel.Create(3, 3);
+    try
+      Level.SaveToStream(Stream);
+      Stream.Position := 0;
+      Loaded.LoadFromStream(Stream);
+      Check(Loaded.Cell(Report.SecretDoorX, Report.SecretDoorY)^.SecretDoor, 'secret doors survive the level JSON');
+    finally
+      Loaded.Free;
+      Stream.Free;
+    end;
+    MapName := RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Bsp.LoadFromPak('maps/' + MapName + '.bsp');
+      Ent := Bsp.FindEntity('func_door_secret');
+      Check((Ent <> nil) and (Copy(Ent.Model, 1, 1) = '*') and (Ent.SpawnFlags = 4) and
+        (Ent.GetInt('wait') = -1) and (Ent.TargetName = ''),
+        'it compiles into a func_door_secret: shootable (no targetname), down first, stays open');
+      I := 0;
+      for Ent in Bsp.Entities do
+        if Ent.ClassName = 'func_door' then
+          Inc(I);
+      Check(I > 0, 'the other doors stay func_doors');
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+end;
+
 procedure TestLevelAmbushes;
 var
   Level: TQuakeLevel;
@@ -2731,6 +2778,7 @@ begin
   TestLevelLiftsSwitches;
   TestLevelGen;
   TestLevelAmbushes;
+  TestLevelSecretDoors;
   TestLevelLightStyles;
   TestMapLevelUrl;
   TestRecord;

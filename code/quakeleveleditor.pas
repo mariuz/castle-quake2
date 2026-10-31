@@ -28,7 +28,7 @@ uses
 
 type
   TLevelEditTool = (etFloor, etWall, etRaise, etLower, etCeilUp, etCeilDown, etSky, etTheme,
-    etEntity, etErase, etDoor, etWater, etLift, etButton, etSlime, etKeyDoor, etLava, etLadder, etHills, etRamp, etWindow, etDiagonal, etInspect);
+    etEntity, etErase, etDoor, etWater, etLift, etButton, etSlime, etKeyDoor, etLava, etLadder, etHills, etRamp, etWindow, etDiagonal, etSecretDoor, etInspect);
   TLevelEditCommand = (ecNew, ecGenerate, ecSave, ecLoad, ecPlay, ecExport, ecClose);
 
   TLevelEditorEvent = procedure(const Level: TQuakeLevel) of object;
@@ -125,9 +125,9 @@ type
 
 const
   ToolNames: array[TLevelEditTool] of String = ('Floor', 'Wall', 'Raise', 'Lower', 'Ceil+', 'Ceil-',
-    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water', 'Lift', 'Button', 'Slime', 'Key', 'Lava', 'Ladder', 'Hills', 'Ramp', 'Window', 'Diagonal', 'Inspect');
+    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water', 'Lift', 'Button', 'Slime', 'Key', 'Lava', 'Ladder', 'Hills', 'Ramp', 'Window', 'Diagonal', 'Secret', 'Inspect');
   ToolKeys: array[TLevelEditTool] of String = ('1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'O', 'U',
-    'H', 'J', 'M', 'K', 'I', 'R', '', '', '', '', '');
+    'H', 'J', 'M', 'K', 'I', 'R', '', '', '', '', '', '');
   CommandNames: array[TLevelEditCommand] of String = ('New', 'Generate', 'Save', 'Load', 'Play',
     'Export', 'Close');
   { What the Entity tool places; "exit" is a trigger with a changelevel }
@@ -772,8 +772,30 @@ begin
           C^.Button := False;
           C^.Channel := FBrushChannel;
           C^.Key := 0;
+          C^.SecretDoor := False;
         end else
           C^.Channel := 0;
+      end;
+    etSecretDoor:
+      if not C^.Solid then
+      begin
+        { A secret door (looks like the wall of the room beside it, opens
+          when shot) or none again }
+        if C^.Door and C^.SecretDoor then
+        begin
+          C^.Door := False;
+          C^.SecretDoor := False;
+        end else
+        begin
+          C^.Door := True;
+          C^.SecretDoor := True;
+          C^.Key := 0;
+          C^.Channel := 0;
+          C^.Sky := False;
+          C^.Wet := False;
+          C^.Lift := False;
+          C^.Button := False;
+        end;
       end;
     etKeyDoor:
       if not C^.Solid then
@@ -786,6 +808,7 @@ begin
         end else
         begin
           C^.Door := True;
+          C^.SecretDoor := False;
           C^.Key := EnsureRange(FBrushKey, 1, High(LevelKeyClasses));
           C^.Channel := 0;
           C^.Sky := False;
@@ -1267,6 +1290,9 @@ begin
       if C^.Door and not C^.Solid then
       begin
         { Locked doors in the colour of their key }
+        if C^.SecretDoor then
+          KeyCol := Vector4(0.7, 0.3, 0.9, 1) { secret doors: purple }
+        else
         if C^.Key = 1 then
           KeyCol := Vector4(0.25, 0.45, 1, 1)
         else
@@ -1401,7 +1427,7 @@ begin
       else
         HoverInfo := Format('(%d,%d) floor %d ceiling %d %s%s%s%s', [FHover.X, FHover.Y, C^.Floor, C^.Ceil,
           LevelThemes[Min(C^.Theme, High(LevelThemes))].Name, StrUtils.IfThen(C^.Sky, ' sky', ''),
-          StrUtils.IfThen(C^.Door, ' door', '') + StrUtils.IfThen(C^.Lift, ' lift to ' + IntToStr(C^.LiftTop), '') +
+          StrUtils.IfThen(C^.Door, StrUtils.IfThen(C^.SecretDoor, ' secret door', ' door'), '') + StrUtils.IfThen(C^.Lift, ' lift to ' + IntToStr(C^.LiftTop), '') +
             StrUtils.IfThen(C^.Button, ' button', '') + StrUtils.IfThen(C^.Channel > 0, ' channel ' + IntToStr(C^.Channel), '') +
             StrUtils.IfThen(C^.Key = 1, ' blue key', '') + StrUtils.IfThen(C^.Key = 2, ' red key', ''),
           StrUtils.IfThen(C^.Ladder, ' ladder', '') + StrUtils.IfThen(C^.Ramp, ' ramp', '') + StrUtils.IfThen(C^.Window, ' window', '') + StrUtils.IfThen(C^.Diagonal > 0, ' diagonal', '') +

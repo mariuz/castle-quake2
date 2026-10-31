@@ -123,7 +123,7 @@ type
     property Height: Integer read FHeight;
   end;
 
-  TQuakeMoverKind = (mkStatic, mkDoor, mkDoorRotating, mkPlat, mkButton, mkRotating, mkTrain, mkTurret);
+  TQuakeMoverKind = (mkStatic, mkDoor, mkDoorRotating, mkPlat, mkButton, mkRotating, mkTrain, mkTurret, mkSecretDoor);
   TQuakeMoverState = (msAtStart, msToEnd, msAtEnd, msToStart);
 
   TQuakeGeometry = class;
@@ -179,6 +179,9 @@ type
       TQuakeWorld.UpdateTurrets; TurretDmg is dealt when blocked }
     TurretPitch, TurretYaw: Single;
     TurretDmg: Integer;
+    { func_door_secret: shootable (no targetname or SECRET_ALWAYS_SHOOT);
+      it gets health back each time it has closed }
+    SecretShootable: Boolean;
     constructor CreateMover(const AGeometry: TQuakeGeometry; const AEntity: TQuakeEntity;
       const AModelIndex: Integer);
     destructor Destroy; override;
@@ -188,6 +191,7 @@ type
     { Center in world (CGE) space; works for invisible brushes too }
     function Center: TVector3;
     procedure Update(const SecondsPassed: Single);
+    procedure UpdateSecretDoor(const SecondsPassed: Single);
     { Activate (open door, raise plat, press button, toggle rotating/train).
       Returns True if something started moving. }
     function Use: Boolean;
@@ -206,6 +210,8 @@ type
       until pressed, cycle 2 / 3 while pressed (EF_ANIM23) and 0 / 1 after
       (EF_ANIM01); everything else stays on frame 0 }
     function TexFrame(const Time: Single): Integer;
+    { func_door_secret: offset from the closed position at Progress (0..2) }
+    function SecretOffset: TVector3;
     procedure UpdateMoveSound(const Moving: Boolean);
     procedure PlayMoverSound(const APath: String);
   published
@@ -381,6 +387,10 @@ const
   DOOR_START_OPEN = 1;
   DOOR_REVERSE    = 2;
   DOOR_CRUSHER    = 4;
+  { func_door_secret spawnflags }
+  SECRET_ALWAYS_SHOOT = 1;
+  SECRET_1ST_LEFT     = 2;
+  SECRET_1ST_DOWN     = 4;
   TRAIN_BLOCK_STOPS = 4;
   DOOR_X_AXIS     = 64;
   DOOR_Y_AXIS     = 128;
@@ -872,6 +882,8 @@ var
   MoveDir: TVector3;
   Lip, Dist, H: Single;
   SpawnFlags: Integer;
+  SecretYaw, SecretWidth, SecretLength: Single;
+  SecretFwd, SecretRight, SecretSize, SecretP1: TVector3;
 begin
   inherited Create(nil);
   { SP_target_character: blank until its target_string writes it }
@@ -901,6 +913,12 @@ begin
   Transform.AddBehavior(Self);
 
   Mdl := Geometry.Bsp.Models[ModelIndex];
+  { Console-spawned box movers (model 0): their own mins / maxs }
+  if (ModelIndex = 0) and AEntity.HasField('mins') and AEntity.HasField('maxs') then
+  begin
+    Mdl.Mins := AEntity.GetVector('mins', TVector3.Zero);
+    Mdl.Maxs := AEntity.GetVector('maxs', TVector3.Zero);
+  end;
   { Size in CGE axes (Quake Z height becomes Y) }
   Size := Vector3(Mdl.Maxs.X - Mdl.Mins.X, Mdl.Maxs.Z - Mdl.Mins.Z, Mdl.Maxs.Y - Mdl.Mins.Y);
   BaseOffset := QuakeToCge(AEntity.Origin);
@@ -910,7 +928,43 @@ begin
   State := msAtStart;
   Kind := mkStatic;
 
-  if (CName = 'func_door') or (CName = 'func_door_secret') or (CName = 'func_water') then
+  if CName = 'func_door_secret' then
+  begin
+    { Quake 2 SP_func_door_secret: first left / right (or down) by its
+      width, a second's pause, then back along its angle by its length
+      (Progress 0..1 then 1..2, Pos1 / Pos2 the two stops); opened by
+      shots or targets, never by touch }
+    Kind := mkSecretDoor;
+    SecretYaw := DegToRad(AEntity.Angle);
+    SecretFwd := Vector3(Cos(SecretYaw), Sin(SecretYaw), 0);
+    SecretRight := Vector3(Sin(SecretYaw), -Cos(SecretYaw), 0);
+    SecretSize := Mdl.Maxs - Mdl.Mins;
+    if (SpawnFlags and SECRET_1ST_DOWN) <> 0 then
+    begin
+      SecretWidth := Abs(SecretSize.Z);
+      SecretP1 := Vector3(0, 0, -SecretWidth);
+    end else
+    begin
+      SecretWidth := Abs(TVector3.DotProduct(SecretRight, SecretSize));
+      if (SpawnFlags and SECRET_1ST_LEFT) <> 0 then
+        SecretP1 := SecretRight * -SecretWidth
+      else
+        SecretP1 := SecretRight * SecretWidth;
+    end;
+    SecretLength := Abs(TVector3.DotProduct(SecretFwd, SecretSize));
+    Pos1 := QuakeToCge(SecretP1) - QuakeToCge(TVector3.Zero);
+    Pos2 := QuakeToCge(SecretP1 + SecretFwd * SecretLength) - QuakeToCge(TVector3.Zero);
+    Speed := AEntity.Speed(50);
+    WaitTime := AEntity.GetFloat('wait', 5);
+    AutoOpen := False;
+    SecretShootable := (TargetName = '') or ((SpawnFlags and SECRET_ALWAYS_SHOOT) <> 0);
+    if SecretShootable then
+      Health := 1; { any damage opens it (Quake 2: health 0 with takedamage) }
+    StartSound := 'sound/doors/dr1_strt.wav';
+    EndSound := 'sound/doors/dr1_end.wav';
+    MoveSound := 'sound/doors/dr1_mid.wav';
+  end else
+  if (CName = 'func_door') or (CName = 'func_water') then
   begin
     Kind := mkDoor;
     MoveDir := MoveDirFromAngle(AEntity.Angle);
@@ -1081,9 +1135,20 @@ begin
       Transform.Rotation := TurretRotation(TurretPitch, TurretYaw);
     mkStatic:
       ;
+    mkSecretDoor:
+      Transform.Translation := BaseOffset + SecretOffset;
     else
       Transform.Translation := BaseOffset + Pos1 + (Pos2 - Pos1) * Progress;
   end;
+end;
+
+function TQuakeMover.SecretOffset: TVector3;
+begin
+  { Progress 0..1: to the first stop (Pos1), 1..2: on to Pos2 }
+  if Progress <= 1 then
+    Result := Pos1 * Progress
+  else
+    Result := Pos1 + (Pos2 - Pos1) * (Progress - 1);
 end;
 
 function TQuakeMover.Center: TVector3;
@@ -1102,6 +1167,16 @@ function TQuakeMover.Use: Boolean;
 begin
   Result := False;
   case Kind of
+    mkSecretDoor:
+      { door_secret_use: only when closed (it can't be stopped) }
+      if State = msAtStart then
+      begin
+        State := msToEnd;
+        StateTimer := 0;
+        Health := 0; { door_secret_die: no more damage until it has closed }
+        PlayMoverSound(StartSound);
+        Result := True;
+      end;
     mkDoor, mkDoorRotating, mkPlat, mkButton:
       begin
         if State = msAtStart then
@@ -1145,6 +1220,9 @@ begin
     Exit;
   BlockedTime := 0.1;
   case Kind of
+    mkSecretDoor:
+      { door_secret_blocked: hurts, keeps going }
+      Result := Entity.GetInt('dmg', 2);
     mkDoor, mkDoorRotating:
       begin
         Result := Entity.GetInt('dmg', 2);
@@ -1189,6 +1267,90 @@ begin
   end else
   if (Kind = mkPlat) and (State = msAtEnd) then
     StateTimer := WaitTime;
+end;
+
+procedure TQuakeMover.UpdateSecretDoor(const SecondsPassed: Single);
+var
+  Leg, Before: Single;
+begin
+  { A pause (StateTimer) at the first stop, both ways (door_secret_move2 /
+    move6 wait 1 s), and WaitTime open (-1: stays open) }
+  if (State in [msToEnd, msToStart]) and (StateTimer > 0) then
+  begin
+    UpdateMoveSound(False);
+    StateTimer := StateTimer - SecondsPassed;
+    if StateTimer <= 0 then
+      PlayMoverSound(StartSound);
+    Exit;
+  end;
+  UpdateMoveSound(State in [msToEnd, msToStart]);
+  Before := Progress;
+  case State of
+    msToEnd:
+      begin
+        if Progress < 1 then
+          Leg := Pos1.Length
+        else
+          Leg := (Pos2 - Pos1).Length;
+        if Leg <= 0.01 then
+          Progress := Min(2, Floor(Progress) + 1)
+        else
+          Progress := Progress + Speed * SecondsPassed / Leg;
+        if (Before < 1) and (Progress >= 1) then
+        begin
+          Progress := 1;
+          StateTimer := 1;
+          PlayMoverSound(EndSound);
+        end else
+        if Progress >= 2 then
+        begin
+          Progress := 2;
+          State := msAtEnd;
+          StateTimer := WaitTime;
+          PlayMoverSound(EndSound);
+        end;
+      end;
+    msAtEnd:
+      if WaitTime >= 0 then
+      begin
+        StateTimer := StateTimer - SecondsPassed;
+        if StateTimer <= 0 then
+        begin
+          State := msToStart;
+          StateTimer := 0;
+          PlayMoverSound(StartSound);
+        end;
+      end;
+    msToStart:
+      begin
+        if Progress > 1 then
+          Leg := (Pos2 - Pos1).Length
+        else
+          Leg := Pos1.Length;
+        if Leg <= 0.01 then
+          Progress := Max(0, Ceil(Progress) - 1)
+        else
+          Progress := Progress - Speed * SecondsPassed / Leg;
+        if (Before > 1) and (Progress <= 1) then
+        begin
+          Progress := 1;
+          StateTimer := 1;
+          PlayMoverSound(EndSound);
+        end else
+        if Progress <= 0 then
+        begin
+          Progress := 0;
+          State := msAtStart;
+          PlayMoverSound(EndSound);
+          { door_secret_done: shootable again }
+          if SecretShootable then
+            Health := 1;
+        end;
+      end;
+    msAtStart:
+      ;
+  end;
+  Transform.Translation := BaseOffset + SecretOffset;
 end;
 
 procedure TQuakeMover.Update(const SecondsPassed: Single);
@@ -1271,6 +1433,8 @@ begin
           TrainNextCorner;
         end;
       end;
+    mkSecretDoor:
+      UpdateSecretDoor(SecondsPassed);
     else
       begin
         UpdateMoveSound(State in [msToEnd, msToStart]);
@@ -1879,7 +2043,7 @@ begin
       Portal.PortalNum := Ent.GetInt('style', 0);
       if Ent.TargetName <> '' then
         for Mover in FMovers do
-          if (Mover.Kind in [mkDoor, mkDoorRotating]) and SameText(Mover.Target, Ent.TargetName) then
+          if (Mover.Kind in [mkDoor, mkDoorRotating, mkSecretDoor]) and SameText(Mover.Target, Ent.TargetName) then
           begin
             Portal.Doors.Add(Mover);
             WritelnLog('QuakeGeometry', 'Area portal %d "%s" opened by mover %d',

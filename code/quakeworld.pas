@@ -645,6 +645,16 @@ begin
   if (CName = 'info_player_start') or (CName = 'info_player_deathmatch') then
     Exit; { chosen by ChooseSpawnPoint }
 
+  { Doors spawned from the console with mins / maxs (no *N model): a box
+    mover, like the turrets below }
+  if ((CName = 'func_door') or (CName = 'func_door_secret')) and (Ent.Model = '') and
+     Ent.HasField('mins') and Ent.HasField('maxs') and (FGeometry <> nil) then
+  begin
+    FGeometry.AddBoxMover(Ent, Ent.GetVector('mins', TVector3.Zero),
+      Ent.GetVector('maxs', TVector3.Zero), FMap);
+    Exit;
+  end;
+
   if (CName = 'turret_breach') or (CName = 'turret_base') then
   begin
     { SP_turret_breach / SP_turret_base: the brush model, or a box for
@@ -1144,7 +1154,7 @@ end;
 procedure TQuakeWorld.UseEntity(const Ent: TQuakeEntity);
 var
   CName, Msg, MapName: String;
-  Mover: TQuakeMover;
+  Mover, M2: TQuakeMover;
   Count: Integer;
   ItemDef: PQuakeItemDef;
   M: TQuakeMonster;
@@ -1406,6 +1416,11 @@ begin
   end else
   begin
     Mover := FGeometry.FindMoverByModel(Ent.Model);
+    { Box movers spawned from the console have no *N model }
+    if (Mover = nil) and (Ent.Model = '') then
+      for M2 in FGeometry.Movers do
+        if M2.Entity = Ent then
+          Mover := M2;
     if Mover <> nil then
     begin
       if Mover.Kind = mkStatic then

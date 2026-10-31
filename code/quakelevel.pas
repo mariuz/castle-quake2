@@ -62,6 +62,10 @@ type
     { A locked door: 1 = blue key, 2 = red key opens it (then it stays
       open); 0 = not locked }
     Key: Byte;
+    { A secret door (with Door): a func_door_secret with the wall texture of
+      the room beside it, opened by a shot; it sinks into the floor, then
+      slides away along the passage, and stays open }
+    SecretDoor: Boolean;
   end;
   PLevelCell = ^TLevelCell;
 
@@ -1022,6 +1026,8 @@ begin
             Row := Row + ',s';
           if C^.Door then
             Row := Row + ',d';
+          if C^.Door and C^.SecretDoor then
+            Row := Row + ',h';
           if CellHasWater(C) then
             Row := Row + ',w' + IntToStr(C^.Water);
           if CellHasWater(C) and C^.Slime then
@@ -1143,6 +1149,9 @@ begin
             end else
             if Vals[I] = 'b' then
               C^.Button := True
+            else
+            if Vals[I] = 'h' then
+              C^.SecretDoor := True
             else
             if Vals[I] = 'm' then
               C^.Slime := True

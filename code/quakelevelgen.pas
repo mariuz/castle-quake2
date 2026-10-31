@@ -52,6 +52,8 @@ type
     { Rooms whose lights flicker or pulse (Quake 2 light styles) }
     FlickeringRooms: Integer;
     StartRoom, ExitRoom, SecretRoom: Integer;
+    { The secret door's cell (-1 without a secret room) }
+    SecretDoorX, SecretDoorY: Integer;
   end;
 
 function DefaultLevelGenOptions: TLevelGenOptions;
@@ -1296,6 +1298,15 @@ var
           else begin X := S.X + 1; Y := Rooms[R].Y - I; end;
         end;
         Level.SetOpen(X, Y, Rooms[R].Floor, Rooms[R].Floor + 80, 3);
+        { The cell next to the room is a secret door: it looks like the
+          room's wall and opens when shot (Quake 2 func_door_secret) }
+        if I = 1 then
+        begin
+          Level.Cell(X, Y)^.Door := True;
+          Level.Cell(X, Y)^.SecretDoor := True;
+          Report.SecretDoorX := X;
+          Report.SecretDoorY := Y;
+        end;
       end;
       S.Floor := Rooms[R].Floor;
       S.Ceil := S.Floor + 128;
@@ -1639,6 +1650,8 @@ var
   I, StartRoom, ExitRoom, CX, CY, Best: Integer;
 begin
   Report := Default(TLevelGenReport);
+  Report.SecretDoorX := -1;
+  Report.SecretDoorY := -1;
   EnsureLevelThemes;
   Rnd.State := SeedState(Seed);
   AmbushState := SeedState(Seed xor $5A17C3E9);

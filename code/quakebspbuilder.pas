@@ -1337,6 +1337,7 @@ var
   Tex, Ent: String;
   KeyModel: TBSPModel;
   KeyLocks: set of Byte;
+  SecretYaw: Integer;
 
   function Member(const C: PLevelCell): Boolean;
   begin
@@ -1346,7 +1347,39 @@ var
       Result := C^.Lift and (C^.Floor = Start^.Floor) and (C^.LiftTop = Start^.LiftTop)
     else
       Result := C^.Door and (C^.Floor = Start^.Floor) and (C^.Ceil = Start^.Ceil) and
-        (C^.Channel = Start^.Channel) and (C^.Key = Start^.Key);
+        (C^.Channel = Start^.Channel) and (C^.Key = Start^.Key) and (C^.SecretDoor = Start^.SecretDoor);
+  end;
+
+  { A secret door looks like the wall of the room beside it (the open
+    neighbour with the highest ceiling) and slides away from that room:
+    its texture and Quake yaw }
+  procedure SecretLook(const CX, CY: Integer; out WallTex: String; out Yaw: Integer);
+  const
+    Yaws: array[0..3] of Integer = (0, 180, 90, 270);
+  var
+    D, Best: Integer;
+    N: PLevelCell;
+  begin
+    WallTex := LevelThemes[0].Wall;
+    Yaw := 0;
+    Best := -1;
+    for D := 0 to 3 do
+    begin
+      if not Level.InGrid(CX + DX[D], CY + DY[D]) then
+        Continue;
+      N := Level.Cell(CX + DX[D], CY + DY[D]);
+      if N^.Solid or N^.Door then
+        Continue;
+      if (Best < 0) or (N^.Ceil > Level.Cell(CX + DX[Best], CY + DY[Best])^.Ceil) then
+        Best := D;
+    end;
+    if Best < 0 then
+      Exit;
+    N := Level.Cell(CX + DX[Best], CY + DY[Best]);
+    if N^.Theme < Length(LevelThemes) then
+      WallTex := LevelThemes[N^.Theme].Wall;
+    { Away from the room: the opposite of its direction }
+    Yaw := Yaws[Best xor 1];
   end;
 
 begin
@@ -1391,8 +1424,12 @@ begin
           end;
         end;
 
+        SecretYaw := 0;
         if Lifts then
           Tex := LevelLiftTexture
+        else
+        if Start^.SecretDoor then
+          SecretLook(X, Y, Tex, SecretYaw)
         else
         if Start^.Key > 0 then
           Tex := LevelKeyDoorTextures[Start^.Key]
@@ -1467,6 +1504,13 @@ begin
           Ent := Format('"classname" "func_plat"' + LineEnding + '"model" "*%d"' + LineEnding +
             '"height" "%d"' + LineEnding + '"speed" "150"' + LineEnding,
             [Models.Count, Start^.LiftTop - Start^.Floor + 2])
+        else
+        if Start^.SecretDoor then
+          { Quake 2 func_door_secret: shot open, first down (SECRET_1ST_DOWN),
+            then away along the passage; stays open }
+          Ent := Format('"classname" "func_door_secret"' + LineEnding + '"model" "*%d"' + LineEnding +
+            '"angle" "%d"' + LineEnding + '"spawnflags" "4"' + LineEnding + '"wait" "-1"' + LineEnding,
+            [Models.Count, SecretYaw])
         else
         if Start^.Key > 0 then
           { Locked: opened by the trigger_key of its key, then stays open }

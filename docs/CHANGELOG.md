@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Secret doors: Quake 2's `func_door_secret` works like the original (opened by a shot or a trigger, it moves down or sideways, pauses, slides back, and closes again after its wait); before, it opened like a plain door when touched. Random levels hide the secret passage behind a secret door that looks like the room's wall, and the level editor has a *Secret* tool.
+
 ## v0.20.0 — 2026-10-31
 
 Flickering, pulsing and switchable lights in compiled levels. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
