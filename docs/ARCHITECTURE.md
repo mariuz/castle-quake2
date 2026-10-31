@@ -186,7 +186,7 @@ A level is a `TQuakeLevel` (unit `QuakeLevel`): a grid of 64-unit cells. Each ce
 
 `RegisterLevelMap` adds the file to the PAKs in memory (`TQuakePak.AddMemoryFile`, `maps/<name>.bsp`).
 
-`QuakeBsp.MissingMapHook` (set by `QuakeLevelGen`) builds maps on demand when they aren't in the PAKs: `rand<seed>` is generated, and `<name>` is the editor's `castle-config:/levels/<name>.json`. So `map rand42`, saved games, restarts, level exits and `TQuakeMap.MapName` in the CGE editor all work with them.
+`QuakeBsp.MissingMapHook` (set by `QuakeLevelGen` (ambushes: `AddAmbush` puts 1–3 spawnflag-2 monsters and a room-sized `trigger_once` in some later rooms, from a separate random state so the rest of a seed's level stays the same; box triggers become brush models in `TBuilder.BuildTriggerBoxes`)) builds maps on demand when they aren't in the PAKs: `rand<seed>` is generated, and `<name>` is the editor's `castle-config:/levels/<name>.json`. So `map rand42`, saved games, restarts, level exits and `TQuakeMap.MapName` in the CGE editor all work with them.
 
 `QuakeLevelGen.GenerateLevel(seed)` uses its own xorshift generator, so the same seed gives the same level on every platform. It applies these rules:
 - **Rooms:** up to 11 rooms, 4–8 cells or 9–13 for an arena, 3 cells apart.

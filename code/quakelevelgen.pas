@@ -47,6 +47,8 @@ type
   TLevelGenReport = record
     Rooms, Links, Loops, OpenCells, FixedCells, WalledCells, Monsters, Items, Doors, Pools, Lifts, Switches: Integer;
     SlimePools, KeyDoors, Teleporters, LavaPools, Ladders, OutdoorRooms, Ramps, Windows, Diagonals, RoundRooms: Integer;
+    { Rooms whose extra monsters appear when the player walks in, and those monsters }
+    Ambushes, AmbushMonsters: Integer;
     StartRoom, ExitRoom, SecretRoom: Integer;
   end;
 
@@ -310,6 +312,9 @@ function GenerateLevel(const Seed: Cardinal; const Options: TLevelGenOptions;
   out Report: TLevelGenReport): TQuakeLevel;
 var
   Rnd: TGenRandom;
+  { Random state of the ambushes, apart from Rnd, so adding them changes
+    nothing else of a seed's level }
+  AmbushState: Cardinal;
   Level: TQuakeLevel;
   Rooms: array of TGenRoom;
   Links: array of TLink;
@@ -1022,6 +1027,59 @@ var
       end;
     end;
 
+    { Quake 2's monster closets: extra monsters with spawnflag 2
+      (TRIGGER_SPAWN: absent until used) and a trigger_once over the room,
+      so they appear when the player walks in }
+    procedure AddAmbush(const R: Integer);
+    var
+      MainState: Cardinal;
+      N, K, AX, AY: Integer;
+      A, B, Org, Half: TVector3;
+      Name: String;
+      Amb: TLevelEntity;
+      Placed: Integer;
+    begin
+      MainState := Rnd.State;
+      Rnd.State := AmbushState;
+      try
+        if not Rnd.Chance(0.4) then
+          Exit;
+        Name := 'ambush' + IntToStr(Report.Ambushes + 1);
+        N := 1 + Rnd.Int(2);
+        if Rooms[R].Rank > 0.6 then
+          Inc(N);
+        Placed := 0;
+        for K := 1 to N do
+        begin
+          if not FreeCell(R, AX, AY) then
+            Break;
+          Amb := Level.AddEntityAtCell(PickMonster(Rooms[R].Rank, False), AX, AY,
+            AngleTo(AX, AY, RoomCenterX(R), RoomCenterY(R)));
+          Amb.SetKey('spawnflags', '2');
+          Amb.SetKey('targetname', Name);
+          Inc(Placed);
+        end;
+        if Placed = 0 then
+          Exit;
+        { The trigger: the room less one cell all round (the player is
+          inside when it fires), from below the lowest floor to well above }
+        A := Level.CellFloorCenter(Rooms[R].X, Rooms[R].Y);
+        B := Level.CellFloorCenter(Rooms[R].X + Rooms[R].W - 1, Rooms[R].Y + Rooms[R].H - 1);
+        Org := (A + B) / 2;
+        Org.Z := Min(A.Z, B.Z);
+        Half := Vector3(Max(Abs(B.X - A.X) / 2 - 32, 32), Max(Abs(B.Y - A.Y) / 2 - 32, 32), 0);
+        Amb := Level.AddEntity('trigger_once', Org);
+        Amb.SetKey('target', Name);
+        Amb.SetKey('mins', Format('%d %d -64', [-Round(Half.X), -Round(Half.Y)]));
+        Amb.SetKey('maxs', Format('%d %d 192', [Round(Half.X), Round(Half.Y)]));
+        Inc(Report.Ambushes);
+        Inc(Report.AmbushMonsters, Placed);
+      finally
+        AmbushState := Rnd.State;
+        Rnd.State := MainState;
+      end;
+    end;
+
   begin
     { Rooms in the order the player meets them }
     MaxDepth := 1;
@@ -1098,6 +1156,8 @@ var
         if (J > 2) and Rnd.Chance(0.5) then
           E.SetKey('spawnflags', '256');
       end;
+      if (R <> ExitRoom) and (Rooms[R].Rank >= 0.25) and (Rooms[R].W * Rooms[R].H >= 16) then
+        AddAmbush(R);
       { Health after the fight, armor now and then; barrels to shoot }
       if Rnd.Chance(0.7) then
         AddItem('item_health', R);
@@ -1557,6 +1617,7 @@ begin
   Report := Default(TLevelGenReport);
   EnsureLevelThemes;
   Rnd.State := SeedState(Seed);
+  AmbushState := SeedState(Seed xor $5A17C3E9);
   for I := 1 to 8 do
     Rnd.Next;
   Level := TQuakeLevel.Create(Options.Width, Options.Height);
@@ -1643,11 +1704,11 @@ begin
     if IsRandomMapName(Name, Seed) then
     begin
       Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
-      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools (%d slime), %d lifts, %d ladders, %d switches, %d key doors, %d teleporters, %d lava pits, %d outdoor rooms, %d ramps, %d windows, %d diagonal walls, %d round rooms, %d monsters, %d items, secret room %d',
+      WritelnLog('QuakeLevelGen', 'Generated %s: %d rooms, %d links (%d loops), %d open cells (%d fixed, %d walled), %d doors, %d pools (%d slime), %d lifts, %d ladders, %d switches, %d key doors, %d teleporters, %d lava pits, %d outdoor rooms, %d ramps, %d windows, %d diagonal walls, %d round rooms, %d monsters, %d ambushes (%d monsters), %d items, secret room %d',
         [Name, Report.Rooms, Report.Links, Report.Loops, Report.OpenCells, Report.FixedCells,
          Report.WalledCells, Report.Doors, Report.Pools, Report.SlimePools, Report.Lifts, Report.Ladders, Report.Switches,
          Report.KeyDoors, Report.Teleporters, Report.LavaPools, Report.OutdoorRooms, Report.Ramps, Report.Windows, Report.Diagonals, Report.RoundRooms, Report.Monsters,
-         Report.Items, Report.SecretRoom]);
+         Report.Ambushes, Report.AmbushMonsters, Report.Items, Report.SecretRoom]);
     end else
     if UriExists(LevelFileUrl(Name)) = ueFile then
     begin

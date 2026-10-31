@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Ambushes in random levels: in some later rooms, extra monsters appear when you walk in (Quake 2's trigger-spawned monsters and a `trigger_once` over the room).
+- Box triggers of compiled levels (the exit, ambushes) are real Quake 2 brush models now, so exported `.bsp` files work in Quake 2 itself.
+
 - CGE editor: map entities are selectable. With *PreviewEntities* / *PreviewMarkers* on, every entity is listed under *EntityPreview*; selecting one shows its class, targetname, target, spawnflags and all its keys.
 - Fixed: saving a design in the CGE editor wrote the whole generated map (world, movers) into the file. Only `TQuakeMap`'s own properties are saved now.
 

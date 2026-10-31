@@ -113,6 +113,8 @@ type
     Models: TModelList;
     { func_door entities of the door models, for the entity lump }
     DoorEntities: String;
+    { Brush models of box triggers ("*N" per level entity, '' for none) }
+    EntityModels: array of String;
     { Door building: cells of the current door (component id per cell) }
     DoorComp: array of Integer;
     CurrentDoor: Integer;
@@ -187,6 +189,8 @@ type
     function WindowBox(const X, Y: Integer; out Mins, Maxs: TVector3; out Axis: Integer): Boolean;
     { Every window: a glass func_explosive model (CONTENTS_WINDOW) }
     procedure BuildWindows;
+    { Box triggers (trigger_* with mins / maxs keys) as brush models }
+    procedure BuildTriggerBoxes;
     { Grid sight from (AX, AY) to (BX, BY), in cells }
     function SightClear(const AX, AY, BX, BY: Double): Boolean;
     function RegionsSee(const A, B: TRegion): Boolean;
@@ -1782,6 +1786,49 @@ begin
   Maxs.Data[Axis] := Mins.Data[Axis] + LevelWindowThickness;
 end;
 
+{ "x y z" to a vector (missing / bad numbers are 0) }
+function ParseVector(const S: String): TVector3;
+var
+  Parts: TStringArray;
+  I: Integer;
+begin
+  Result := TVector3.Zero;
+  Parts := Trim(S).Split([' '], TStringSplitOptions.ExcludeEmpty);
+  for I := 0 to Min(2, High(Parts)) do
+    Result.Data[I] := StrToFloatDef(Parts[I], 0, DefaultFormatSettings);
+end;
+
+procedure TBuilder.BuildTriggerBoxes;
+var
+  I: Integer;
+  E: TLevelEntity;
+  M: TBSPModel;
+  Lo, Hi: TVector3;
+begin
+  SetLength(EntityModels, Level.Entities.Count);
+  for I := 0 to Level.Entities.Count - 1 do
+  begin
+    E := Level.Entities[I];
+    if (Copy(E.EntClass, 1, 8) <> 'trigger_') or (E.Key('model') <> '') or
+       (E.Key('mins') = '') or (E.Key('maxs') = '') then
+      Continue;
+    Lo := E.Origin + ParseVector(E.Key('mins'));
+    Hi := E.Origin + ParseVector(E.Key('maxs'));
+    if (Hi.X <= Lo.X) or (Hi.Y <= Lo.Y) or (Hi.Z <= Lo.Z) then
+      Continue;
+    { A faceless box model, like the triggers of the key doors: a real
+      Quake 2 brush trigger instead of our mins / maxs extension }
+    M := Default(TBSPModel);
+    M.Mins := Lo;
+    M.Maxs := Hi;
+    M.HeadNode := BuildBoxModel(Lo, Hi);
+    M.FirstFace := Faces.Count;
+    M.NumFaces := 0;
+    EntityModels[I] := '*' + IntToStr(Models.Count);
+    Models.Add(M);
+  end;
+end;
+
 procedure TBuilder.BuildWindows;
 var
   X, Y, Axis, Head, I: Integer;
@@ -2172,7 +2219,7 @@ begin
   Hdr.Version := 38;
   Result.WriteBuffer(Hdr, SizeOf(Hdr));
 
-  Ents := Level.EntityText + DoorEntities + #0;
+  Ents := Level.EntityText(EntityModels) + DoorEntities + #0;
   Lump(LUMP_ENTITIES, @Ents[1], Length(Ents));
   BytesLump(LUMP_PLANES, specialize ListBytes<TBSPPlane>(Planes));
   BytesLump(LUMP_VERTICES, specialize ListBytes<TVector3>(Vertices));
@@ -2346,6 +2393,7 @@ begin
     B.BuildMoverGroups(True);
     B.BuildButtons;
     B.BuildWindows;
+    B.BuildTriggerBoxes;
     Result := B.Write(Stats);
     Stats.Models := B.Models.Count;
   finally

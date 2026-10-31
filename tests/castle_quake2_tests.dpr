@@ -2078,6 +2078,61 @@ begin
   end;
 end;
 
+procedure TestLevelAmbushes;
+var
+  Level: TQuakeLevel;
+  Report: TLevelGenReport;
+  E, Trig: TLevelEntity;
+  Bsp: TQuakeBsp;
+  Ent: TQuakeEntity;
+  I, Dormant, ModelIdx: Integer;
+  MapName: String;
+  Lo, Hi, P: TVector3;
+begin
+  Level := GenerateLevel(3, DefaultLevelGenOptions, Report);
+  try
+    Dormant := 0;
+    Trig := nil;
+    for E in Level.Entities do
+    begin
+      if (E.Key('targetname') = 'ambush1') and (Copy(E.EntClass, 1, 8) = 'monster_') and
+         (E.Key('spawnflags') = '2') then
+        Inc(Dormant);
+      if (E.EntClass = 'trigger_once') and (E.Key('target') = 'ambush1') then
+        Trig := E;
+    end;
+    Check((Report.Ambushes > 0) and (Report.AmbushMonsters >= Report.Ambushes) and (Dormant > 0) and (Trig <> nil),
+      'random level 3 has ambushes: monsters with spawnflag 2 woken by a trigger_once over the room');
+    MapName := RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Bsp.LoadFromPak('maps/' + MapName + '.bsp');
+      Ent := nil;
+      for I := 0 to Bsp.Entities.Count - 1 do
+        if (Bsp.Entities[I].ClassName = 'trigger_once') and (Bsp.Entities[I].Target = 'ambush1') then
+          Ent := Bsp.Entities[I];
+      ModelIdx := -1;
+      if Ent <> nil then
+        ModelIdx := StrToIntDef(Copy(Ent.Model, 2, MaxInt), -1);
+      Check((Ent <> nil) and (Copy(Ent.Model, 1, 1) = '*') and (ModelIdx > 0) and
+        (ModelIdx < Bsp.ModelCount) and not Ent.HasField('mins') and not Ent.HasField('origin'),
+        'the compiled map has the ambush trigger as a brush model (a real Quake 2 trigger)');
+      if (Ent <> nil) and (ModelIdx > 0) and (ModelIdx < Bsp.ModelCount) and (Trig <> nil) then
+      begin
+        Lo := Bsp.Models[ModelIdx].Mins;
+        Hi := Bsp.Models[ModelIdx].Maxs;
+        P := Trig.Origin + Vector3(0, 0, 32);
+        Check((P.X > Lo.X) and (P.X < Hi.X) and (P.Y > Lo.Y) and (P.Y < Hi.Y) and (P.Z > Lo.Z) and (P.Z < Hi.Z) and
+          (Hi.X - Lo.X >= 64) and SameValue(Hi.Z - Lo.Z, 256, 0.5), 'the trigger model covers the room');
+      end;
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+end;
+
 procedure TestLevelGen;
 const
   Mins: TVector3 = (X: -16; Y: -16; Z: -24);
@@ -2609,6 +2664,7 @@ begin
   TestSoundMixer;
   TestLevelLiftsSwitches;
   TestLevelGen;
+  TestLevelAmbushes;
   TestMapLevelUrl;
   TestRecord;
   TestGun;

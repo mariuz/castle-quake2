@@ -155,7 +155,11 @@ type
     procedure SaveToFile(const Url: String);
     procedure LoadFromFile(const Url: String);
     { The Quake 2 entity lump text (worldspawn first) }
-    function EntityText: String;
+    function EntityText: String; overload;
+    { Same, with brush models for some entities (EntityModels[i] = "*N" for
+      the i-th entity, '' for none): those get "model" instead of their
+      origin and the mins / maxs of a box trigger }
+    function EntityText(const EntityModels: array of String): String; overload;
     property Width: Integer read FWidth;
     property Height: Integer read FHeight;
     property Entities: TLevelEntityList read FEntities;
@@ -912,9 +916,15 @@ begin
 end;
 
 function TQuakeLevel.EntityText: String;
+begin
+  Result := EntityText([]);
+end;
+
+function TQuakeLevel.EntityText(const EntityModels: array of String): String;
 var
   E: TLevelEntity;
-  I, Teleporters, Dests: Integer;
+  I, Teleporters, Dests, EntIndex: Integer;
+  BrushModel: String;
   SB: TStringBuilder;
 
   procedure Pair(const K, V: String);
@@ -934,15 +944,23 @@ begin
     if Sky <> '' then
       Pair('sky', Sky);
     SB.Append('}').Append(LineEnding);
-    for E in FEntities do
+    for EntIndex := 0 to FEntities.Count - 1 do
     begin
+      E := FEntities[EntIndex];
+      BrushModel := '';
+      if EntIndex < Length(EntityModels) then
+        BrushModel := EntityModels[EntIndex];
       SB.Append('{').Append(LineEnding);
       Pair('classname', E.EntClass);
-      Pair('origin', FormatNum(E.Origin.X) + ' ' + FormatNum(E.Origin.Y) + ' ' + FormatNum(E.Origin.Z));
+      if BrushModel <> '' then
+        Pair('model', BrushModel)
+      else
+        Pair('origin', FormatNum(E.Origin.X) + ' ' + FormatNum(E.Origin.Y) + ' ' + FormatNum(E.Origin.Z));
       if E.Angle <> 0 then
         Pair('angle', FormatNum(E.Angle));
       for I := 0 to E.Keys.Count - 1 do
-        Pair(E.Keys.Names[I], E.Keys.ValueFromIndex[I]);
+        if (BrushModel = '') or not ((E.Keys.Names[I] = 'mins') or (E.Keys.Names[I] = 'maxs')) then
+          Pair(E.Keys.Names[I], E.Keys.ValueFromIndex[I]);
       { Teleporters without a target go to the destination of the same
         number (the n-th misc_teleporter to the n-th misc_teleporter_dest) }
       if (E.EntClass = 'misc_teleporter') and (E.Key('target') = '') then
