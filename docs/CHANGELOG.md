@@ -2,6 +2,75 @@
 
 ## Unreleased
 
+- Mods and Quake II Remastered data: `-game <folder>` (or `+set game <folder>`) loads a mod over `baseq2`, also from the remaster's `rerelease/` folder; game folders load their `.pkz` archives and loose files too; the remaster's PNG / TGA textures replace the WAL images; maps in the extended QBSP format load.
+- Call of the Void (`-game q1q2`): its maps, textures and models load, and its Quake 1 and hybrid monsters spawn with their model and health and fight with the generic monster AI.
+
+- Secret doors: Quake 2's `func_door_secret` works like the original (opened by a shot or a trigger, it moves down or sideways, pauses, slides back, and closes again after its wait); before, it opened like a plain door when touched. Random levels hide the secret passage behind a secret door that looks like the room's wall, and the level editor has a *Secret* tool.
+
+## v0.20.0 — 2026-10-31
+
+Flickering, pulsing and switchable lights in compiled levels. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
+
+- Light styles in compiled levels: lights of the level editor and random levels can flicker, pulse or be switched (a light's `style`, or a `targetname` for a switchable light, like Quake 2's qrad). Random levels have rooms with flickering, fluorescent or pulsing lights.
+
+## v0.19.0 — 2026-10-31
+
+Ambushes in random levels and selectable map entities in the CGE editor. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
+
+- Ambushes in random levels: in some later rooms, extra monsters appear when you walk in (Quake 2's trigger-spawned monsters and a `trigger_once` over the room).
+- Box triggers of compiled levels (the exit, ambushes) are real Quake 2 brush models now, so exported `.bsp` files work in Quake 2 itself.
+
+- CGE editor: map entities are selectable. With *PreviewEntities* / *PreviewMarkers* on, every entity is listed under *EntityPreview*; selecting one shows its class, targetname, target, spawnflags and all its keys.
+- Fixed: saving a design in the CGE editor wrote the whole generated map (world, movers) into the file. Only `TQuakeMap`'s own properties are saved now.
+
+## v0.18.0 — 2026-10-31
+
+CGE editor property editors for the Quake 2 map, and the custom editor builds again. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
+
+- CGE editor: `TQuakeMap.MapName` has a dropdown of the PAK's maps, `PakUrl` and `LevelUrl` open file dialogs, and right-clicking the map in the hierarchy offers *Reload Map*.
+- Fixed: *Restart Editor (With Custom Components)* failed to compile because the console unit used `CastleWindow`, which the editor doesn't have. CI now builds the custom editor.
+
+## v0.17.0 — 2026-10-31
+
+Gamepad button rebinding. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
+
+- Gamepad buttons can be rebound: *Options → Controls → Gamepad Buttons* (press the button to use for jump, crouch, use, hand grenades, help, next or previous weapon) or `padbind <action> <button>` in the console. Bindings are saved with the other options.
+
+## v0.16.0 — 2026-10-30
+
+Round rooms, an entity inspector in the level editor and a launcher icon. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
+
+- An entity inspector in the level editor: the **Inspect** tool selects a placed entity and shows its keys; Q / E turn it, and `editor set <key> <value>` / `editor unset <key>` in the console change its light level, colour, spawnflags, targets and so on.
+- A launcher icon for Android, Windows and Linux (original artwork: a castle tower with a glowing 2).
+- Curved walls: round rooms. Random levels make some big rooms round, with walls of 45-degree facets, and the level editor carves one with `editor round x0 y0 x1 y1` in the console.
+- Fixed: monsters in random levels could start stuck in a wall: a tank next to a pillar or a step, or anything placed in a cell with a diagonal wall. The tests now compile 12 random levels and check every monster's starting spot.
+
+## v0.15.0 — 2026-10-30
+
+Diagonal walls in random and edited levels. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
+
+- Diagonal walls: the level editor has a **Diagonal** tool that cuts a corner at 45 degrees (it picks the corner between two walls), and random levels cut the corners of most bigger rooms.
+- README: the license section no longer suggests Castle Game Engine is MIT (it is LGPL with a static linking exception, which lets games use any license).
+
+## v0.14.0 — 2026-10-26
+
+Real slopes, breakable glass windows, a key hunt, the full game's textures as themes, and audio polish. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
+
+- Fixed: the game could crash on exit after playing a level from the level editor (the console was inserted into the screen twice when the editor opened).
+- The full game's textures as themes: with the retail Quake 2 PAKs, every texture set (e1u2, e2u3...) becomes a level theme for the editor and the random levels. Level files remember theme names, so they still load on the demo.
+- Breakable glass: windows shatter when shot, with Quake 2's glass sound and debris. Quake 2's breakable walls only explode now if they are meant to (`dmg`), and always throw debris.
+- Real slopes: ramps in levels. The level editor has a **Ramp** tool: the floor slopes up to the highest neighbouring cell, smooth to walk on. Random levels climb on slopes instead of 16-unit steps, outdoor hills roll, and the *Hills* tool paints slopes.
+- Windows between rooms: a **Window** tool in the editor, and a few windows in random levels. You and monsters can see through the glass, but nobody can walk or shoot through it.
+- Audio polish: sounds straight ahead are a little quieter than sounds to the side, as in Quake 2, and the master volume is turned down gently when many loud sounds play at once (big fights no longer distort).
+- A key hunt in random levels: on even seeds the blue key that opens the exit often lies in a vault behind red doors, and you have to find the red key first. Red key doors have a red lamp.
+
+## v0.13.0 — 2026-10-25
+
+Keys, ladders, slime, lava, teleporters and outdoor areas in random and edited levels. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
+
+- Ladders, lava and outdoor areas in levels. The level editor has a **Ladder** tool (R): a ladder goes up the highest step next to the cell, and you climb it like Quake 2's (walk into it, look up). The **Lava** tool (I) makes glowing lava pools that hurt a lot. Quake 2's demo has no lava texture, so the game draws its own. The **Hills** tool paints rolling ground for outdoor areas.
+- Four more themes: red and brown indoors, rock and grass outdoors.
+- Random levels use ladders for some of the big climbs, have lava pits as well as slime pits, and turn big sky rooms into outdoor areas with grass or rock and rolling ground.
 - Keys, slime and teleporters in levels. The level editor has a **Key** tool (K; Y switches between the blue and red key): those doors stay shut ("You need the Blue Key") until you bring the key, which then opens all doors of its colour. It also has a **Slime** tool (M): a damaging green pool. Keys and teleporters are in the entity palette; each teleporter takes you to the teleporter destination of the same number.
 - Random levels lock the exit with the blue key on even seeds (with the switch on odd ones), turn a third of the pools into shallow slime pits, and put a teleporter in the secret room that takes you back to the start.
 - Teleporters show their pad (the `dmspot` model), as in Quake 2.

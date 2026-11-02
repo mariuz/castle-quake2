@@ -15,7 +15,7 @@ type
     maNone, maNewGame, maWarpMap, maToggleCamera, maSettingsChanged, maLevelEditor, maQuit
   );
 
-  TMenuPage = (smMain, smSkill, smMaps, smOptions, smControls, smShowcase);
+  TMenuPage = (smMain, smSkill, smMaps, smOptions, smControls, smPad, smShowcase);
 
   { Rows of the Options page }
   TOptionItem = (oiCamera, oiSensitivity, oiInvert, oiViewBob, oiFieldOfView, oiInterfaceSize,
@@ -24,7 +24,7 @@ type
 const
   { Map name the menu passes for a new random level }
   RandomGameMap = 'random';
-  PageNames: array[TMenuPage] of String = ('Main', 'Skill', 'Maps', 'Options', 'Controls', 'Showcase');
+  PageNames: array[TMenuPage] of String = ('Main', 'Skill', 'Maps', 'Options', 'Controls', 'Gamepad', 'Showcase');
 
 type
   TOnMenuActionEvent = procedure(const Action: TMenuAction; const Param: String) of object;
@@ -43,15 +43,21 @@ type
     { Controls page: action waiting for a key press, or False }
     FBinding: Boolean;
     FBindingAction: TQuakeAction;
+    { Gamepad page: action waiting for a controller button }
+    FPadBinding: Boolean;
+    FPadBindingAction: TPadAction;
     { Gamepad stick as arrows: direction held and time to the next repeat }
     FStickArrow: TKey;
     FStickRepeat: Single;
+    { Press after the controller buttons became menu keys }
+    function PressMenuKey(const Event: TInputPressRelease): Boolean;
     procedure RebuildMenuItems(const KeepSelection: Boolean = False);
     procedure ExecuteSelection;
     procedure ShowPage(const Page: TMenuPage);
     { Change the value of the selected option (-1 / +1); False if it has none }
     function AdjustOption(const Delta: Integer): Boolean;
     procedure SettingsChanged;
+    procedure BackToControls;
     { Index of the item row at a position (container pixels), -1 if none }
     function ItemAt(const P: TVector2): Integer;
     function PageTitle: String;
@@ -129,6 +135,7 @@ end;
 procedure TQuakeMenu.RebuildMenuItems(const KeepSelection: Boolean);
 var
   A: TQuakeAction;
+  PA: TPadAction;
   I: Integer;
 begin
   FItems.Clear;
@@ -171,8 +178,16 @@ begin
       begin
         for A := Low(TQuakeAction) to High(TQuakeAction) do
           FItems.Add(ActionNames[A] + ': [' + KeyToStr(Settings.Keys[A]) + ']');
+        FItems.Add('Gamepad Buttons...');
         FItems.Add('Reset to Defaults');
         FItems.Add('Back to Options');
+      end;
+    smPad:
+      begin
+        for PA := Low(TPadAction) to High(TPadAction) do
+          FItems.Add(PadActionNames[PA] + ': [' + PadButtonLabels[Settings.PadButtons[PA]] + ']');
+        FItems.Add('Reset to Defaults');
+        FItems.Add('Back to Controls');
       end;
     smShowcase:
       begin
@@ -188,6 +203,7 @@ procedure TQuakeMenu.ShowPage(const Page: TMenuPage);
 begin
   FSubMenu := Page;
   FBinding := False;
+  FPadBinding := False;
   RebuildMenuItems;
   WritelnLog('Menu', 'Page %s', [PageNames[Page]]);
   { Start on the current skill }
@@ -237,6 +253,7 @@ begin
     smMaps: Result := 'MAP WARP';
     smOptions: Result := 'OPTIONS';
     smControls: Result := 'CONTROLS';
+    smPad: Result := 'GAMEPAD';
     else Result := '';
   end;
 end;
@@ -332,6 +349,9 @@ begin
           FBindingAction := TQuakeAction(FSelectedIdx);
         end else
         if FSelectedIdx = Ord(High(TQuakeAction)) + 1 then
+          ShowPage(smPad)
+        else
+        if FSelectedIdx = Ord(High(TQuakeAction)) + 2 then
         begin
           Settings.ResetKeys;
           SettingsChanged;
@@ -340,6 +360,22 @@ begin
           ShowPage(smOptions);
           FSelectedIdx := Ord(oiControls);
         end;
+      end;
+    smPad:
+      begin
+        Sounds.Play('sound/misc/menu2.wav');
+        if FSelectedIdx <= Ord(High(TPadAction)) then
+        begin
+          { Wait for the controller button to bind }
+          FPadBinding := True;
+          FPadBindingAction := TPadAction(FSelectedIdx);
+        end else
+        if FSelectedIdx = Ord(High(TPadAction)) + 1 then
+        begin
+          Settings.ResetPadButtons;
+          SettingsChanged;
+        end else
+          BackToControls;
       end;
     smShowcase:
       ShowPage(smMain);
@@ -353,7 +389,7 @@ begin
   inherited Update(SecondsPassed, HandleInput);
   { The left stick works like the arrow keys, repeating while held }
   Arrow := ReadGamepads(0, 1, False).MenuArrow;
-  if (Arrow = keyNone) or FBinding then
+  if (Arrow = keyNone) or FBinding or FPadBinding then
   begin
     FStickArrow := keyNone;
     Exit;
@@ -412,6 +448,42 @@ begin
 end;
 
 function TQuakeMenu.Press(const Event: TInputPressRelease): Boolean;
+begin
+  if FPadBinding then
+  begin
+    { A controller button binds; Escape, Menu or a click cancels }
+    if Event.EventType = itGameController then
+    begin
+      FPadBinding := False;
+      if Settings.BindPadButton(FPadBindingAction, Event.Controller.Button) then
+      begin
+        WritelnLog('Menu', 'Gamepad %s: %s', [PadActionNames[FPadBindingAction],
+          PadButtonNames[Event.Controller.Button]]);
+        Sounds.Play('sound/misc/menu2.wav');
+        SettingsChanged;
+      end else
+        Sounds.Play('sound/misc/menu3.wav');
+      Exit(True);
+    end;
+    if Event.IsKey(keyEscape) or (Event.EventType = itMouseButton) then
+    begin
+      FPadBinding := False;
+      Sounds.Play('sound/misc/menu3.wav');
+      Exit(True);
+    end;
+    { Other keys don't bind }
+    Exit(Event.EventType = itKey);
+  end;
+  Result := PressMenuKey(GamepadMenuEvent(Event));
+end;
+
+procedure TQuakeMenu.BackToControls;
+begin
+  ShowPage(smControls);
+  FSelectedIdx := Ord(High(TQuakeAction)) + 1;
+end;
+
+function TQuakeMenu.PressMenuKey(const Event: TInputPressRelease): Boolean;
 var
   Tapped: Integer;
 begin
@@ -482,6 +554,12 @@ begin
 
   if Event.IsKey(keyEscape) then
   begin
+    if FSubMenu = smPad then
+    begin
+      BackToControls;
+      Sounds.Play('sound/misc/menu3.wav');
+      Exit(True);
+    end;
     if FSubMenu = smControls then
     begin
       ShowPage(smOptions);
@@ -592,6 +670,11 @@ begin
     begin
       Col := Vector4(1.0, 0.85, 0.15, 1.0);
       Hint := 'Press a key for ' + ActionNames[FBindingAction] + ' (Esc cancels)';
+    end else
+    if FPadBinding then
+    begin
+      Col := Vector4(1.0, 0.85, 0.15, 1.0);
+      Hint := 'Press a gamepad button for ' + PadActionNames[FPadBindingAction] + ' (Esc cancels)';
     end else
     if TouchInterface and (FSubMenu = smOptions) then
       Hint := 'Tap: Select, Tap Again: Change (Left / Right Half: Down / Up)'

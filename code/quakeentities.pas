@@ -593,6 +593,90 @@ var
 function FindItemDef(const AClassName: String): PQuakeItemDef;
 function FindMonsterDef(const AClassName: String): PQuakeMonsterDef;
 
+type
+  TGenericMoveKind = (gmWalk, gmFly, gmSwim);
+  { A monster this port has no code for (Call of the Void's Quake 1 and
+    hybrid monsters): its model, health, how it moves (facts from the
+    mod's SP_monster_* functions) and a coarse attack by kind of monster
+    (Quake 1's: melee, grenades, lasers, bolts, homing pods, lightning).
+    It plays with the generic AI. Chthon gets 3000 health instead of 16:
+    in Quake 1 only the level's electrodes kill him, which the generic AI
+    can't do. }
+  TGenericMonsterFact = record
+    ClassName, ModelDir: String;
+    Health: Integer;
+    Move: TGenericMoveKind;
+    Attack: TAttackKind;
+    Damage: Integer;
+    Range: Single;
+  end;
+
+const
+  GenericMonsterFacts: array[0..53] of TGenericMonsterFact = (
+    (ClassName: 'monster_arachnid'; ModelDir: 'models/monsters/arachnid'; Health: 1000; Move: gmWalk; Attack: akRail; Damage: 35; Range: 1200),
+    (ClassName: 'monster_chthon'; ModelDir: 'models/monsters/chthon'; Health: 3000; Move: gmWalk; Attack: akRocket; Damage: 40; Range: 1500),
+    (ClassName: 'monster_chtjor'; ModelDir: 'models/monsters/chtjor'; Health: 12000; Move: gmWalk; Attack: akRocket; Damage: 50; Range: 1500),
+    (ClassName: 'monster_dog'; ModelDir: 'models/monsters/dog'; Health: 50; Move: gmWalk; Attack: akMelee; Damage: 10; Range: 80),
+    (ClassName: 'monster_dog_prototype'; ModelDir: 'models/monsters/dog_prototype'; Health: 50; Move: gmWalk; Attack: akMelee; Damage: 10; Range: 80),
+    (ClassName: 'monster_dog_strogg'; ModelDir: 'models/monsters/parasite/tip'; Health: 35; Move: gmWalk; Attack: akMelee; Damage: 10; Range: 80),
+    (ClassName: 'monster_enforcer'; ModelDir: 'models/monsters/enforcer'; Health: 80; Move: gmWalk; Attack: akBlaster; Damage: 15; Range: 900),
+    (ClassName: 'monster_enforcer_prototype'; ModelDir: 'models/monsters/enforcer_prototype'; Health: 100; Move: gmWalk; Attack: akBlaster; Damage: 15; Range: 900),
+    (ClassName: 'monster_enforcer_strogg'; ModelDir: 'models/monsters/enforcerstrogg'; Health: 100; Move: gmWalk; Attack: akBlaster; Damage: 15; Range: 900),
+    (ClassName: 'monster_fiend'; ModelDir: 'models/monsters/fiend'; Health: 300; Move: gmWalk; Attack: akMelee; Damage: 20; Range: 100),
+    (ClassName: 'monster_fiend_prototype'; ModelDir: 'models/monsters/fiend_prototype'; Health: 300; Move: gmWalk; Attack: akMelee; Damage: 20; Range: 100),
+    (ClassName: 'monster_fiend_strogg'; ModelDir: 'models/monsters/fiendstrogg'; Health: 300; Move: gmWalk; Attack: akMelee; Damage: 20; Range: 100),
+    (ClassName: 'monster_fish'; ModelDir: 'models/monsters/fish'; Health: 25; Move: gmSwim; Attack: akMelee; Damage: 3; Range: 70),
+    (ClassName: 'monster_fishgunner'; ModelDir: 'models/monsters/fishgunner'; Health: 225; Move: gmWalk; Attack: akHitscan; Damage: 4; Range: 900),
+    (ClassName: 'monster_guardian'; ModelDir: 'models/monsters/guardian'; Health: 2500; Move: gmWalk; Attack: akRocket; Damage: 50; Range: 1500),
+    (ClassName: 'monster_guncmdr'; ModelDir: 'models/monsters/gunner'; Health: 325; Move: gmWalk; Attack: akGrenade; Damage: 50; Range: 800),
+    (ClassName: 'monster_hellknight'; ModelDir: 'models/monsters/hellknight'; Health: 250; Move: gmWalk; Attack: akBlaster; Damage: 9; Range: 900),
+    (ClassName: 'monster_hknight_hyper'; ModelDir: 'models/monsters/hyperknight'; Health: 250; Move: gmWalk; Attack: akBlaster; Damage: 9; Range: 900),
+    (ClassName: 'monster_hknight_prototype'; ModelDir: 'models/monsters/hellknight_prototype'; Health: 250; Move: gmWalk; Attack: akBlaster; Damage: 9; Range: 900),
+    (ClassName: 'monster_hknight_strogg'; ModelDir: 'models/monsters/hellknightstrogg'; Health: 250; Move: gmWalk; Attack: akBlaster; Damage: 9; Range: 900),
+    (ClassName: 'monster_hknight_bsk_strogg'; ModelDir: 'models/monsters/hellberserkerstrogg'; Health: 250; Move: gmWalk; Attack: akMelee; Damage: 20; Range: 90),
+    (ClassName: 'monster_insane_spawn'; ModelDir: 'models/monsters/insane_spawn'; Health: 100; Move: gmWalk; Attack: akMelee; Damage: 10; Range: 80),
+    (ClassName: 'monster_ironvore'; ModelDir: 'models/monsters/ironvore'; Health: 175; Move: gmWalk; Attack: akRocket; Damage: 40; Range: 1000),
+    (ClassName: 'monster_knight'; ModelDir: 'models/monsters/knight'; Health: 75; Move: gmWalk; Attack: akMelee; Damage: 10; Range: 80),
+    (ClassName: 'monster_knight_prototype'; ModelDir: 'models/monsters/knight_prototype'; Health: 75; Move: gmWalk; Attack: akMelee; Damage: 10; Range: 80),
+    (ClassName: 'monster_knight_strogg'; ModelDir: 'models/monsters/knightstrogg'; Health: 100; Move: gmWalk; Attack: akMelee; Damage: 10; Range: 80),
+    (ClassName: 'monster_mutantspawn'; ModelDir: 'models/monsters/mutantspawn'; Health: 300; Move: gmWalk; Attack: akMelee; Damage: 15; Range: 90),
+    (ClassName: 'monster_ogre'; ModelDir: 'models/monsters/ogre'; Health: 200; Move: gmWalk; Attack: akGrenade; Damage: 40; Range: 800),
+    (ClassName: 'monster_ogre_prototype'; ModelDir: 'models/monsters/ogre_prototype'; Health: 200; Move: gmWalk; Attack: akGrenade; Damage: 40; Range: 800),
+    (ClassName: 'monster_ogre2_strogg'; ModelDir: 'models/monsters/ogre2strogg'; Health: 220; Move: gmWalk; Attack: akPellets; Damage: 4; Range: 700),
+    (ClassName: 'monster_ogre_strogg'; ModelDir: 'models/monsters/ogrestrogg'; Health: 450; Move: gmWalk; Attack: akGrenade; Damage: 40; Range: 800),
+    (ClassName: 'monster_rotflyer'; ModelDir: 'models/monsters/rotflyer'; Health: 50; Move: gmFly; Attack: akBlaster; Damage: 5; Range: 800),
+    (ClassName: 'monster_shalrath'; ModelDir: 'models/monsters/shalrath'; Health: 400; Move: gmWalk; Attack: akRocket; Damage: 40; Range: 1000),
+    (ClassName: 'monster_shalrath_prototype'; ModelDir: 'models/monsters/shalrath_prototype'; Health: 400; Move: gmWalk; Attack: akRocket; Damage: 40; Range: 1000),
+    (ClassName: 'monster_shalrath_strogg'; ModelDir: 'models/monsters/shalrathstrogg'; Health: 400; Move: gmWalk; Attack: akRocket; Damage: 40; Range: 1000),
+    (ClassName: 'monster_shamacudda'; ModelDir: 'models/monsters/shamacudda'; Health: 600; Move: gmWalk; Attack: akHitscan; Damage: 8; Range: 600),
+    (ClassName: 'monster_shambler'; ModelDir: 'models/monsters/shambler'; Health: 600; Move: gmWalk; Attack: akHitscan; Damage: 8; Range: 600),
+    (ClassName: 'monster_shambler_prototype'; ModelDir: 'models/monsters/shambler_prototype'; Health: 600; Move: gmWalk; Attack: akHitscan; Damage: 8; Range: 600),
+    (ClassName: 'monster_shambler_strogg'; ModelDir: 'models/monsters/shamblerstrogg'; Health: 775; Move: gmWalk; Attack: akHitscan; Damage: 8; Range: 600),
+    (ClassName: 'monster_shamedic'; ModelDir: 'models/monsters/shamblerthunder'; Health: 550; Move: gmWalk; Attack: akHitscan; Damage: 8; Range: 600),
+    (ClassName: 'monster_shamjorg'; ModelDir: 'models/monsters/shamjorg'; Health: 12000; Move: gmWalk; Attack: akRocket; Damage: 50; Range: 1500),
+    (ClassName: 'monster_soldier_grunt'; ModelDir: 'models/monsters/grunt'; Health: 60; Move: gmWalk; Attack: akPellets; Damage: 4; Range: 700),
+    (ClassName: 'monster_soldier_grunt_double'; ModelDir: 'models/monsters/grunt_double'; Health: 60; Move: gmWalk; Attack: akPellets; Damage: 4; Range: 700),
+    (ClassName: 'monster_soldier_grunt_prototype'; ModelDir: 'models/monsters/grunt_prototype'; Health: 30; Move: gmWalk; Attack: akPellets; Damage: 4; Range: 700),
+    (ClassName: 'monster_soldier_strogg'; ModelDir: 'models/monsters/grunt_strogg'; Health: 30; Move: gmWalk; Attack: akPellets; Damage: 4; Range: 700),
+    (ClassName: 'monster_spawn'; ModelDir: 'models/monsters/spawn'; Health: 80; Move: gmWalk; Attack: akMelee; Damage: 10; Range: 80),
+    (ClassName: 'monster_supershamblertank'; ModelDir: 'models/monsters/shamblertank'; Health: 3000; Move: gmWalk; Attack: akRocket; Damage: 50; Range: 1500),
+    (ClassName: 'monster_wizard'; ModelDir: 'models/monsters/wizard'; Health: 80; Move: gmFly; Attack: akBlaster; Damage: 9; Range: 800),
+    (ClassName: 'monster_wizarcuda_strogg'; ModelDir: 'models/monsters/scraggacuda'; Health: 120; Move: gmFly; Attack: akBlaster; Damage: 9; Range: 800),
+    (ClassName: 'monster_wizard_prototype'; ModelDir: 'models/monsters/wizard_prototype'; Health: 80; Move: gmFly; Attack: akBlaster; Damage: 9; Range: 800),
+    (ClassName: 'monster_wizard_strogg'; ModelDir: 'models/monsters/wizardstrogg'; Health: 120; Move: gmFly; Attack: akBlaster; Damage: 9; Range: 800),
+    (ClassName: 'monster_zombie'; ModelDir: 'models/monsters/zombie'; Health: 60; Move: gmWalk; Attack: akMelee; Damage: 10; Range: 80),
+    (ClassName: 'monster_zombie_prototype'; ModelDir: 'models/monsters/zombie_prototype'; Health: 60; Move: gmWalk; Attack: akMelee; Damage: 10; Range: 80),
+    (ClassName: 'monster_zombie_strogg'; ModelDir: 'models/monsters/zombiestrogg'; Health: 60; Move: gmWalk; Attack: akMelee; Damage: 10; Range: 80)
+  );
+
+{ A definition for a monster without one of its own (GenericMonsterFacts,
+  or any monster_<name> with models/monsters/<name>/tris.md2), only when
+  its model is in the loaded PAKs; nil otherwise. FindMonsterDef falls
+  back to it. }
+function GenericMonsterDef(const AClassName: String): PQuakeMonsterDef;
+{ Is this definition one of GenericMonsterDef's }
+function IsGenericMonsterDef(const Def: PQuakeMonsterDef): Boolean;
+
 { Full sound path for a monster sound name }
 function MonsterSound(const Def: PQuakeMonsterDef; const Name: String): String;
 { The monster's idle / search sound found in the PAK ('' if none) }
@@ -757,6 +841,77 @@ begin
   Result := nil;
 end;
 
+var
+  { Heap records (MonsterDefs can be reallocated; monsters keep pointers) }
+  GenericDefs: specialize TList<PQuakeMonsterDef>;
+
+function GenericMonsterDef(const AClassName: String): PQuakeMonsterDef;
+var
+  I: Integer;
+  ModelDir, Model: String;
+  Fact: TGenericMonsterFact;
+  Found: Boolean;
+begin
+  Result := nil;
+  if Copy(AClassName, 1, 8) <> 'monster_' then
+    Exit;
+  if GenericDefs = nil then
+    GenericDefs := specialize TList<PQuakeMonsterDef>.Create;
+  for I := 0 to GenericDefs.Count - 1 do
+    if GenericDefs[I]^.ClassName = AClassName then
+      Exit(GenericDefs[I]);
+  Found := False;
+  Fact := Default(TGenericMonsterFact);
+  for I := 0 to High(GenericMonsterFacts) do
+    if GenericMonsterFacts[I].ClassName = AClassName then
+    begin
+      Fact := GenericMonsterFacts[I];
+      Found := True;
+    end;
+  if Found then
+    ModelDir := Fact.ModelDir
+  else
+  begin
+    { Any other monster_<name>: models/monsters/<name>, ranged }
+    ModelDir := 'models/monsters/' + Copy(AClassName, 9, MaxInt);
+    Fact.Health := 100;
+    Fact.Move := gmWalk;
+    Fact.Attack := akHitscan;
+    Fact.Damage := 4;
+    Fact.Range := 900;
+  end;
+  Model := ModelDir + '/tris.md2';
+  if not Pak.FileExists(Model) then
+    Exit;
+  New(Result);
+  Result^ := Default(TQuakeMonsterDef);
+  Result^.ClassName := AClassName;
+  Result^.Model := Model;
+  Result^.Health := Fact.Health;
+  Result^.Attack := Fact.Attack;
+  Result^.Damage := Fact.Damage;
+  Result^.AttackRange := Fact.Range;
+  if Fact.Attack = akMelee then
+  begin
+    Result^.Speed := 170;
+    Result^.AttackCooldown := 0.8;
+  end else
+  begin
+    Result^.Speed := 110;
+    Result^.AttackCooldown := 1.5;
+  end;
+  Result^.Flying := Fact.Move in [gmFly, gmSwim];
+  { Sounds: sound/<model folder>/ (MonsterSoundLike finds idle / search) }
+  Result^.SoundDir := ExtractFileName(ModelDir);
+  GenericDefs.Add(Result);
+  WritelnLog('QuakeEntities', 'Generic monster %s: %s, health %d', [AClassName, Model, Result^.Health]);
+end;
+
+function IsGenericMonsterDef(const Def: PQuakeMonsterDef): Boolean;
+begin
+  Result := (Def <> nil) and (GenericDefs <> nil) and (GenericDefs.IndexOf(Def) >= 0);
+end;
+
 function FindMonsterDef(const AClassName: String): PQuakeMonsterDef;
 var
   I: Integer;
@@ -764,7 +919,18 @@ begin
   for I := 0 to High(MonsterDefs) do
     if MonsterDefs[I].ClassName = AClassName then
       Exit(@MonsterDefs[I]);
-  Result := nil;
+  Result := GenericMonsterDef(AClassName);
+end;
+
+procedure FreeGenericDefs;
+var
+  I: Integer;
+begin
+  if GenericDefs = nil then
+    Exit;
+  for I := 0 to GenericDefs.Count - 1 do
+    Dispose(GenericDefs[I]);
+  FreeAndNil(GenericDefs);
 end;
 
 var
@@ -2498,4 +2664,5 @@ initialization
   InitMonsterDefs;
 finalization
   FreeAndNil(IdleSounds);
+  FreeGenericDefs;
 end.

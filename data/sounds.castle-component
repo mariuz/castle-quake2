@@ -379,6 +379,12 @@
       "Name" : "World_quake",
       "QuakePath" : "sound/world/quake.wav",
       "Url" : "quakepak:/sound/world/quake.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "World_brkglas",
+      "QuakePath" : "sound/world/brkglas.wav",
+      "Url" : "quakepak:/sound/world/brkglas.wav"
     }
   ]
 }

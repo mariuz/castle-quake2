@@ -235,6 +235,7 @@ type
     procedure UpdateTimersAndLasers(const SecondsPassed: Single);
     { Shootable brushes: func_explosive, doors / buttons with "health" }
     procedure DamageMover(const Mover: TQuakeMover; const Damage: Integer);
+    procedure BreakExplosive(const Mover: TQuakeMover);
     procedure KillPlayer;
     procedure ClearLevel;
   public
@@ -643,6 +644,16 @@ begin
 
   if (CName = 'info_player_start') or (CName = 'info_player_deathmatch') then
     Exit; { chosen by ChooseSpawnPoint }
+
+  { Doors spawned from the console with mins / maxs (no *N model): a box
+    mover, like the turrets below }
+  if ((CName = 'func_door') or (CName = 'func_door_secret')) and (Ent.Model = '') and
+     Ent.HasField('mins') and Ent.HasField('maxs') and (FGeometry <> nil) then
+  begin
+    FGeometry.AddBoxMover(Ent, Ent.GetVector('mins', TVector3.Zero),
+      Ent.GetVector('maxs', TVector3.Zero), FMap);
+    Exit;
+  end;
 
   if (CName = 'turret_breach') or (CName = 'turret_base') then
   begin
@@ -1143,7 +1154,7 @@ end;
 procedure TQuakeWorld.UseEntity(const Ent: TQuakeEntity);
 var
   CName, Msg, MapName: String;
-  Mover: TQuakeMover;
+  Mover, M2: TQuakeMover;
   Count: Integer;
   ItemDef: PQuakeItemDef;
   M: TQuakeMonster;
@@ -1405,15 +1416,18 @@ begin
   end else
   begin
     Mover := FGeometry.FindMoverByModel(Ent.Model);
+    { Box movers spawned from the console have no *N model }
+    if (Mover = nil) and (Ent.Model = '') then
+      for M2 in FGeometry.Movers do
+        if M2.Entity = Ent then
+          Mover := M2;
     if Mover <> nil then
     begin
       if Mover.Kind = mkStatic then
       begin
         if CName = 'func_explosive' then
-        begin
-          Explode(Mover.Center, Ent.GetInt('dmg', 0), 120, False);
-          Mover.Transform.Exists := False;
-        end else
+          BreakExplosive(Mover)
+        else
           Mover.Transform.Exists := not Mover.Transform.Exists;
       end else
         Mover.Use;
@@ -1435,6 +1449,23 @@ begin
   end;
 end;
 
+procedure TQuakeWorld.BreakExplosive(const Mover: TQuakeMover);
+var
+  Dmg: Integer;
+begin
+  { Quake 2 func_explosive_explode: debris always, an explosion (and
+    radius damage) only with "dmg"; glass (our "_glass" key, the level
+    compiler's windows) shatters }
+  Dmg := Mover.Entity.GetInt('dmg', 0);
+  if Dmg > 0 then
+    Explode(Mover.Center, Dmg, 120, False);
+  Particles.SpawnDebris(Mover.Center);
+  if Mover.Entity.GetField('_glass') = '1' then
+    Sounds.PlayAtPoint('sound/world/brkglas.wav', Mover.Center);
+  Mover.Transform.Exists := False;
+  WritelnLog('QuakeWorld', 'func_explosive %s breaks', [Mover.Entity.Model]);
+end;
+
 procedure TQuakeWorld.DamageMover(const Mover: TQuakeMover; const Damage: Integer);
 begin
   if (Mover.Health <= 0) or not Mover.Transform.Exists then
@@ -1444,8 +1475,7 @@ begin
     Exit;
   if Mover.Entity.ClassName = 'func_explosive' then
   begin
-    Explode(Mover.Center, Mover.Entity.GetInt('dmg', 0), 120, False);
-    Mover.Transform.Exists := False;
+    BreakExplosive(Mover);
     UseTargets(Mover.Target);
   end else
   begin

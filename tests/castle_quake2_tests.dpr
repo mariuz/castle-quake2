@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, Zipper;
 
 var
   Passed, Failed: Integer;
@@ -321,7 +321,7 @@ end;
 
 const
   { Sounds the game code plays by literal path, named in the sounds design }
-  DesignSoundPaths: array[0..62] of String = (
+  DesignSoundPaths: array[0..63] of String = (
     'sound/doors/dr1_end.wav',
     'sound/doors/dr1_mid.wav',
     'sound/doors/dr1_strt.wav',
@@ -384,7 +384,7 @@ const
     'sound/weapons/rocklx1a.wav',
     'sound/weapons/shotgf1b.wav',
     'sound/weapons/sshotf1b.wav',
-    'sound/world/quake.wav'
+    'sound/world/quake.wav', 'sound/world/brkglas.wav'
   );
 
 { Readable component name for a sound path: sound/items/pkup.wav -> Items_pkup }
@@ -518,6 +518,11 @@ begin
   try
     S.BindKey(qaForward, keyA);
     Check((S.Keys[qaForward] = keyA) and (S.Keys[qaMoveLeft] = keyW), 'binding a used key swaps the keys');
+    Check(S.BindPadButton(paUse, gbSouth) and (S.PadButtons[paUse] = gbSouth) and
+      (S.PadButtons[paJump] = gbWest), 'binding a used gamepad button swaps the buttons');
+    Check(not S.BindPadButton(paJump, gbMenu) and not S.BindPadButton(paJump, gbDPadUp) and
+      (S.PadButtons[paJump] = gbWest), 'Menu and D-pad up / down can not be bound');
+    Check(S.BindPadButton(paNextWeapon, gbDPadRight), 'D-pad right can be bound');
     S.Skill := 3;
     S.MouseSensitivity := 1.75;
     S.InvertMouse := True;
@@ -541,6 +546,9 @@ begin
     Check((S.Keys[qaForward] = keyA) and (S.Keys[qaMoveLeft] = keyW) and (S.Keys[qaFire] = keyCtrl),
       'key bindings survive save / load');
     Check(S.InterfaceSize = 3, 'interface size survives save / load');
+    Check((S.PadButtons[paUse] = gbSouth) and (S.PadButtons[paJump] = gbWest) and
+      (S.PadButtons[paNextWeapon] = gbDPadRight) and (S.PadButtons[paCrouch] = gbEast),
+      'gamepad bindings survive save / load');
     Check(SameValue(InterfaceScaleFor(0, False), 1) and SameValue(InterfaceScaleFor(0, True), TouchInterfaceScale),
       'auto interface size: normal on desktop, larger on touch screens');
     Check(SameValue(InterfaceScaleFor(2, True), 1) and (InterfaceScaleFor(4, False) > InterfaceScaleFor(3, False)) and
@@ -1514,6 +1522,463 @@ begin
   end;
 end;
 
+{ Ladders (a solid ladder brush against the step, for the player only)
+  and lava (CONTENTS_LAVA, a texture made in memory) }
+procedure TestLevelLaddersLava;
+const
+  Mins: TVector3 = (X: -16; Y: -16; Z: -24);
+  Maxs: TVector3 = (X: 16; Y: 16; Z: 32);
+var
+  Level, Loaded: TQuakeLevel;
+  Bsp: TQuakeBsp;
+  Col: TQuakeCollision;
+  T: TQuakeTrace;
+  X, Y: Integer;
+  Stream: TMemoryStream;
+begin
+  { Room A (1..4, floor 0), a ledge (6..8, floor 128) beyond x 5; a ladder
+    in (4, 3) up the ledge's step at x 5 (floor 128 too); lava in (2, 5) }
+  Level := TQuakeLevel.Create(10, 8);
+  try
+    Level.Name := 'unittest_ladder';
+    for Y := 1 to 6 do
+    begin
+      for X := 1 to 4 do
+        Level.SetOpen(X, Y, 0, 256);
+      for X := 5 to 8 do
+        Level.SetOpen(X, Y, 128, 256);
+    end;
+    Level.Cell(4, 3)^.Ladder := True;
+    Level.Cell(2, 5)^.Floor := -32;
+    Level.Cell(2, 5)^.Wet := True;
+    Level.Cell(2, 5)^.Lava := True;
+    Level.Cell(2, 5)^.Water := -16;
+    Level.AddEntityAtCell('info_player_start', 2, 2);
+    Check(Level.LadderDir(4, 3) = 0, 'the ladder climbs to the higher neighbour (+X)');
+    Check(Level.LadderDir(2, 2) = -1, 'no ladder direction without a step');
+
+    Stream := TMemoryStream.Create;
+    Loaded := TQuakeLevel.Create(3, 3);
+    try
+      Level.SaveToStream(Stream);
+      Stream.Position := 0;
+      Loaded.LoadFromStream(Stream);
+      Check(Loaded.Cell(4, 3)^.Ladder and Loaded.Cell(2, 5)^.Lava and CellHasWater(Loaded.Cell(2, 5)) and
+        not Loaded.Cell(2, 5)^.Slime, 'ladders and lava save and load');
+    finally
+      Loaded.Free;
+      Stream.Free;
+    end;
+
+    RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Check(Bsp.LoadFromPak('maps/unittest_ladder.bsp') and Pak.FileExists('textures/' + LevelLavaTexture + '.wal'),
+        'the ladder / lava level loads, with the lava texture made in memory');
+      Check((Bsp.PointContents(Vector3(2.5 * 64, 5.5 * 64, -24)) and CONTENTS_LAVA) <> 0, 'lava cells are CONTENTS_LAVA');
+      Check(Bsp.PointInLadder(Vector3(5 * 64 - 4, 3.5 * 64, 64)) and not Bsp.PointInLadder(Vector3(5 * 64 - 4, 3.5 * 64, 140)),
+        'the ladder brush stands against the step, up to its top');
+      Col := TQuakeCollision.Create(Bsp);
+      try
+        T := Col.BoxTrace(Vector3(4 * 64, 3.5 * 64, 40), Vector3(5 * 64, 3.5 * 64, 40), Mins, Maxs, 0, MASK_PLAYERSOLID);
+        Check(SameValue(T.EndPos.X, 5 * 64 - LevelLadderDepth - 16, 0.2) and ((T.Contents and CONTENTS_LADDER) <> 0),
+          'the player bumps into the ladder (CONTENTS_LADDER, Quake 2''s ladder test)');
+        T := Col.BoxTrace(Vector3(4 * 64, 3.5 * 64, 40), Vector3(5 * 64, 3.5 * 64, 40), Mins, Maxs, 0, MASK_MONSTERSOLID);
+        Check(SameValue(T.EndPos.X, 5 * 64 - 16, 0.2), 'monsters walk up to the wall behind it');
+      finally
+        Col.Free;
+      end;
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+end;
+
+{ Ramps: a sloped floor node and wedge brush, walkable }
+procedure TestLevelRamps;
+const
+  Mins: TVector3 = (X: -16; Y: -16; Z: -24);
+  Maxs: TVector3 = (X: 16; Y: 16; Z: 32);
+var
+  Level, Loaded: TQuakeLevel;
+  Bsp: TQuakeBsp;
+  Col: TQuakeCollision;
+  T: TQuakeTrace;
+  Color: TVector3;
+  X, Y: Integer;
+  Stream: TMemoryStream;
+begin
+  { Floor 0 (x 1..3), a ramp in x 4 rising to floor 32 (x 5..8) }
+  Level := TQuakeLevel.Create(10, 6);
+  try
+    Level.Name := 'unittest_ramp';
+    for Y := 1 to 4 do
+    begin
+      for X := 1 to 4 do
+        Level.SetOpen(X, Y, 0, 192);
+      for X := 5 to 8 do
+        Level.SetOpen(X, Y, 32, 192);
+      Level.Cell(4, Y)^.Ramp := True;
+    end;
+    Level.AddEntityAtCell('info_player_start', 2, 2);
+    Level.AddEntityAtCell('light', 4, 2).SetKey('light', '400');
+    Check((Level.RampDir(4, 2) = 0) and (Level.RampDir(2, 2) = -1), 'a ramp rises towards its higher neighbour');
+    Check(SameValue(Level.FloorAt(4, 2, 4.5 * 64, 2.5 * 64), 16, 0.01) and SameValue(Level.FloorAt(4, 2, 5 * 64, 0), 32, 0.01),
+      'the floor of a ramp slopes along it');
+    Stream := TMemoryStream.Create;
+    Loaded := TQuakeLevel.Create(3, 3);
+    try
+      Level.SaveToStream(Stream);
+      Stream.Position := 0;
+      Loaded.LoadFromStream(Stream);
+      Check(Loaded.Cell(4, 3)^.Ramp and not Loaded.Cell(3, 3)^.Ramp, 'ramps save and load');
+    finally
+      Loaded.Free;
+      Stream.Free;
+    end;
+
+    RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Check(Bsp.LoadFromPak('maps/unittest_ramp.bsp'), 'the ramp level loads');
+      Col := TQuakeCollision.Create(Bsp);
+      try
+        { Dropping onto the middle of the ramp: its box corner touches at
+          x 4.5 * 64 - 16 (floor 8 there; box bottom 24 below the origin) }
+        T := Col.BoxTrace(Vector3(4.5 * 64, 2.5 * 64, 120), Vector3(4.5 * 64, 2.5 * 64, -50), Mins, Maxs, 0, MASK_PLAYERSOLID);
+        Check((T.Fraction < 1) and SameValue(T.EndPos.Z, 24 + 24, 0.5) and (T.Normal.Z > 0.7) and (T.Normal.Z < 0.99),
+          'the player lands on the slope (a walkable, tilted plane)');
+        T := Col.BoxTrace(Vector3(2 * 64, 2.5 * 64, 24.1), Vector3(7 * 64, 2.5 * 64, 24.1), Mins, Maxs, 0, MASK_PLAYERSOLID);
+        Check((T.Fraction < 1) and (T.Normal.Z > 0.7), 'walking into the ramp meets its slope, not a wall');
+      finally
+        Col.Free;
+      end;
+      Check(Bsp.LightPoint(Vector3(4.5 * 64, 2.5 * 64, 40), Color) and (Color.X > 0.2),
+        'models on the ramp are lit by its lightmap (R_LightPoint on the sloped node)');
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+end;
+
+{ Windows: a glass pane that stops shots and the player, not sight }
+procedure TestLevelWindows;
+var
+  Level, Loaded: TQuakeLevel;
+  Bsp: TQuakeBsp;
+  Col: TQuakeCollision;
+  T: TQuakeTrace;
+  X, Y: Integer;
+  Stream: TMemoryStream;
+  Report: TLevelGenReport;
+  Seed: Cardinal;
+  Windows, I: Integer;
+  Glass, E: TQuakeEntity;
+  Found: Boolean;
+begin
+  { Rooms A (x 1..4) and B (x 6..9) behind a wall at x 5 with a window in
+    (5, 3): sill 48, top 144 }
+  Level := TQuakeLevel.Create(11, 7);
+  try
+    Level.Name := 'unittest_window';
+    for Y := 1 to 5 do
+      for X := 1 to 9 do
+        if X <> 5 then
+          Level.SetOpen(X, Y, 0, 192);
+    Level.SetOpen(5, 3, 48, 144);
+    Level.Cell(5, 3)^.Window := True;
+    Level.AddEntityAtCell('info_player_start', 2, 3);
+    Check(Level.WindowAxis(5, 3) = 0, 'the window looks along X (open on both sides)');
+    Stream := TMemoryStream.Create;
+    Loaded := TQuakeLevel.Create(3, 3);
+    try
+      Level.SaveToStream(Stream);
+      Stream.Position := 0;
+      Loaded.LoadFromStream(Stream);
+      Check(Loaded.Cell(5, 3)^.Window and (Loaded.Cell(5, 3)^.Floor = 48), 'windows save and load');
+    finally
+      Loaded.Free;
+      Stream.Free;
+    end;
+
+    RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Check(Bsp.LoadFromPak('maps/unittest_window.bsp'), 'the window level loads');
+      Col := TQuakeCollision.Create(Bsp);
+      try
+        { The glass is a brush model (breakable), the world is open there }
+        T := Col.BoxTrace(Vector3(3 * 64, 3.5 * 64, 96), Vector3(8 * 64, 3.5 * 64, 96), TVector3.Zero, TVector3.Zero,
+          0, MASK_SHOT);
+        Check(T.Fraction = 1, 'the window''s opening is open in the world (the glass is a model)');
+        T := Col.BoxTrace(Vector3(3 * 64, 3.5 * 64, 40), Vector3(8 * 64, 3.5 * 64, 40), TVector3.Zero, TVector3.Zero,
+          0, MASK_OPAQUE);
+        Check(T.Fraction < 1, 'below the sill is wall');
+      finally
+        Col.Free;
+      end;
+      Glass := nil;
+      for E in Bsp.Entities do
+        if (E.ClassName = 'func_explosive') and (E.GetField('_glass') = '1') then
+          Glass := E;
+      Check((Glass <> nil) and (Bsp.ModelCount = 2) and (Glass.GetInt('health', 0) > 0) and (Glass.GetInt('dmg', 0) = 0),
+        'the glass is a shootable func_explosive without blast (Quake 2 glass)');
+      Found := False;
+      for I := 0 to High(Bsp.Brushes) do
+        if Bsp.Brushes[I].Contents = CONTENTS_WINDOW then
+          Found := True;
+      Check(Found, 'its brush is CONTENTS_WINDOW: shots and the player stop, sight passes');
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+
+  Windows := 0;
+  for Seed := 1 to 12 do
+  begin
+    Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
+    Inc(Windows, Report.Windows);
+    Level.Free;
+  end;
+  Check(Windows > 0, 'random levels have windows between areas');
+end;
+
+{ Audio polish: Quake 2's stereo loudness and the master limiter }
+procedure TestSoundMixer;
+var
+  G: Single;
+  I: Integer;
+begin
+  Check(SameValue(QuakePanLoudness(0), Sqrt(0.5), 1e-5) and SameValue(QuakePanLoudness(1), 1, 1e-5) and
+    SameValue(QuakePanLoudness(-1), 1, 1e-5), 'Quake 2 panning: ahead -3 dB, at the sides full');
+  Check(SameValue(LimiterTarget(1.5, 2), 1) and SameValue(LimiterTarget(4, 2), Sqrt(0.5), 1e-5),
+    'the limiter keeps quiet mixes, compresses 2:1 above the threshold');
+  G := LimiterStep(1, 0.5, 0.1);
+  Check(G < 0.55, 'the limiter turns down within a tenth of a second (attack)');
+  G := LimiterStep(0.5, 1, 0.1);
+  Check((G > 0.55) and (G < 0.7), 'and comes back slowly (release)');
+  G := 0.5;
+  for I := 1 to 30 do
+    G := LimiterStep(G, 1, 0.1);
+  Check(G > 0.99, 'back to full volume after a few seconds');
+end;
+
+{ Themes of the full game's textures: a texture directory with enough
+  plain textures becomes a theme (simulated with demo WALs under a new
+  directory; runs last, it adds them to the PAKs) }
+procedure TestLevelThemes;
+const
+  Copies: array[0..16] of array[0..1] of String = (
+    ('floor3_1', 'floor1_1'), ('wslt1_1', 'wall1_1'), ('metal5_1', 'ceil1_1'), ('metal3_2', 'step1_1'),
+    ('plite1_1', 'lite1_1'), ('metal1_1', 'metal1_1'), ('metal1_2', 'metal1_2'), ('metal2_2', 'metal2_2'),
+    ('grate1_3', 'grate1_3'), ('grnx2_1', 'grnx2_1'), ('red1_2', 'red1_2'), ('box1_1', 'box1_1'),
+    ('crate1_1', 'crate1_1'), ('comp1_1', 'comp1_1'), ('c_met5_1', 'c_met5_1'), ('sky1', 'sky1'),
+    ('dr02_1', 'door1_1'));
+var
+  I, Idx, Builtin: Integer;
+  Data: PByte;
+  Size: Cardinal;
+  Stream: TMemoryStream;
+  Level, Loaded: TQuakeLevel;
+  Built: TStringStream;
+  Stats: TBspBuildStats;
+begin
+  EnsureLevelThemes;
+  Builtin := Length(LevelThemes);
+  Check((Builtin = Length(BuiltInThemes)) and (IndoorThemeCount = 6) and (OutdoorThemeCount = 2),
+    'the demo has the built-in themes only (6 indoor, 2 outdoor)');
+  for I := 0 to High(Copies) do
+  begin
+    Data := Pak.GetData('textures/e1u1/' + Copies[I][0] + '.wal', Size);
+    Stream := TMemoryStream.Create;
+    Stream.WriteBuffer(Data^, Size);
+    Pak.AddMemoryFile('textures/e9u9/' + Copies[I][1] + '.wal', Stream);
+  end;
+  EnsureLevelThemes;
+  Idx := ThemeIndex('e9u9');
+  Check((Idx = Builtin) and (Length(LevelThemes) = Builtin + 1), 'a full-game texture directory becomes a theme');
+  if Idx >= 0 then
+    Check((LevelThemes[Idx].Floor = 'e9u9/floor1_1') and (LevelThemes[Idx].Wall = 'e9u9/wall1_1') and
+      (LevelThemes[Idx].Ceil = 'e9u9/ceil1_1') and (LevelThemes[Idx].Step = 'e9u9/step1_1') and
+      (LevelThemes[Idx].Light = 'e9u9/lite1_1') and not LevelThemes[Idx].Outdoor and (IndoorThemeCount = 7),
+      'its floor, wall, ceiling, step and light are picked by name and WAL flags (sky and doors skipped)');
+
+  Level := MakeTestLevel;
+  Loaded := TQuakeLevel.Create(3, 3);
+  Built := TStringStream.Create('');
+  try
+    Level.Cell(2, 2)^.Theme := Idx;
+    Level.Name := 'unittest_theme';
+    BuildLevelBsp(Level, Stats).Free;
+    Check(Stats.Faces > 0, 'a level with a discovered theme builds');
+    Level.SaveToStream(Built);
+    Built.Position := 0;
+    Loaded.LoadFromStream(Built);
+    Check(Loaded.Cell(2, 2)^.Theme = Idx, 'levels save theme names and load them back');
+    { A file of other PAKs: themes by name, unknown ones fall back }
+    Built.Free;
+    Built := TStringStream.Create('{"width": 3, "height": 3, "rows": ["#", "# 0,128,0 0,128,1 #", "#"], ' +
+      '"themes": ["grass", "nosuch"], "entities": []}');
+    Loaded.LoadFromStream(Built);
+    Check((Loaded.Cell(1, 1)^.Theme = ThemeIndex('grass')) and (Loaded.Cell(2, 1)^.Theme = 0),
+      'theme names map to this game''s list (missing ones: the first theme)');
+  finally
+    Built.Free;
+    Loaded.Free;
+    Level.Free;
+  end;
+end;
+
+{ Diagonal walls: a cell cut at 45 degrees, solid behind }
+procedure TestLevelDiagonals;
+const
+  Mins: TVector3 = (X: -16; Y: -16; Z: -24);
+  Maxs: TVector3 = (X: 16; Y: 16; Z: 32);
+var
+  Level, Loaded: TQuakeLevel;
+  Bsp: TQuakeBsp;
+  Col: TQuakeCollision;
+  T: TQuakeTrace;
+  X, Y, Diagonals: Integer;
+  Stream: TMemoryStream;
+  E: TLevelEntity;
+  Report: TLevelGenReport;
+  Seed: Cardinal;
+  Solid: Integer;
+  BMins, BMaxs: TVector3;
+begin
+  { A room (1..5, 1..4) with its north-east corner (5, 4) cut }
+  Level := TQuakeLevel.Create(7, 6);
+  try
+    Level.Name := 'unittest_diagonal';
+    for Y := 1 to 4 do
+      for X := 1 to 5 do
+        Level.SetOpen(X, Y, 0, 160);
+    Check((Level.DiagonalCornerFor(5, 4) = 1) and (Level.DiagonalCornerFor(1, 1) = 3) and
+      (Level.DiagonalCornerFor(3, 2) = 0), 'the editor picks the corner between two walls');
+    Level.Cell(5, 4)^.Diagonal := 1;
+    Check(Level.DiagonalSolidSide(5, 4, 0) and Level.DiagonalSolidSide(5, 4, 2) and
+      not Level.DiagonalSolidSide(5, 4, 1), 'a north-east diagonal closes the east and north sides');
+    Level.AddEntityAtCell('info_player_start', 2, 2);
+    E := Level.AddEntityAtCell('item_health', 5, 4);
+    Check((E.Origin.X < 5.5 * 64) and (E.Origin.Y < 4.5 * 64), 'an entity in a diagonal cell stands in its open half');
+    Stream := TMemoryStream.Create;
+    Loaded := TQuakeLevel.Create(3, 3);
+    try
+      Level.SaveToStream(Stream);
+      Stream.Position := 0;
+      Loaded.LoadFromStream(Stream);
+      Check(Loaded.Cell(5, 4)^.Diagonal = 1, 'diagonal walls save and load');
+    finally
+      Loaded.Free;
+      Stream.Free;
+    end;
+
+    RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Check(Bsp.LoadFromPak('maps/unittest_diagonal.bsp'), 'the diagonal level loads');
+      Col := TQuakeCollision.Create(Bsp);
+      try
+        T := Col.BoxTrace(E.Origin, E.Origin, Vector3(-16, -16, -16), Vector3(16, 16, 16), 0, MASK_PLAYERSOLID);
+        Check(not T.StartSolid, 'an entity in a diagonal cell is clear of the wall (its 32-unit box)');
+      finally
+        Col.Free;
+      end;
+      Check(((Bsp.PointContents(Vector3(5.8 * 64, 4.8 * 64, 64)) and CONTENTS_SOLID) <> 0) and
+        ((Bsp.PointContents(Vector3(5.2 * 64, 4.2 * 64, 64)) and CONTENTS_SOLID) = 0),
+        'behind the diagonal is solid, in front is open');
+      Col := TQuakeCollision.Create(Bsp);
+      try
+        T := Col.BoxTrace(Vector3(4 * 64, 3 * 64, 40), Vector3(6 * 64, 5 * 64, 40), Mins, Maxs, 0, MASK_PLAYERSOLID);
+        Check((T.Fraction < 1) and SameValue(T.Normal.X, -Sqrt(0.5), 0.01) and SameValue(T.Normal.Y, -Sqrt(0.5), 0.01) and
+          SameValue(T.EndPos.X + T.EndPos.Y, (5.5 + 4.5) * 64 - 32, 0.3),
+          'walking into the corner meets the 45-degree wall (the box touches it)');
+      finally
+        Col.Free;
+      end;
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+
+  Diagonals := 0;
+  for Seed := 1 to 12 do
+  begin
+    Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
+    Inc(Diagonals, Report.Diagonals);
+    Level.Free;
+  end;
+  Check(Diagonals > 0, 'random levels cut room corners with diagonal walls');
+
+  { Round rooms: an ellipse, its staircase cut into 45-degree facets }
+  Level := TQuakeLevel.Create(16, 14);
+  try
+    Level.CarveEllipse(2, 2, 12, 11, 0, 160, 0);
+    Check(Level.Cell(7, 6)^.Solid = False, 'the middle of a round room is open');
+    Check(Level.Cell(2, 2)^.Solid and Level.Cell(12, 11)^.Solid and Level.Cell(12, 2)^.Solid,
+      'its rectangle''s corners stay solid');
+    Diagonals := 0;
+    for Y := 0 to Level.Height - 1 do
+      for X := 0 to Level.Width - 1 do
+        if Level.Cell(X, Y)^.Diagonal > 0 then
+          Inc(Diagonals);
+    Check(Diagonals >= 8, 'its staircase edges are cut with diagonal walls');
+  finally
+    Level.Free;
+  end;
+  Diagonals := 0;
+  for Seed := 1 to 12 do
+  begin
+    Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
+    Inc(Diagonals, Report.RoundRooms);
+    Level.Free;
+  end;
+  Check(Diagonals > 0, 'random levels have round rooms (reachable: the level check above)');
+
+  { Every monster of the random levels starts clear of the brushes (its
+    Quake 2 box; the tank's fills a cell) }
+  Solid := 0;
+  for Seed := 1 to 12 do
+  begin
+    Level := GenerateLevel(Seed, DefaultLevelGenOptions, Report);
+    try
+      Level.Name := 'unittest_monsters';
+      RegisterLevelMap(Level);
+      Bsp := TQuakeBsp.Create;
+      Col := nil;
+      try
+        Bsp.LoadFromPak('maps/unittest_monsters.bsp');
+        Col := TQuakeCollision.Create(Bsp);
+        for E in Level.Entities do
+          if Copy(E.EntClass, 1, 8) = 'monster_' then
+          begin
+            MonsterBoxSize(E.EntClass, BMins, BMaxs);
+            if Col.BoxTrace(E.Origin, E.Origin, BMins, BMaxs, 0, MASK_MONSTERSOLID).StartSolid then
+            begin
+              Inc(Solid);
+              Writeln('  seed ', Seed, ': ', E.EntClass, ' in solid at ', E.Origin.ToString);
+            end;
+          end;
+      finally
+        Col.Free;
+        Bsp.Free;
+      end;
+    finally
+      Level.Free;
+    end;
+  end;
+  Check(Solid = 0, 'monsters of random levels start clear of walls, steps and diagonal walls');
+end;
+
 procedure TestLevelLiftsSwitches;
 const
   Mins: TVector3 = (X: -16; Y: -16; Z: -24);
@@ -1613,6 +2078,174 @@ begin
   end;
 end;
 
+procedure TestLevelLightStyles;
+var
+  Level: TQuakeLevel;
+  Bsp: TQuakeBsp;
+  MapName: String;
+  I, K, Flicker, Switch, Plain: Integer;
+  Ent: TQuakeEntity;
+  Report: TLevelGenReport;
+  Styled: Integer;
+  E: TLevelEntity;
+begin
+  { A flickering light (style 1) at one end, a switchable one (a
+    targetname: style 32) at the other }
+  Level := MakeTestLevel;
+  try
+    Level.Name := 'unittest_styles';
+    Level.AddEntityAtCell('light', 4, 5).SetKey('style', '1');
+    Level.Entities.Last.SetKey('light', '250');
+    Level.AddEntityAtCell('light', 7, 2).SetKey('targetname', 'lamp');
+    Level.Entities.Last.SetKey('light', '250');
+    MapName := RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Bsp.LoadFromPak('maps/' + MapName + '.bsp');
+      Flicker := 0;
+      Switch := 0;
+      Plain := 0;
+      for I := 0 to Bsp.FaceCount - 1 do
+        for K := 0 to 3 do
+          case Bsp.Faces[I].Styles[K] of
+            1: Inc(Flicker);
+            32: Inc(Switch);
+            0: Inc(Plain);
+          end;
+      Check((Flicker > 0) and (Switch > 0) and (Plain > Flicker) and (Plain > Switch),
+        'compiled lightmaps have blocks for the flickering (style 1) and switchable (style 32) lights');
+      Ent := nil;
+      for I := 0 to Bsp.Entities.Count - 1 do
+        if Bsp.Entities[I].TargetName = 'lamp' then
+          Ent := Bsp.Entities[I];
+      Check((Ent <> nil) and (Ent.GetInt('style') = 32), 'a light with a targetname gets style 32 (like qrad)');
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+  { Random levels: some rooms flicker }
+  Styled := 0;
+  for I := 1 to 6 do
+  begin
+    Level := GenerateLevel(I, DefaultLevelGenOptions, Report);
+    try
+      for E in Level.Entities do
+        if (E.EntClass = 'light') and (E.Key('style') <> '') then
+        begin
+          Inc(Styled);
+          Break;
+        end;
+    finally
+      Level.Free;
+    end;
+  end;
+  Check(Styled >= 2, 'random levels have rooms with flickering or pulsing lights');
+end;
+
+procedure TestLevelSecretDoors;
+var
+  Level, Loaded: TQuakeLevel;
+  Report: TLevelGenReport;
+  Bsp: TQuakeBsp;
+  Ent: TQuakeEntity;
+  I: Integer;
+  MapName: String;
+  Stream: TMemoryStream;
+begin
+  Level := GenerateLevel(3, DefaultLevelGenOptions, Report);
+  try
+    Check((Report.SecretDoorX >= 0) and Level.Cell(Report.SecretDoorX, Report.SecretDoorY)^.Door and
+      Level.Cell(Report.SecretDoorX, Report.SecretDoorY)^.SecretDoor,
+      'random level 3 hides its secret passage behind a secret door');
+    Stream := TMemoryStream.Create;
+    Loaded := TQuakeLevel.Create(3, 3);
+    try
+      Level.SaveToStream(Stream);
+      Stream.Position := 0;
+      Loaded.LoadFromStream(Stream);
+      Check(Loaded.Cell(Report.SecretDoorX, Report.SecretDoorY)^.SecretDoor, 'secret doors survive the level JSON');
+    finally
+      Loaded.Free;
+      Stream.Free;
+    end;
+    MapName := RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Bsp.LoadFromPak('maps/' + MapName + '.bsp');
+      Ent := Bsp.FindEntity('func_door_secret');
+      Check((Ent <> nil) and (Copy(Ent.Model, 1, 1) = '*') and (Ent.SpawnFlags = 4) and
+        (Ent.GetInt('wait') = -1) and (Ent.TargetName = ''),
+        'it compiles into a func_door_secret: shootable (no targetname), down first, stays open');
+      I := 0;
+      for Ent in Bsp.Entities do
+        if Ent.ClassName = 'func_door' then
+          Inc(I);
+      Check(I > 0, 'the other doors stay func_doors');
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+end;
+
+procedure TestLevelAmbushes;
+var
+  Level: TQuakeLevel;
+  Report: TLevelGenReport;
+  E, Trig: TLevelEntity;
+  Bsp: TQuakeBsp;
+  Ent: TQuakeEntity;
+  I, Dormant, ModelIdx: Integer;
+  MapName: String;
+  Lo, Hi, P: TVector3;
+begin
+  Level := GenerateLevel(3, DefaultLevelGenOptions, Report);
+  try
+    Dormant := 0;
+    Trig := nil;
+    for E in Level.Entities do
+    begin
+      if (E.Key('targetname') = 'ambush1') and (Copy(E.EntClass, 1, 8) = 'monster_') and
+         (E.Key('spawnflags') = '2') then
+        Inc(Dormant);
+      if (E.EntClass = 'trigger_once') and (E.Key('target') = 'ambush1') then
+        Trig := E;
+    end;
+    Check((Report.Ambushes > 0) and (Report.AmbushMonsters >= Report.Ambushes) and (Dormant > 0) and (Trig <> nil),
+      'random level 3 has ambushes: monsters with spawnflag 2 woken by a trigger_once over the room');
+    MapName := RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Bsp.LoadFromPak('maps/' + MapName + '.bsp');
+      Ent := nil;
+      for I := 0 to Bsp.Entities.Count - 1 do
+        if (Bsp.Entities[I].ClassName = 'trigger_once') and (Bsp.Entities[I].Target = 'ambush1') then
+          Ent := Bsp.Entities[I];
+      ModelIdx := -1;
+      if Ent <> nil then
+        ModelIdx := StrToIntDef(Copy(Ent.Model, 2, MaxInt), -1);
+      Check((Ent <> nil) and (Copy(Ent.Model, 1, 1) = '*') and (ModelIdx > 0) and
+        (ModelIdx < Bsp.ModelCount) and not Ent.HasField('mins') and not Ent.HasField('origin'),
+        'the compiled map has the ambush trigger as a brush model (a real Quake 2 trigger)');
+      if (Ent <> nil) and (ModelIdx > 0) and (ModelIdx < Bsp.ModelCount) and (Trig <> nil) then
+      begin
+        Lo := Bsp.Models[ModelIdx].Mins;
+        Hi := Bsp.Models[ModelIdx].Maxs;
+        P := Trig.Origin + Vector3(0, 0, 32);
+        Check((P.X > Lo.X) and (P.X < Hi.X) and (P.Y > Lo.Y) and (P.Y < Hi.Y) and (P.Z > Lo.Z) and (P.Z < Hi.Z) and
+          (Hi.X - Lo.X >= 64) and SameValue(Hi.Z - Lo.Z, 256, 0.5), 'the trigger model covers the room');
+      end;
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+end;
+
 procedure TestLevelGen;
 const
   Mins: TVector3 = (X: -16; Y: -16; Z: -24);
@@ -1625,6 +2258,8 @@ var
   Start: TLevelEntity;
   E: TLevelEntity;
   SX, SY, KX, KY, Monsters, Lifts, Switches, Doors, Pools, KeyDoors, Slime, Teleporters: Integer;
+  Ladders, Lava, Outdoor, RX, RY, Vaults: Integer;
+  Ok1: Boolean;
   KeyOk: Boolean;
   A, B: TMemoryStream;
   Bsp: TQuakeBsp;
@@ -1640,6 +2275,10 @@ begin
   KeyDoors := 0;
   Slime := 0;
   Teleporters := 0;
+  Ladders := 0;
+  Lava := 0;
+  Outdoor := 0;
+  Vaults := 0;
   KeyOk := True;
   for Seed := 1 to 12 do
   begin
@@ -1651,6 +2290,9 @@ begin
     Inc(KeyDoors, Report.KeyDoors);
     Inc(Slime, Report.SlimePools);
     Inc(Teleporters, Report.Teleporters);
+    Inc(Ladders, Report.Ladders);
+    Inc(Lava, Report.LavaPools);
+    Inc(Outdoor, Report.OutdoorRooms);
     try
       Start := nil;
       Monsters := 0;
@@ -1668,17 +2310,33 @@ begin
         Continue;
       end;
       Level.CellAt(Start.Origin, SX, SY);
-      { The key of a locked exit lies on the near side of its doors }
+      { The key hunt: one key opens the exit (its key on the near side of
+        the exit's doors), or the red key (reachable with every locked door
+        shut) opens the vault of the blue key }
       if Report.KeyDoors > 0 then
       begin
         KX := -1;
+        RX := -1;
         for E in Level.Entities do
           if E.EntClass = 'key_blue_key' then
-            Level.CellAt(E.Origin, KX, KY);
-        if (KX < 0) or not ReachableWithLockedDoors(Level, SX, SY, KX, KY) or (Seed mod 2 <> 0) then
+            Level.CellAt(E.Origin, KX, KY)
+          else
+          if E.EntClass = 'key_red_key' then
+            Level.CellAt(E.Origin, RX, RY);
+        if Report.KeyDoors = 1 then
+          Ok1 := (KX >= 0) and (RX < 0) and ReachableWithLockedDoors(Level, SX, SY, KX, KY)
+        else
+        begin
+          Ok1 := (KX >= 0) and (RX >= 0) and ReachableWithLockedDoors(Level, SX, SY, RX, RY, [1, 2]) and
+            not ReachableWithLockedDoors(Level, SX, SY, KX, KY, [1, 2]) and
+            ReachableWithLockedDoors(Level, SX, SY, KX, KY, [1]);
+          Inc(Vaults);
+        end;
+        if (not Ok1) or (Seed mod 2 <> 0) then
         begin
           KeyOk := False;
-          Writeln('  seed ', Seed, ': key at ', KX, ' ', KY, ' not reachable with the doors shut');
+          Writeln('  seed ', Seed, ': keys (', Report.KeyDoors, ') blue at ', KX, ' ', KY, ' red at ', RX, ' ', RY,
+            ' in the wrong order');
         end;
       end;
       if (Report.Rooms < 6) or (Monsters < 5) or (UnreachableCells(Level, SX, SY) > 0) or
@@ -1696,7 +2354,9 @@ begin
   Check((Lifts > 0) and (Switches > 0) and (Doors > 0) and (Pools > 0),
     'random levels have lifts, exit switches, doors and pools');
   Check((KeyDoors > 0) and KeyOk, 'even seeds lock the exit with a blue key reachable with the doors shut');
+  Check(Vaults > 0, 'some levels keep the blue key in a vault behind red doors, its red key in the open');
   Check((Slime > 0) and (Teleporters > 0), 'random levels have slime pits and secret room teleporters');
+  Check((Ladders > 0) and (Lava > 0) and (Outdoor > 0), 'random levels have ladders, lava pits and outdoor rooms (all reachable)');
 
   { The same seed makes the same level }
   A := TMemoryStream.Create;
@@ -1737,6 +2397,13 @@ procedure TestMapLevelUrl;
 var
   Level: TQuakeLevel;
   Map: TQuakeMap;
+  Maps: TStringList;
+  Faces: Integer;
+  C: TComponent;
+  I: Integer;
+  Preview: TCastleTransform;
+  Found, Found2: TQuakeEntityTransform;
+  Json: String;
 begin
   { What the CGE editor shows: a level file through TQuakeMap.LevelUrl, a
     random level through MapName }
@@ -1755,6 +2422,51 @@ begin
     Map.MapName := RandomMapName(3);
     Check((Map.Bsp <> nil) and (Map.Bsp.MapName = 'rand3') and (Map.FaceCount > 100),
       'TQuakeMap.MapName rand3 shows random level 3');
+    Maps := Map.AvailableMaps;
+    try
+      Check((Maps.IndexOf('demo1') >= 0) and (Maps.IndexOf('demo2') >= 0) and
+        (Maps.IndexOf('demo3') >= 0), 'the editor''s MapName list has the demo maps');
+    finally
+      Maps.Free;
+    end;
+    Faces := Map.FaceCount;
+    Map.ReloadMap;
+    Check((Map.Bsp <> nil) and (Map.FaceCount = Faces), 'Reload Map rebuilds the same map');
+    { Saving the design keeps only TQuakeMap's properties: the generated
+      world, movers and previews are not written }
+    Json := ComponentToString(Map);
+    Check((Pos('"World"', Json) = 0) and (Pos('Mover', Json) = 0) and (Pos('"Children"', Json) = 0),
+      'saving a design with a TQuakeMap does not write its generated children');
+    { Entities selectable in the editor: one TQuakeEntityTransform each,
+      with the entity's keys }
+    Map.MapName := 'demo1';
+    Map.PreviewMarkers := True;
+    Map.PreviewEntities := True;
+    Found := nil;
+    Found2 := nil;
+    Preview := nil;
+    for I := 0 to Map.Count - 1 do
+      if Map[I].Name = 'EntityPreview' then
+        Preview := Map[I];
+    if Preview <> nil then
+      for I := 0 to Preview.Count - 1 do
+      begin
+        C := Preview[I];
+        if (C is TQuakeEntityTransform) and (TQuakeEntityTransform(C).EntityClass = 'info_player_start') then
+          Found := TQuakeEntityTransform(C)
+        else
+        if (C is TQuakeEntityTransform) and (Copy(TQuakeEntityTransform(C).EntityClass, 1, 8) = 'monster_') then
+          Found2 := TQuakeEntityTransform(C);
+      end;
+    Check((Found <> nil) and (Found.Fields.Values['classname'] = 'info_player_start') and
+      (Found.Fields.Values['origin'] <> '') and (Found.EntityIndex > 0) and (Found.Count = 1),
+      'a player start marker shows its keys in the editor');
+    Check((Found2 <> nil) and (Found2.Count = 1) and
+      ((Found2.Fields.IndexOfName('spawnflags') >= 0) = (Found2.SpawnFlags <> 0)),
+      'a previewed monster holds its model and keys');
+    Json := ComponentToString(Map);
+    Check((Pos('TQuakeEntityTransform', Json) = 0) and (Pos('"Children"', Json) = 0) and (Pos('"PreviewMarkers" : true', Json) > 0),
+      'previews are not saved either (only the PreviewMarkers switch)');
   finally
     Map.Free;
   end;
@@ -1939,6 +2651,7 @@ var
   V: TVector2;
   F, S, Yaw, Pitch, Yaw2, Pitch2: Single;
   E: TInputPressRelease;
+  B: TGameControllerButton;
 begin
   { Deadzone: small drift ignored, output starts at 0 and reaches 1 }
   Check(ApplyDeadZone(Vector2(0.15, 0.1)).IsZero, 'stick drift inside the deadzone ignored');
@@ -1969,6 +2682,25 @@ begin
   Check(GamepadMenuEvent(E).IsKey(keyArrowUp), 'D-pad up is the up arrow in menus');
   CheckEquals(1, GamepadWeaponCycle(gbRightBumper), 'right bumper selects the next weapon');
   CheckEquals(-1, GamepadWeaponCycle(gbLeftBumper), 'left bumper selects the previous weapon');
+  { Rebound buttons (the D-pad up / down stay weapon cycling) }
+  Settings.BindPadButton(paNextWeapon, gbNorth);
+  CheckEquals(1, GamepadWeaponCycle(gbNorth), 'a rebound button cycles weapons');
+  CheckEquals(0, GamepadWeaponCycle(gbRightBumper), 'the old button no longer does');
+  CheckEquals(1, GamepadWeaponCycle(gbDPadUp), 'D-pad up always selects the next weapon');
+  Check(GamepadButtonFromName('Share', B) and (B = gbShare) and not GamepadButtonFromName('trigger', B),
+    'gamepad button names');
+  Settings.BindPadButton(paJump, gbLeftBumper);
+  VirtualGamepad.Held := [gbLeftBumper];
+  Check(ReadGamepads(0.01, 1, False).Jump, 'holding the button bound to jump jumps');
+  VirtualGamepad.Held := [gbSouth];
+  Check(not ReadGamepads(0.01, 1, False).Jump, 'the old jump button (now previous weapon) does not');
+  VirtualGamepad.Held := [gbLeftStickClick];
+  Check(ReadGamepads(0.01, 1, False).Crouch, 'an unbound left stick click crouches');
+  Settings.BindPadButton(paUse, gbLeftStickClick);
+  Check(not ReadGamepads(0.01, 1, False).Crouch, 'but not once it is bound to use');
+  VirtualGamepad.Held := [];
+  Settings.ResetPadButtons;
+  CheckEquals(1, GamepadWeaponCycle(gbRightBumper), 'reset restores the right bumper');
 end;
 
 procedure TestPlayerTrail;
@@ -1997,6 +2729,207 @@ end;
 
 const
   PakPath = '../data/paks/quake2_demo.pak';
+{ Bytes of an IBSP map rewritten as a QBSP map (the same data in the
+  extended layout), like ericw-tools' -qbism output }
+function IbspToQbsp(const Data: PByte; const Size: Cardinal): TMemoryStream;
+var
+  Hdr, Out: TBSPHeader;
+  L, I, Count: Integer;
+  Lumps: array[0..LUMP_COUNT - 1] of TBytes;
+  IN_: ^TIBSPNode; QN: TQBSPNode;
+  IL: ^TIBSPLeaf; QL: TQBSPLeaf;
+  IF_: ^TIBSPFace; QF: TQBSPFace;
+  IE: ^TIBSPEdge; QE: TQBSPEdge;
+  ISd: ^TIBSPBrushSide; QS: TQBSPBrushSide;
+  W: PWord; LW: LongWord;
+  J: Integer;
+
+  procedure Put(const Lump: Integer; const Rec; const RecSize, Index: Integer);
+  begin
+    Move(Rec, Lumps[Lump][Index * RecSize], RecSize);
+  end;
+
+begin
+  Move(Data^, Hdr, SizeOf(Hdr));
+  for L := 0 to LUMP_COUNT - 1 do
+  begin
+    SetLength(Lumps[L], Hdr.Lumps[L].Length);
+    if Hdr.Lumps[L].Length > 0 then
+      Move((Data + Hdr.Lumps[L].Offset)^, Lumps[L][0], Hdr.Lumps[L].Length);
+  end;
+  Count := Hdr.Lumps[LUMP_NODES].Length div SizeOf(TIBSPNode);
+  IN_ := Pointer(Data + Hdr.Lumps[LUMP_NODES].Offset);
+  SetLength(Lumps[LUMP_NODES], Count * SizeOf(TQBSPNode));
+  for I := 0 to Count - 1 do
+  begin
+    QN.PlaneNum := IN_[I].PlaneNum;
+    QN.Children := IN_[I].Children;
+    for J := 0 to 2 do
+    begin
+      QN.Mins[J] := IN_[I].Mins[J];
+      QN.Maxs[J] := IN_[I].Maxs[J];
+    end;
+    QN.FirstFace := IN_[I].FirstFace;
+    QN.NumFaces := IN_[I].NumFaces;
+    Put(LUMP_NODES, QN, SizeOf(QN), I);
+  end;
+  Count := Hdr.Lumps[LUMP_LEAFS].Length div SizeOf(TIBSPLeaf);
+  IL := Pointer(Data + Hdr.Lumps[LUMP_LEAFS].Offset);
+  SetLength(Lumps[LUMP_LEAFS], Count * SizeOf(TQBSPLeaf));
+  for I := 0 to Count - 1 do
+  begin
+    QL.Contents := IL[I].Contents;
+    QL.Cluster := IL[I].Cluster;
+    QL.Area := IL[I].Area;
+    for J := 0 to 2 do
+    begin
+      QL.Mins[J] := IL[I].Mins[J];
+      QL.Maxs[J] := IL[I].Maxs[J];
+    end;
+    QL.FirstLeafFace := IL[I].FirstLeafFace;
+    QL.NumLeafFaces := IL[I].NumLeafFaces;
+    QL.FirstLeafBrush := IL[I].FirstLeafBrush;
+    QL.NumLeafBrushes := IL[I].NumLeafBrushes;
+    Put(LUMP_LEAFS, QL, SizeOf(QL), I);
+  end;
+  Count := Hdr.Lumps[LUMP_FACES].Length div SizeOf(TIBSPFace);
+  IF_ := Pointer(Data + Hdr.Lumps[LUMP_FACES].Offset);
+  SetLength(Lumps[LUMP_FACES], Count * SizeOf(TQBSPFace));
+  for I := 0 to Count - 1 do
+  begin
+    QF.PlaneId := IF_[I].PlaneId;
+    QF.Side := IF_[I].Side;
+    QF.FirstEdge := IF_[I].FirstEdge;
+    QF.NumEdges := IF_[I].NumEdges;
+    QF.TexInfoId := IF_[I].TexInfoId;
+    QF.Styles := IF_[I].Styles;
+    QF.LightmapOffset := IF_[I].LightmapOffset;
+    Put(LUMP_FACES, QF, SizeOf(QF), I);
+  end;
+  Count := Hdr.Lumps[LUMP_EDGES].Length div SizeOf(TIBSPEdge);
+  IE := Pointer(Data + Hdr.Lumps[LUMP_EDGES].Offset);
+  SetLength(Lumps[LUMP_EDGES], Count * SizeOf(TQBSPEdge));
+  for I := 0 to Count - 1 do
+  begin
+    QE.V0 := IE[I].V0;
+    QE.V1 := IE[I].V1;
+    Put(LUMP_EDGES, QE, SizeOf(QE), I);
+  end;
+  Count := Hdr.Lumps[LUMP_BRUSHSIDES].Length div SizeOf(TIBSPBrushSide);
+  ISd := Pointer(Data + Hdr.Lumps[LUMP_BRUSHSIDES].Offset);
+  SetLength(Lumps[LUMP_BRUSHSIDES], Count * SizeOf(TQBSPBrushSide));
+  for I := 0 to Count - 1 do
+  begin
+    QS.PlaneNum := ISd[I].PlaneNum;
+    QS.TexInfo := ISd[I].TexInfo;
+    Put(LUMP_BRUSHSIDES, QS, SizeOf(QS), I);
+  end;
+  for L in [LUMP_LEAFFACES, LUMP_LEAFBRUSHES] do
+  begin
+    Count := Hdr.Lumps[L].Length div SizeOf(Word);
+    W := Pointer(Data + Hdr.Lumps[L].Offset);
+    SetLength(Lumps[L], Count * SizeOf(LongWord));
+    for I := 0 to Count - 1 do
+    begin
+      LW := W[I];
+      Put(L, LW, SizeOf(LW), I);
+    end;
+  end;
+  Result := TMemoryStream.Create;
+  Out := Hdr;
+  Out.Ident := QBSP_IDENT;
+  Result.WriteBuffer(Out, SizeOf(Out));
+  for L := 0 to LUMP_COUNT - 1 do
+  begin
+    while Result.Position mod 4 <> 0 do
+      Result.WriteByte(0);
+    Out.Lumps[L].Offset := Result.Position;
+    Out.Lumps[L].Length := Length(Lumps[L]);
+    if Length(Lumps[L]) > 0 then
+      Result.WriteBuffer(Lumps[L][0], Length(Lumps[L]));
+  end;
+  Result.Position := 0;
+  Result.WriteBuffer(Out, SizeOf(Out));
+  Result.Position := 0;
+end;
+
+procedure TestModSupport;
+var
+  Dir: String;
+  Img: TRGBImage;
+  Info: TQuakeWalInfo;
+  Zipper: TZipper;
+  Md2: TMemoryStream;
+  Def: PQuakeMonsterDef;
+  Data: PByte;
+  Size: Cardinal;
+  A, B: TQuakeBsp;
+  I, Same: Integer;
+  P: TVector3;
+begin
+  { A mod folder: loose files (a PNG-only texture) and a .pkz with a
+    model of a monster this port has no code for (a Quake 1 dog) }
+  Dir := GetTempDir + 'castle_quake2_modtest' + PathDelim;
+  ForceDirectories(Dir + 'textures' + PathDelim + 'cotvtest');
+  Img := TRGBImage.Create(16, 8);
+  try
+    Img.Clear(Vector4Byte(200, 40, 40, 255));
+    SaveImage(Img, FilenameToUriSafe(Dir + 'textures' + PathDelim + 'cotvtest' + PathDelim + 'onlypng.png'));
+  finally
+    Img.Free;
+  end;
+  Check(Pak.AddDirectory(Dir) >= 1, 'a mod folder''s loose files are added');
+  Check(Palette.LoadWal('cotvtest/onlypng', Info) and (Info.Width = 16) and (Info.Height = 8),
+    'a texture with only a PNG (Quake 2 Remastered / mods) loads, at the image''s size');
+
+  Check(FindMonsterDef('monster_dog') = nil, 'no generic monster without its model');
+  Md2 := Pak.GetStream('models/monsters/soldier/tris.md2');
+  Zipper := TZipper.Create;
+  try
+    Zipper.FileName := Dir + 'pak9.pkz';
+    Zipper.Entries.AddFileEntry(Md2, 'models/monsters/dog/tris.md2');
+    Zipper.ZipAllFiles;
+  finally
+    Zipper.Free;
+    Md2.Free;
+  end;
+  Check(Pak.AddZip(Dir + 'pak9.pkz') and Pak.FileExists('models/monsters/dog/tris.md2') and
+    (Pak.GetStream('models/monsters/dog/tris.md2') <> nil), 'a .pkz archive''s files are read');
+  Def := FindMonsterDef('monster_dog');
+  Check((Def <> nil) and IsGenericMonsterDef(Def) and (Def^.Health = 50) and (Def^.Attack = akMelee) and
+    (Def^.Model = 'models/monsters/dog/tris.md2'), 'a Call of the Void monster gets a generic definition (model, health 50, melee)');
+  Check(FindMonsterDef('monster_dog') = Def, 'the generic definition is made once');
+  Check(FindMonsterDef('monster_ogre') = nil, 'but only when its model is there');
+
+  { QBSP: demo1 rewritten in the extended layout reads the same }
+  Data := Pak.GetData('maps/demo1.bsp', Size);
+  Pak.AddMemoryFile('maps/qbsptest.bsp', IbspToQbsp(Data, Size));
+  A := TQuakeBsp.Create;
+  B := TQuakeBsp.Create;
+  try
+    Check(A.LoadFromPak('maps/demo1.bsp') and B.LoadFromPak('maps/qbsptest.bsp') and B.Extended and not A.Extended,
+      'a QBSP (extended) map loads');
+    Same := 0;
+    for I := 0 to Min(A.FaceCount, B.FaceCount) - 1 do
+      if (A.Faces[I].NumEdges = B.Faces[I].NumEdges) and (A.Faces[I].TexInfoId = B.Faces[I].TexInfoId) and
+         TVector3.Equals(A.GetFaceVertex(I, 0), B.GetFaceVertex(I, 0)) then
+        Inc(Same);
+    Check((A.FaceCount = B.FaceCount) and (Same = A.FaceCount) and (A.ClusterCount = B.ClusterCount),
+      'its faces, vertices and clusters match the IBSP map');
+    Same := 0;
+    for I := 0 to 99 do
+    begin
+      P := Vector3(-1000 + I * 23, -800 + I * 17, -100 + I * 5);
+      if A.PointContents(P) = B.PointContents(P) then
+        Inc(Same);
+    end;
+    Check(Same = 100, 'and its tree gives the same contents');
+  finally
+    A.Free;
+    B.Free;
+  end;
+end;
+
 begin
   if (ParamCount >= 2) and (ParamStr(1) = '--generate-designs') then
   begin
@@ -2038,8 +2971,16 @@ begin
   TestLevelVis;
   TestLevelDoorsWater;
   TestLevelKeysSlime;
+  TestLevelLaddersLava;
+  TestLevelRamps;
+  TestLevelWindows;
+  TestLevelDiagonals;
+  TestSoundMixer;
   TestLevelLiftsSwitches;
   TestLevelGen;
+  TestLevelAmbushes;
+  TestLevelSecretDoors;
+  TestLevelLightStyles;
   TestMapLevelUrl;
   TestRecord;
   TestGun;
@@ -2047,6 +2988,9 @@ begin
   TestMonsterMoves;
   TestTrace;
   TestMonsterJump;
+  { Last: they add files to the PAKs }
+  TestLevelThemes;
+  TestModSupport;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then

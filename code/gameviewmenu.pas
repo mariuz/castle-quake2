@@ -74,7 +74,7 @@ begin
   Result := inherited Press(Event);
   if Result then
     Exit;
-  Result := Menu.Press(GamepadMenuEvent(Event));
+  Result := Menu.Press(Event);
 end;
 
 end.

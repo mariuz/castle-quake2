@@ -33,8 +33,23 @@ type
     { Water in the cell, its surface at height Water (above Floor) }
     Wet: Boolean;
     Water: SmallInt;
-    { The liquid is slime (CONTENTS_SLIME, hurts) instead of water }
-    Slime: Boolean;
+    { The liquid is slime (CONTENTS_SLIME, hurts) or lava (CONTENTS_LAVA,
+      hurts a lot) instead of water }
+    Slime, Lava: Boolean;
+    { A ladder against the highest neighbouring step (LadderDir), up to its
+      floor }
+    Ladder: Boolean;
+    { A slope: the floor rises from Floor at the back edge to the floor of
+      the neighbour RampDir points to (at most LevelRampMaxRise higher) }
+    Ramp: Boolean;
+    { A window: a glass pane (CONTENTS_WINDOW, translucent) across the
+      cell between its open sides (WindowAxis), from Floor (the sill) to
+      Ceil }
+    Window: Boolean;
+    { A diagonal wall: the half of the cell at this corner is solid, cut at
+      45 degrees (1 north-east = +X +Y, 2 north-west, 3 south-west, 4
+      south-east); 0 = none }
+    Diagonal: Byte;
     { A lift (func_plat): a slab moving between Floor and LiftTop; touching
       lift cells with the same heights are one lift }
     Lift: Boolean;
@@ -47,12 +62,18 @@ type
     { A locked door: 1 = blue key, 2 = red key opens it (then it stays
       open); 0 = not locked }
     Key: Byte;
+    { A secret door (with Door): a func_door_secret with the wall texture of
+      the room beside it, opened by a shot; it sinks into the floor, then
+      slides away along the passage, and stays open }
+    SecretDoor: Boolean;
   end;
   PLevelCell = ^TLevelCell;
 
   { Texture set of a theme (WAL names in the PAK, without "textures/") }
   TLevelTheme = record
     Name, Floor, Wall, Ceil, Step, Light: String;
+    { For outdoor (sky) areas: the generator's outdoor rooms }
+    Outdoor: Boolean;
   end;
 
   { A Quake 2 entity: classname, origin and the other key / value pairs }
@@ -87,6 +108,36 @@ type
     { All cells solid, no entities }
     procedure Clear;
     function InGrid(const X, Y: Integer): Boolean;
+    { Direction (0 +X, 1 -X, 2 +Y, 3 -Y) of the open neighbour a ladder in
+      (X, Y) climbs to: the highest floor more than a step up; -1 = none }
+    function LadderDir(const X, Y: Integer): Integer;
+    { Direction a ramp in (X, Y) rises towards: the highest open neighbour
+      above its floor, at most LevelRampMaxRise up; -1 = flat }
+    function RampDir(const X, Y: Integer): Integer;
+    { The axis a window looks along (0 X: open to the west and east, 1 Y),
+      -1 when it isn't between two open cells }
+    function WindowAxis(const X, Y: Integer): Integer;
+    { Is the edge of (X, Y) towards D (0 +X, 1 -X, 2 +Y, 3 -Y) closed by the
+      solid half of a diagonal cell? }
+    function DiagonalSolidSide(const X, Y, D: Integer): Boolean;
+    { The corner a diagonal wall would close: the one between two solid
+      neighbours (1..4, as Diagonal), 0 when none }
+    function DiagonalCornerFor(const X, Y: Integer): Integer;
+    { Can (X, Y) take a diagonal wall at Corner without closing a way: open
+      and plain (no door, lift, button, liquid, ladder, ramp, window), and
+      the cell across the corner is solid too }
+    function CanCutCorner(const X, Y, Corner: Integer): Boolean;
+    { Open the cells of the ellipse inscribed in X0..X1, Y0..Y1 (inclusive)
+      and cut its staircase edges with diagonal walls: a round room }
+    procedure CarveEllipse(const X0, Y0, X1, Y1, AFloor, ACeil, ATheme: Integer);
+    { Diagonal walls on every plain open cell in the rectangle that is an
+      outer corner (two solid neighbours and the cell across); their count }
+    function SmoothCorners(const X0, Y0, X1, Y1: Integer): Integer;
+    { Is (X, Y) inside the ellipse inscribed in X0..X1, Y0..Y1? }
+    function InEllipse(const X, Y, X0, Y0, X1, Y1: Integer): Boolean;
+    { The floor of (X, Y) at a point of the cell (Quake coordinates; a ramp
+      slopes, other cells are flat) }
+    function FloorAt(const X, Y: Integer; const PX, PY: Single): Single;
     { The cell, or a solid one outside the grid (don't change that) }
     function Cell(const X, Y: Integer): PLevelCell;
     procedure SetOpen(const X, Y: Integer; const AFloor, ACeil: Integer; const ATheme: Integer = 0);
@@ -108,28 +159,54 @@ type
     procedure SaveToFile(const Url: String);
     procedure LoadFromFile(const Url: String);
     { The Quake 2 entity lump text (worldspawn first) }
-    function EntityText: String;
+    function EntityText: String; overload;
+    { Same, with brush models for some entities (EntityModels[i] = "*N" for
+      the i-th entity, '' for none): those get "model" instead of their
+      origin and the mins / maxs of a box trigger }
+    function EntityText(const EntityModels: array of String): String; overload;
     property Width: Integer read FWidth;
     property Height: Integer read FHeight;
     property Entities: TLevelEntityList read FEntities;
   end;
 
 const
-  LevelThemes: array[0..3] of TLevelTheme = (
+  { The themes of the demo's textures (LevelThemes starts with them; more
+    are discovered in the full game's PAKs, DiscoverLevelThemes) }
+  BuiltInThemes: array[0..7] of TLevelTheme = (
     (Name: 'base'; Floor: 'e1u1/floor3_1'; Wall: 'e1u1/wslt1_1'; Ceil: 'e1u1/ceil1_1';
-      Step: 'e1u1/metal3_2'; Light: 'e1u1/plite1_1'),
+      Step: 'e1u1/metal3_2'; Light: 'e1u1/plite1_1'; Outdoor: False),
     (Name: 'metal'; Floor: 'e1u1/grate1_3'; Wall: 'e1u1/metal2_2'; Ceil: 'e1u1/ceil1_3';
-      Step: 'e1u1/metal1_1'; Light: 'e1u1/plite1_3'),
+      Step: 'e1u1/metal1_1'; Light: 'e1u1/plite1_3'; Outdoor: False),
     (Name: 'green'; Floor: 'e1u1/florr1_2'; Wall: 'e1u1/grnx2_1'; Ceil: 'e1u1/ceil1_4';
-      Step: 'e1u1/grnmt1_1'; Light: 'e1u1/plite1_1'),
+      Step: 'e1u1/grnmt1_1'; Light: 'e1u1/plite1_1'; Outdoor: False),
     (Name: 'tech'; Floor: 'e1u1/floor3_2'; Wall: 'e1u1/wbasic1_1'; Ceil: 'e1u1/ceil1_7';
-      Step: 'e1u1/metal3_5'; Light: 'e1u1/baselt_2')
+      Step: 'e1u1/metal3_5'; Light: 'e1u1/baselt_2'; Outdoor: False),
+    (Name: 'red'; Floor: 'e1u1/floor3_3'; Wall: 'e1u1/red1_2'; Ceil: 'e1u1/metal5_1';
+      Step: 'e1u1/metal1_3'; Light: 'e1u1/baselt_3'; Outdoor: False),
+    (Name: 'brown'; Floor: 'e1u1/c_met7_1'; Wall: 'e1u2/metal13_1'; Ceil: 'e1u1/wtroof4_2';
+      Step: 'e1u1/metal3_3'; Light: 'e1u1/baselt_4'; Outdoor: False),
+    (Name: 'rock'; Floor: 'e1u1/rocks16_2'; Wall: 'e1u1/rocks19_1'; Ceil: 'e1u1/rocks16_2';
+      Step: 'e1u1/rocks19_1'; Light: 'e1u1/plite1_3'; Outdoor: True),
+    (Name: 'grass'; Floor: 'e1u1/grass1_7'; Wall: 'e1u1/rocks19_1'; Ceil: 'e1u1/rocks16_2';
+      Step: 'e1u1/rocks16_2'; Light: 'e1u1/plite1_3'; Outdoor: True)
   );
   LevelSkyTexture = 'e1u1/sky1';
   LevelWaterTexture = 'e1u1/bluwter';
   { The demo has no slime texture: its warping sewage stands in }
   LevelSlimeTexture = 'e1u1/sewer1';
-  LevelKeyDoorTexture = 'e1u1/keydr1_1';
+  { Doors of the blue and red key (the red one has a red lamp) }
+  LevelKeyDoorTextures: array[1..2] of String = ('e1u1/keydr1_1', 'e1u2/keydran1_1');
+  { Made in memory by QuakeBspBuilder (the demo has no lava texture) }
+  LevelLavaTexture = 'castle/lava';
+  LevelLadderTexture = 'e1u1/wsupprt1_3';
+  { A ladder: this deep in front of its wall, this wide }
+  LevelLadderDepth = 8;
+  LevelLadderHalfWidth = 20;
+  { A ramp rises at most this much over its cell (45 degrees: Quake 2's
+    walkable limit is a floor normal of 0.7) }
+  LevelRampMaxRise = 48;
+  LevelWindowTexture = 'e1u1/wndow0_3';
+  LevelWindowThickness = 4;
   { Key items of Key = 1, 2 }
   LevelKeyClasses: array[1..2] of String = ('key_blue_key', 'key_red_key');
   LevelDoorTexture = 'e1u1/dr02_1';
@@ -140,8 +217,37 @@ const
   LevelButtonHalfWidth = 12;
   LevelButtonHeight = 40;
 
+var
+  { The themes levels can use: BuiltInThemes, then the ones discovered in
+    the loaded PAKs (EnsureLevelThemes). Cells store an index; level files
+    also store the names, so they keep their themes as the list changes. }
+  LevelThemes: array of TLevelTheme;
+
+{ Back to BuiltInThemes only }
+procedure ResetLevelThemes;
+
+{ BuiltInThemes plus a theme per texture directory of the PAKs with enough
+  plain textures (the full game's e1u2, e2u3...; the demo's few extra ones
+  don't count): floor, wall, ceiling, step and light picked by the WAL
+  flags and names }
+procedure DiscoverLevelThemes;
+
+{ DiscoverLevelThemes when the PAKs changed since the last time }
+procedure EnsureLevelThemes;
+
+{ Themes the generator uses for rooms and corridors / outdoor areas }
+function IndoorThemeCount: Integer;
+function IndoorTheme(const I: Integer): Integer;
+function OutdoorThemeCount: Integer;
+function OutdoorTheme(const I: Integer): Integer;
+function ThemeIndex(const Name: String): Integer;
+
 { Water in the cell (its surface above the floor) }
 function CellHasWater(const C: PLevelCell): Boolean;
+
+{ Rolling ground: a smooth height 0..64 (16-unit steps) for each cell,
+  for outdoor areas (the Hills tool, the generator's outdoor rooms) }
+function TerrainHeight(const X, Y: Integer): Integer;
 
 { Height above the floor where an entity of this class has its origin:
   its box 1 unit above the floor (an origin that makes the box touch the
@@ -151,14 +257,217 @@ function EntityFloorOffset(const AClassName: String): Single;
 implementation
 
 uses
-  Math, fpjson, jsonparser, CastleDownload, CastleFilesUtils, CastleUriUtils;
+  Math, StrUtils, fpjson, jsonparser, CastleDownload, CastleFilesUtils, CastleUriUtils, CastleLog, QuakePak;
 
 var
   DotFormat: TFormatSettings;
 
+const
+  LadderDX: array[0..3] of Integer = (1, -1, 0, 0);
+  LadderDY: array[0..3] of Integer = (0, 0, 1, -1);
+
 function CellHasWater(const C: PLevelCell): Boolean;
 begin
   Result := (not C^.Solid) and C^.Wet and (C^.Water > C^.Floor);
+end;
+
+var
+  ThemesForFileCount: Integer = -1;
+
+procedure ResetLevelThemes;
+var
+  I: Integer;
+begin
+  SetLength(LevelThemes, Length(BuiltInThemes));
+  for I := 0 to High(BuiltInThemes) do
+    LevelThemes[I] := BuiltInThemes[I];
+end;
+
+procedure DiscoverLevelThemes;
+const
+  { A directory needs this many plain textures to be a theme }
+  MinTextures = 12;
+  SURF_LIGHT = 1;
+  SURF_SKY = 4;
+  SURF_WARP = 8;
+  SURF_TRANS33 = $10;
+  SURF_TRANS66 = $20;
+  SURF_NODRAW = $80;
+var
+  Files, Dirs: TStringList;
+  Plain, Lights: TStringList;
+  I, J, Slash: Integer;
+  Path, Dir, Name: String;
+  Data: PByte;
+  Size: Cardinal;
+  Flags, Contents, Value: LongInt;
+  T: TLevelTheme;
+
+  function Skipped(const N: String): Boolean;
+  const
+    Words: array[0..15] of String = ('sky', 'clip', 'trigger', 'hint', 'origin', 'skip', 'door', 'dr0',
+      'btn', 'button', 'sign', 'exit', 'arrow', 'lever', 'alarm', 'black');
+  var
+    W: String;
+  begin
+    Result := (N = '') or (N[1] in ['+', '*', '#']);
+    for W in Words do
+      if Pos(W, N) > 0 then
+        Exit(True);
+  end;
+
+  function Pick(const Hints: array of String; const Fallback: String): String;
+  var
+    K: Integer;
+    H: String;
+  begin
+    for H in Hints do
+      for K := 0 to Plain.Count - 1 do
+        if Pos(H, Plain[K]) > 0 then
+          Exit(Dir + '/' + Plain[K]);
+    Result := Fallback;
+  end;
+
+begin
+  ResetLevelThemes;
+  Files := Pak.FindFiles('textures/', '.wal');
+  Dirs := TStringList.Create;
+  Plain := TStringList.Create;
+  Lights := TStringList.Create;
+  try
+    Files.Sort;
+    Dirs.Sorted := True;
+    Dirs.Duplicates := dupIgnore;
+    for Path in Files do
+    begin
+      Slash := Pos('/', Copy(Path, 10, MaxInt));
+      if Slash > 0 then
+        Dirs.Add(Copy(Path, 10, Slash - 1));
+    end;
+    for Dir in Dirs do
+    begin
+      { The demo's own textures are the built-in themes }
+      if Dir = 'e1u1' then
+        Continue;
+      Plain.Clear;
+      Lights.Clear;
+      for J := 0 to Files.Count - 1 do
+      begin
+        Path := Files[J];
+        if Copy(Path, 1, 10 + Length(Dir)) <> 'textures/' + Dir + '/' then
+          Continue;
+        Name := ChangeFileExt(Copy(Path, 11 + Length(Dir), MaxInt), '');
+        if Pos('/', Name) > 0 then
+          Continue;
+        Data := Pak.GetData(Path, Size);
+        if (Data = nil) or (Size < 100) then
+          Continue;
+        { WAL header: name, size, mip offsets, next anim name, then flags }
+        Flags := PLongInt(Data + 88)^;
+        Contents := PLongInt(Data + 92)^;
+        Value := PLongInt(Data + 96)^;
+        if ((Flags and (SURF_SKY or SURF_WARP or SURF_TRANS33 or SURF_TRANS66 or SURF_NODRAW)) <> 0) or
+           (Contents <> 0) or Skipped(Name) then
+          Continue;
+        if ((Flags and SURF_LIGHT) <> 0) and (Value > 0) then
+          Lights.Add(Name)
+        else
+          Plain.Add(Name);
+      end;
+      if Plain.Count < MinTextures then
+        Continue;
+      T.Name := Dir;
+      T.Floor := Pick(['floor', 'flr', 'grate', 'grnd', 'flat', 'plat', 'grass', 'dirt'], Dir + '/' + Plain[0]);
+      T.Wall := Pick(['wall', 'wbasic', 'wslt', 'brick', 'stone', 'rock', 'metal', 'comp', 'bas'], Dir + '/' + Plain[1]);
+      T.Ceil := Pick(['ceil', 'roof', 'top'], T.Floor);
+      T.Step := Pick(['step', 'trim', 'support', 'metal', 'pip'], T.Wall);
+      if Lights.Count > 0 then
+        T.Light := Dir + '/' + Lights[0]
+      else
+        T.Light := BuiltInThemes[0].Light;
+      T.Outdoor := (Pos('grass', T.Floor) > 0) or (Pos('rock', T.Floor) > 0) or (Pos('dirt', T.Floor) > 0) or
+        (Pos('grnd', T.Floor) > 0);
+      SetLength(LevelThemes, Length(LevelThemes) + 1);
+      LevelThemes[High(LevelThemes)] := T;
+      WritelnLog('QuakeLevel', 'Theme "%s" from the PAKs: floor %s, wall %s, ceiling %s, step %s, light %s%s',
+        [T.Name, T.Floor, T.Wall, T.Ceil, T.Step, T.Light, StrUtils.IfThen(T.Outdoor, ' (outdoor)', '')]);
+    end;
+  finally
+    Lights.Free;
+    Plain.Free;
+    Dirs.Free;
+    Files.Free;
+  end;
+  ThemesForFileCount := Pak.FileCount;
+end;
+
+procedure EnsureLevelThemes;
+begin
+  if (Pak <> nil) and (Pak.FileCount <> ThemesForFileCount) then
+    DiscoverLevelThemes;
+end;
+
+function IndoorThemeCount: Integer;
+var
+  T: TLevelTheme;
+begin
+  Result := 0;
+  for T in LevelThemes do
+    if not T.Outdoor then
+      Inc(Result);
+end;
+
+function IndoorTheme(const I: Integer): Integer;
+var
+  K, N: Integer;
+begin
+  N := 0;
+  for K := 0 to High(LevelThemes) do
+    if not LevelThemes[K].Outdoor then
+    begin
+      if N = I then
+        Exit(K);
+      Inc(N);
+    end;
+  Result := 0;
+end;
+
+function OutdoorThemeCount: Integer;
+begin
+  Result := Length(LevelThemes) - IndoorThemeCount;
+end;
+
+function OutdoorTheme(const I: Integer): Integer;
+var
+  K, N: Integer;
+begin
+  N := 0;
+  for K := 0 to High(LevelThemes) do
+    if LevelThemes[K].Outdoor then
+    begin
+      if N = I then
+        Exit(K);
+      Inc(N);
+    end;
+  Result := 0;
+end;
+
+function ThemeIndex(const Name: String): Integer;
+var
+  K: Integer;
+begin
+  for K := 0 to High(LevelThemes) do
+    if LevelThemes[K].Name = Name then
+      Exit(K);
+  Result := -1;
+end;
+
+function TerrainHeight(const X, Y: Integer): Integer;
+var
+  H: Single;
+begin
+  H := 32 + 16 * Sin(0.55 * X + 1.3 * Sin(0.31 * Y)) + 16 * Sin(0.47 * Y + 0.9 * Sin(0.37 * X));
+  Result := EnsureRange(Round(H / LevelHeightStep) * LevelHeightStep, 0, 64);
 end;
 
 function EntityFloorOffset(const AClassName: String): Single;
@@ -251,6 +560,192 @@ begin
   Result := (X >= 0) and (Y >= 0) and (X < FWidth) and (Y < FHeight);
 end;
 
+const
+  { The solid corner of each Diagonal value, as signs along X and Y }
+  DiagonalSX: array[1..4] of Integer = (1, -1, -1, 1);
+  DiagonalSY: array[1..4] of Integer = (1, 1, -1, -1);
+
+function TQuakeLevel.DiagonalSolidSide(const X, Y, D: Integer): Boolean;
+var
+  C: PLevelCell;
+begin
+  Result := False;
+  if not InGrid(X, Y) then
+    Exit;
+  C := Cell(X, Y);
+  if C^.Solid or (C^.Diagonal < 1) or (C^.Diagonal > 4) then
+    Exit;
+  case D of
+    0: Result := DiagonalSX[C^.Diagonal] > 0;
+    1: Result := DiagonalSX[C^.Diagonal] < 0;
+    2: Result := DiagonalSY[C^.Diagonal] > 0;
+    3: Result := DiagonalSY[C^.Diagonal] < 0;
+  end;
+end;
+
+function TQuakeLevel.DiagonalCornerFor(const X, Y: Integer): Integer;
+
+  function SolidAt(const NX, NY: Integer): Boolean;
+  begin
+    Result := (not InGrid(NX, NY)) or Cell(NX, NY)^.Solid;
+  end;
+
+var
+  K: Integer;
+begin
+  for K := 1 to 4 do
+    if SolidAt(X + DiagonalSX[K], Y) and SolidAt(X, Y + DiagonalSY[K]) then
+      Exit(K);
+  Result := 0;
+end;
+
+function TQuakeLevel.CanCutCorner(const X, Y, Corner: Integer): Boolean;
+var
+  C, N: PLevelCell;
+begin
+  Result := False;
+  if (Corner < 1) or (Corner > 4) or not InGrid(X, Y) then
+    Exit;
+  C := Cell(X, Y);
+  if C^.Solid or C^.Door or C^.Lift or C^.Button or C^.Wet or C^.Ladder or C^.Ramp or C^.Window then
+    Exit;
+  if InGrid(X + DiagonalSX[Corner], Y + DiagonalSY[Corner]) then
+  begin
+    N := Cell(X + DiagonalSX[Corner], Y + DiagonalSY[Corner]);
+    if not N^.Solid then
+      Exit;
+  end;
+  Result := True;
+end;
+
+function TQuakeLevel.InEllipse(const X, Y, X0, Y0, X1, Y1: Integer): Boolean;
+var
+  RX, RY, DX, DY: Single;
+begin
+  RX := (X1 - X0 + 1) / 2;
+  RY := (Y1 - Y0 + 1) / 2;
+  DX := (X + 0.5 - (X0 + RX)) / RX;
+  DY := (Y + 0.5 - (Y0 + RY)) / RY;
+  Result := Sqr(DX) + Sqr(DY) <= 1.05;
+end;
+
+procedure TQuakeLevel.CarveEllipse(const X0, Y0, X1, Y1, AFloor, ACeil, ATheme: Integer);
+var
+  X, Y: Integer;
+begin
+  for Y := Y0 to Y1 do
+    for X := X0 to X1 do
+      if InGrid(X, Y) and InEllipse(X, Y, X0, Y0, X1, Y1) then
+        SetOpen(X, Y, AFloor, ACeil, ATheme);
+  SmoothCorners(X0, Y0, X1, Y1);
+end;
+
+function TQuakeLevel.SmoothCorners(const X0, Y0, X1, Y1: Integer): Integer;
+var
+  X, Y, K: Integer;
+begin
+  Result := 0;
+  for Y := Y0 to Y1 do
+    for X := X0 to X1 do
+      if InGrid(X, Y) and (not Cell(X, Y)^.Solid) and (Cell(X, Y)^.Diagonal = 0) then
+      begin
+        K := DiagonalCornerFor(X, Y);
+        if CanCutCorner(X, Y, K) then
+        begin
+          Cell(X, Y)^.Diagonal := K;
+          Inc(Result);
+        end;
+      end;
+end;
+
+function TQuakeLevel.WindowAxis(const X, Y: Integer): Integer;
+
+  function Open(const NX, NY: Integer): Boolean;
+  begin
+    Result := InGrid(NX, NY) and not Cell(NX, NY)^.Solid;
+  end;
+
+begin
+  Result := -1;
+  if (not InGrid(X, Y)) or Cell(X, Y)^.Solid or not Cell(X, Y)^.Window then
+    Exit;
+  if Open(X - 1, Y) and Open(X + 1, Y) then
+    Result := 0
+  else
+  if Open(X, Y - 1) and Open(X, Y + 1) then
+    Result := 1;
+end;
+
+function TQuakeLevel.RampDir(const X, Y: Integer): Integer;
+var
+  D, Best: Integer;
+  C, N: PLevelCell;
+begin
+  Result := -1;
+  if not InGrid(X, Y) then
+    Exit;
+  C := Cell(X, Y);
+  if C^.Solid or not C^.Ramp then
+    Exit;
+  Best := C^.Floor;
+  for D := 0 to 3 do
+    if InGrid(X + LadderDX[D], Y + LadderDY[D]) then
+    begin
+      N := Cell(X + LadderDX[D], Y + LadderDY[D]);
+      if (not N^.Solid) and (N^.Floor > Best) and (N^.Floor <= C^.Floor + LevelRampMaxRise) then
+      begin
+        Best := N^.Floor;
+        Result := D;
+      end;
+    end;
+end;
+
+function TQuakeLevel.FloorAt(const X, Y: Integer; const PX, PY: Single): Single;
+var
+  C: PLevelCell;
+  D: Integer;
+  T, Top: Single;
+begin
+  C := Cell(X, Y);
+  Result := C^.Floor;
+  D := RampDir(X, Y);
+  if D < 0 then
+    Exit;
+  Top := Cell(X + LadderDX[D], Y + LadderDY[D])^.Floor;
+  { 0 at the back edge, 1 at the edge towards D }
+  case D of
+    0: T := PX / LevelCellSize - X;
+    1: T := X + 1 - PX / LevelCellSize;
+    2: T := PY / LevelCellSize - Y;
+    else T := Y + 1 - PY / LevelCellSize;
+  end;
+  Result := C^.Floor + (Top - C^.Floor) * EnsureRange(T, 0, 1);
+end;
+
+function TQuakeLevel.LadderDir(const X, Y: Integer): Integer;
+var
+  D, Best: Integer;
+  C, N: PLevelCell;
+begin
+  Result := -1;
+  if not InGrid(X, Y) then
+    Exit;
+  C := Cell(X, Y);
+  if C^.Solid then
+    Exit;
+  Best := C^.Floor + LevelHeightStep;
+  for D := 0 to 3 do
+    if InGrid(X + LadderDX[D], Y + LadderDY[D]) then
+    begin
+      N := Cell(X + LadderDX[D], Y + LadderDY[D]);
+      if (not N^.Solid) and (N^.Floor > Best) then
+      begin
+        Best := N^.Floor;
+        Result := D;
+      end;
+    end;
+end;
+
 function TQuakeLevel.Cell(const X, Y: Integer): PLevelCell;
 begin
   if InGrid(X, Y) then
@@ -289,7 +784,7 @@ end;
 
 procedure TQuakeLevel.Normalize;
 var
-  X, Y: Integer;
+  X, Y, D: Integer;
   C: PLevelCell;
 begin
   for Y := 0 to FHeight - 1 do
@@ -304,12 +799,18 @@ begin
       C^.Ceil := Round(C^.Ceil / LevelHeightStep) * LevelHeightStep;
       if C^.Ceil < C^.Floor + LevelMinHeadroom then
         C^.Ceil := C^.Floor + LevelMinHeadroom;
-      C^.Theme := Min(C^.Theme, High(LevelThemes));
+      if C^.Theme > High(LevelThemes) then
+        C^.Theme := 0;
       if C^.Wet and (C^.Water > C^.Floor) then
         C^.Water := EnsureRange(Round(C^.Water / 8) * 8, C^.Floor + 8, C^.Ceil - 8)
       else
         C^.Wet := False;
       if not C^.Wet then
+      begin
+        C^.Slime := False;
+        C^.Lava := False;
+      end;
+      if C^.Lava then
         C^.Slime := False;
       { A door under the sky or over water isn't supported }
       if C^.Door and (C^.Sky or C^.Wet) then
@@ -326,6 +827,15 @@ begin
         if C^.Ceil < C^.LiftTop + LevelMinHeadroom then
           C^.Ceil := C^.LiftTop + LevelMinHeadroom;
       end;
+      if C^.Ladder and (C^.Door or C^.Lift or C^.Button or C^.Wet) then
+        C^.Ladder := False;
+      if C^.Ramp and (C^.Door or C^.Lift or C^.Button or C^.Wet or C^.Ladder) then
+        C^.Ramp := False;
+      if C^.Window and (C^.Door or C^.Lift or C^.Button or C^.Wet or C^.Ladder or C^.Ramp or C^.Sky) then
+        C^.Window := False;
+      if (C^.Diagonal > 4) or ((C^.Diagonal > 0) and (C^.Door or C^.Lift or C^.Button or C^.Wet or
+         C^.Ladder or C^.Ramp or C^.Window)) then
+        C^.Diagonal := 0;
       if C^.Button and (C^.Door or C^.Lift or C^.Wet) then
         C^.Button := False;
       if C^.Button and (C^.Channel = 0) then
@@ -336,6 +846,15 @@ begin
       { A locked door opens with its key, not a switch }
       if C^.Key > 0 then
         C^.Channel := 0;
+    end;
+  { Headroom over a ramp's high end }
+  for Y := 0 to FHeight - 1 do
+    for X := 0 to FWidth - 1 do
+    begin
+      C := Cell(X, Y);
+      D := RampDir(X, Y);
+      if D >= 0 then
+        C^.Ceil := Max(C^.Ceil, Cell(X + LadderDX[D], Y + LadderDY[D])^.Floor + LevelMinHeadroom);
     end;
 end;
 
@@ -352,6 +871,16 @@ var
   P: TVector3;
 begin
   P := CellFloorCenter(X, Y);
+  { In a diagonal cell: the middle of its open half }
+  if (Cell(X, Y)^.Diagonal >= 1) and (Cell(X, Y)^.Diagonal <= 4) then
+  begin
+    { 18 along each axis: a 32-unit box clears the 45-degree wall }
+    P.X := P.X - DiagonalSX[Cell(X, Y)^.Diagonal] * 18;
+    P.Y := P.Y - DiagonalSY[Cell(X, Y)^.Diagonal] * 18;
+  end;
+  { On a ramp: the floor's highest point under a 32-unit box }
+  P.Z := Max(Max(FloorAt(X, Y, P.X - 16, P.Y - 16), FloorAt(X, Y, P.X + 16, P.Y - 16)),
+    Max(FloorAt(X, Y, P.X - 16, P.Y + 16), FloorAt(X, Y, P.X + 16, P.Y + 16)));
   if AClassName = 'light' then
     P.Z := Cell(X, Y)^.Ceil - 16
   else
@@ -391,9 +920,15 @@ begin
 end;
 
 function TQuakeLevel.EntityText: String;
+begin
+  Result := EntityText([]);
+end;
+
+function TQuakeLevel.EntityText(const EntityModels: array of String): String;
 var
   E: TLevelEntity;
-  I, Teleporters, Dests: Integer;
+  I, Teleporters, Dests, EntIndex: Integer;
+  BrushModel: String;
   SB: TStringBuilder;
 
   procedure Pair(const K, V: String);
@@ -413,15 +948,23 @@ begin
     if Sky <> '' then
       Pair('sky', Sky);
     SB.Append('}').Append(LineEnding);
-    for E in FEntities do
+    for EntIndex := 0 to FEntities.Count - 1 do
     begin
+      E := FEntities[EntIndex];
+      BrushModel := '';
+      if EntIndex < Length(EntityModels) then
+        BrushModel := EntityModels[EntIndex];
       SB.Append('{').Append(LineEnding);
       Pair('classname', E.EntClass);
-      Pair('origin', FormatNum(E.Origin.X) + ' ' + FormatNum(E.Origin.Y) + ' ' + FormatNum(E.Origin.Z));
+      if BrushModel <> '' then
+        Pair('model', BrushModel)
+      else
+        Pair('origin', FormatNum(E.Origin.X) + ' ' + FormatNum(E.Origin.Y) + ' ' + FormatNum(E.Origin.Z));
       if E.Angle <> 0 then
         Pair('angle', FormatNum(E.Angle));
       for I := 0 to E.Keys.Count - 1 do
-        Pair(E.Keys.Names[I], E.Keys.ValueFromIndex[I]);
+        if (BrushModel = '') or not ((E.Keys.Names[I] = 'mins') or (E.Keys.Names[I] = 'maxs')) then
+          Pair(E.Keys.Names[I], E.Keys.ValueFromIndex[I]);
       { Teleporters without a target go to the destination of the same
         number (the n-th misc_teleporter to the n-th misc_teleporter_dest) }
       if (E.EntClass = 'misc_teleporter') and (E.Key('target') = '') then
@@ -445,7 +988,7 @@ end;
 procedure TQuakeLevel.SaveToStream(const Stream: TStream);
 var
   Root, JE, JKeys: TJSONObject;
-  Rows, Ents: TJSONArray;
+  Rows, Ents, Names: TJSONArray;
   X, Y, I: Integer;
   C: PLevelCell;
   Row: String;
@@ -483,10 +1026,22 @@ begin
             Row := Row + ',s';
           if C^.Door then
             Row := Row + ',d';
+          if C^.Door and C^.SecretDoor then
+            Row := Row + ',h';
           if CellHasWater(C) then
             Row := Row + ',w' + IntToStr(C^.Water);
           if CellHasWater(C) and C^.Slime then
             Row := Row + ',m';
+          if CellHasWater(C) and C^.Lava then
+            Row := Row + ',v';
+          if C^.Ladder then
+            Row := Row + ',r';
+          if C^.Ramp then
+            Row := Row + ',p';
+          if C^.Window then
+            Row := Row + ',g';
+          if C^.Diagonal > 0 then
+            Row := Row + ',x' + IntToStr(C^.Diagonal);
           if C^.Door and (C^.Key > 0) then
             Row := Row + ',k' + IntToStr(C^.Key);
           if C^.Lift then
@@ -500,6 +1055,12 @@ begin
       Rows.Add(Row);
     end;
     Root.Add('rows', Rows);
+    { The theme names, so the cells keep their themes when the list differs
+      (other PAKs) }
+    Names := TJSONArray.Create;
+    for I := 0 to High(LevelThemes) do
+      Names.Add(LevelThemes[I].Name);
+    Root.Add('themes', Names);
     Ents := TJSONArray.Create;
     for E in FEntities do
     begin
@@ -529,7 +1090,7 @@ procedure TQuakeLevel.LoadFromStream(const Stream: TStream);
 var
   Data: TJSONData;
   Root, JE, JKeys: TJSONObject;
-  Rows, Ents, Org: TJSONArray;
+  Rows, Ents, Org, Names: TJSONArray;
   X, Y, I: Integer;
   Parts, Vals: TStringArray;
   C: PLevelCell;
@@ -589,8 +1150,26 @@ begin
             if Vals[I] = 'b' then
               C^.Button := True
             else
+            if Vals[I] = 'h' then
+              C^.SecretDoor := True
+            else
             if Vals[I] = 'm' then
               C^.Slime := True
+            else
+            if Vals[I] = 'v' then
+              C^.Lava := True
+            else
+            if Vals[I] = 'r' then
+              C^.Ladder := True
+            else
+            if Vals[I] = 'p' then
+              C^.Ramp := True
+            else
+            if Vals[I] = 'g' then
+              C^.Window := True
+            else
+            if Copy(Vals[I], 1, 1) = 'x' then
+              C^.Diagonal := StrToIntDef(Copy(Vals[I], 2, MaxInt), 0)
             else
             if Copy(Vals[I], 1, 1) = 'k' then
               C^.Key := StrToIntDef(Copy(Vals[I], 2, MaxInt), 0)
@@ -599,6 +1178,19 @@ begin
               C^.Channel := StrToIntDef(Copy(Vals[I], 2, MaxInt), 0);
         end;
       end;
+    { Theme indexes of the file -> ours, by name (missing: the first) }
+    Names := Root.Find('themes', jtArray) as TJSONArray;
+    if Names <> nil then
+    begin
+      EnsureLevelThemes;
+      for Y := 0 to FHeight - 1 do
+        for X := 0 to FWidth - 1 do
+        begin
+          C := Cell(X, Y);
+          if (not C^.Solid) and (C^.Theme < Names.Count) then
+            C^.Theme := Max(0, ThemeIndex(Names.Strings[C^.Theme]));
+        end;
+    end;
     Ents := Root.Find('entities', jtArray) as TJSONArray;
     if Ents <> nil then
       for I := 0 to Ents.Count - 1 do
@@ -647,6 +1239,7 @@ begin
 end;
 
 initialization
+  ResetLevelThemes;
   DotFormat := DefaultFormatSettings;
   DotFormat.DecimalSeparator := '.';
 end.

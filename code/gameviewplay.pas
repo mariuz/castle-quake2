@@ -96,6 +96,8 @@ type
     procedure DoSelectWeapon(const Slot: Integer);
     procedure DoUse;
     procedure DoToggleHelp;
+    { padbind [<action> <button> | reset]: list or change the gamepad buttons }
+    procedure PadBindCommand(const Args: String);
     { Look along Quake yaw / pitch (pitch positive looks down), keeping the velocity }
     procedure SetLook(const YawDeg, PitchDeg: Single);
     procedure UpdateDeathView(const SecondsPassed: Single);
@@ -257,8 +259,24 @@ begin
     Result.Add(Word);
 end;
 
+{ Move a control to the front of its parent's children. Removed first:
+  InsertFront of a control that is already in the list adds it twice
+  (CGE: "the result is undefined"), and the stale entry was written to
+  after the control was freed, crashing on exit. }
+procedure BringToFront(const C: TCastleUserInterface);
+var
+  P: TCastleUserInterface;
+begin
+  P := C.Parent;
+  if P = nil then
+    Exit;
+  P.RemoveControl(C);
+  P.InsertFront(C);
+end;
+
 procedure TViewPlay.OpenEditor;
 begin
+  EnsureLevelThemes;
   if FEditor = nil then
   begin
     FEditor := TQuakeLevelEditor.Create(FreeAtStop);
@@ -267,7 +285,7 @@ begin
     FEditor.OnClose := @EditorClose;
     InsertFront(FEditor);
     { The console stays usable over the editor }
-    Console.Parent.InsertFront(Console);
+    BringToFront(Console);
   end;
   Menu.Exists := False;
   FEditor.Exists := True;
@@ -315,7 +333,7 @@ end;
 procedure TViewPlay.EditorCommand(const Args: String);
 var
   Words: TStringList;
-  Cmd: String;
+  Cmd, Value: String;
   T: TLevelEditTool;
   I: Integer;
 begin
@@ -384,6 +402,31 @@ begin
     if (Cmd = 'lift') and (Words.Count > 1) then
       FEditor.BrushLift := Max(32, StrToIntDef(Words[1], 96))
     else
+    if (Cmd = 'select') and (Words.Count > 2) then
+    begin
+      FEditor.Tool := etInspect;
+      FEditor.SelectAt(StrToIntDef(Words[1], 0), StrToIntDef(Words[2], 0));
+    end else
+    if (Cmd = 'set') and (Words.Count > 2) then
+    begin
+      { The value: the rest of the words (a target name, a light level...) }
+      Value := Words[2];
+      for I := 3 to Words.Count - 1 do
+        Value := Value + ' ' + Words[I];
+      if FEditor.SetSelectedKey(Words[1], Value) then
+        WritelnLog('LevelEditor', 'Entity: ' + FEditor.SelectedText)
+      else
+        Console.Print('editor set: select an entity first (editor select x y); not classname / origin');
+    end else
+    if (Cmd = 'unset') and (Words.Count > 1) then
+    begin
+      if FEditor.SetSelectedKey(Words[1], '') then
+        WritelnLog('LevelEditor', 'Entity: ' + FEditor.SelectedText);
+    end else
+    if (Cmd = 'round') and (Words.Count > 4) then
+      FEditor.RoundRect(StrToIntDef(Words[1], 0), StrToIntDef(Words[2], 0), StrToIntDef(Words[3], 0),
+        StrToIntDef(Words[4], 0))
+    else
     if (Cmd = 'fill') and (Words.Count > 4) then
       FEditor.FillRect(StrToIntDef(Words[1], 0), StrToIntDef(Words[2], 0), StrToIntDef(Words[3], 0),
         StrToIntDef(Words[4], 0))
@@ -394,7 +437,7 @@ begin
       FEditor.BrushCeil := StrToIntDef(Words[2], 160);
       FEditor.BrushTheme := EnsureRange(StrToIntDef(Words[3], 0), 0, High(LevelThemes));
     end else
-      Console.Print('editor [new|generate [seed]|save [name]|load <name>|play|export|close|name <n>|tool <t>|entity <class>|brush <floor> <ceil> <theme>|channel <0-9>|lift <height>|key <blue|red>|fill <x0> <y0> <x1> <y1>]');
+      Console.Print('editor [new|generate [seed]|save [name]|load <name>|play|export|close|name <n>|tool <t>|entity <class>|brush <floor> <ceil> <theme>|channel <0-9>|lift <height>|key <blue|red>|fill <x0> <y0> <x1> <y1>|round <x0> <y0> <x1> <y1>|select <x> <y>|set <key> <value>|unset <key>]');
   finally
     Words.Free;
   end;
@@ -419,8 +462,8 @@ begin
     FTouch.OnNextWeapon := @TouchNextWeapon;
     FTouch.OnMenu := @TouchMenu;
     InsertFront(FTouch);
-    Menu.Parent.InsertFront(Menu);
-    Console.Parent.InsertFront(Console);
+    BringToFront(Menu);
+    BringToFront(Console);
   end else
     FTouch := nil;
 
@@ -923,6 +966,17 @@ begin
     end else
       WritelnWarning('Demo', 'Unknown gamepad button "%s"', [Param]);
   end else
+  if Action = 'GH' then { Hold / release a gamepad button (toggle), e.g. "GH:south" }
+  begin
+    if GamepadButtonFromName(Param, Button) then
+    begin
+      if Button in VirtualGamepad.Held then
+        Exclude(VirtualGamepad.Held, Button)
+      else
+        Include(VirtualGamepad.Held, Button);
+    end else
+      WritelnWarning('Demo', 'Unknown gamepad button "%s"', [Param]);
+  end else
   if Action = 'SY' then { Correct the drift of recorded IN positions: SY:1 (default) / SY:0 }
     FDemoNoSync := Param = '0'
   else
@@ -1003,6 +1057,8 @@ begin
         FWorld.Geometry.Movers[J].Entity.ClassName, FWorld.Geometry.Movers[J].Entity.Model,
         FWorld.Geometry.ModelTexFrame(FWorld.Geometry.Movers[J].ModelIndex), Ord(FWorld.Geometry.Movers[J].State),
         FWorld.Geometry.Movers[J].Progress, BoolToStr(FWorld.Geometry.Movers[J].Transform.Exists, True)]);
+    WritelnLog('Demo', 'Sound mixer: %d playing, load %.2f, limiter %.2f', [Sounds.ActiveSoundCount,
+      Sounds.MixLoad, Sounds.LimiterGain]);
     for J := 0 to FWorld.Turrets.Count - 1 do
       WritelnLog('Demo', 'Turret %d pitch %.1f yaw %.1f aim %.1f %.1f bases %d driver %s shots %d', [J,
         FWorld.Turrets[J].Breach.TurretPitch, FWorld.Turrets[J].Breach.TurretYaw,
@@ -1038,7 +1094,11 @@ begin
         if Assigned(EntityTrace) and EntityTrace(FWorld.Monsters[J].Origin, FWorld.Monsters[J].Origin,
            FWorld.Monsters[J].BoxMins, FWorld.Monsters[J].BoxMaxs, MASK_MONSTERSOLID,
            FWorld.Monsters[J]).StartSolid then
+        begin
           Inc(SolidCount);
+          WritelnLog('Demo', 'Monster %d %s in solid at %s', [J, FWorld.Monsters[J].Def^.ClassName,
+            FWorld.Monsters[J].Origin.ToString]);
+        end;
       end;
     WritelnLog('Demo', 'Monsters: %d alerted of %d alive, %d in solid', [P, Round(Val), SolidCount]);
     for J := 0 to FWorld.Monsters.Count - 1 do
@@ -1319,6 +1379,54 @@ begin
   FWorld.ActivateUse(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
 end;
 
+procedure TViewPlay.PadBindCommand(const Args: String);
+const
+  ShortNames: array[TPadAction] of String = ('jump', 'crouch', 'use', 'grenade',
+    'help', 'next', 'prev');
+var
+  Parts: TStringArray;
+  A, Found: TPadAction;
+  HasAction: Boolean;
+  Button: TGameControllerButton;
+begin
+  Parts := Trim(Args).Split([' '], TStringSplitOptions.ExcludeEmpty);
+  if (Length(Parts) = 1) and SameText(Parts[0], 'reset') then
+    Settings.ResetPadButtons
+  else
+  if Length(Parts) = 2 then
+  begin
+    HasAction := False;
+    Found := paJump;
+    for A := Low(TPadAction) to High(TPadAction) do
+      if SameText(ShortNames[A], Parts[0]) then
+      begin
+        Found := A;
+        HasAction := True;
+      end;
+    if not HasAction then
+    begin
+      Console.Print('Unknown action "' + Parts[0] + '" (jump, crouch, use, grenade, help, next, prev)');
+      Exit;
+    end;
+    if not (PadButtonFromName(Parts[1], Button) and Settings.BindPadButton(Found, Button)) then
+    begin
+      Console.Print('Cannot bind "' + Parts[1] + '" (south, east, west, north, lb, rb, ls, rs, left, right, view, share)');
+      Exit;
+    end;
+    Settings.Save;
+  end else
+  if Length(Parts) <> 0 then
+  begin
+    Console.Print('Usage: padbind [<action> <button> | reset]');
+    Exit;
+  end;
+  for A := Low(TPadAction) to High(TPadAction) do
+  begin
+    Console.Print(Format('%s: %s', [ShortNames[A], PadButtonNames[Settings.PadButtons[A]]]));
+    WritelnLog('Gamepad', '%s: %s', [ShortNames[A], PadButtonNames[Settings.PadButtons[A]]]);
+  end;
+end;
+
 procedure TViewPlay.DoToggleHelp;
 begin
   RecordCommand('F');
@@ -1514,7 +1622,9 @@ begin
   FWorld.SetGunAngles(PlayerMovement.GunAngles);
   FWorld.Geometry.UpdateVisibility(CgeToQuake(MainViewport.Camera.Translation));
   FWorld.CullEntities;
+  Sounds.ListenerRight := TVector3.CrossProduct(MainViewport.Camera.Direction, MainViewport.Camera.Up).Normalize;
   FWorld.UpdateLoopSounds(MainViewport.Camera.Translation);
+  Sounds.UpdateMixer(SecondsPassed, Settings.SoundVolume / 100);
   WalkNavigation.Exists := not FWorld.Dead;
   UpdateDeathView(SecondsPassed);
 
@@ -1548,6 +1658,7 @@ const
 var
   Slot: Integer;
   MenuEvent: TInputPressRelease;
+  PadAction: TPadAction;
 begin
   Result := False;
 
@@ -1579,7 +1690,8 @@ begin
     { The menu uses Escape to go back from a page or cancel a key binding }
     { Game controller buttons act as the menu keys }
     MenuEvent := GamepadMenuEvent(Event);
-    if Menu.Press(MenuEvent) then
+    { The raw event: the Gamepad page binds controller buttons }
+    if Menu.Press(Event) then
       Exit(True);
     if MenuEvent.IsKey(keyEscape) then
     begin
@@ -1610,11 +1722,13 @@ begin
       CycleWeapon(GamepadWeaponCycle(Event.Controller.Button));
       Exit(True);
     end;
-    case Event.Controller.Button of
-      gbWest: DoUse;
-      gbNorth: DoSelectWeapon(11); { hand grenades }
-      gbView: DoToggleHelp;
-      else Exit(False);
+    if not Settings.PadActionOf(Event.Controller.Button, PadAction) then
+      Exit(False);
+    case PadAction of
+      QuakeSettings.paUse: DoUse;
+      QuakeSettings.paGrenade: DoSelectWeapon(11); { hand grenades }
+      QuakeSettings.paHelp: DoToggleHelp;
+      else Exit(False); { jump / crouch are held: ReadGamepads }
     end;
     Exit(True);
   end;
@@ -1824,6 +1938,9 @@ begin
     else
       Console.Print('Usage: lightstyle <0..255> <pattern a..z>');
   end else
+  if Cmd = 'padbind' then
+    PadBindCommand(Args)
+  else
   if Cmd = 'skill' then
   begin
     { Like Quake 2: takes effect when a map is (re)loaded }

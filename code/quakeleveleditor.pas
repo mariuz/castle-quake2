@@ -28,7 +28,7 @@ uses
 
 type
   TLevelEditTool = (etFloor, etWall, etRaise, etLower, etCeilUp, etCeilDown, etSky, etTheme,
-    etEntity, etErase, etDoor, etWater, etLift, etButton, etSlime, etKeyDoor);
+    etEntity, etErase, etDoor, etWater, etLift, etButton, etSlime, etKeyDoor, etLava, etLadder, etHills, etRamp, etWindow, etDiagonal, etSecretDoor, etInspect);
   TLevelEditCommand = (ecNew, ecGenerate, ecSave, ecLoad, ecPlay, ecExport, ecClose);
 
   TLevelEditorEvent = procedure(const Level: TQuakeLevel) of object;
@@ -41,6 +41,8 @@ type
     { Key of the Key tool's doors: 1 blue, 2 red }
     FBrushKey: Integer;
     FEntityIndex: Integer;
+    { The entity the Inspect tool picked (index in FLevel.Entities), -1 }
+    FSelected: Integer;
     FEntityAngle: Single;
     FZoom: Single;
     FPan: TVector2;
@@ -91,6 +93,9 @@ type
     procedure ShowStatus(const Text: String);
     { Apply the current tool to every cell of a rectangle (scripts) }
     procedure FillRect(const X0, Y0, X1, Y1: Integer);
+    { A round room: the ellipse in the rectangle, opened with the brush
+      heights and theme, its edges smoothed with diagonal walls }
+    procedure RoundRect(const X0, Y0, X1, Y1: Integer);
     { Saved level names (castle-config:/levels) }
     function SavedLevels: TStringList;
     property Level: TQuakeLevel read FLevel;
@@ -99,6 +104,15 @@ type
     property BrushCeil: Integer read FBrushCeil write FBrushCeil;
     property BrushTheme: Integer read FBrushTheme write FBrushTheme;
     property EntityIndex: Integer read FEntityIndex write FEntityIndex;
+    { The inspected entity (nil: none) }
+    function SelectedEntity: TLevelEntity;
+    { Pick the entity in a cell (False: none there) }
+    function SelectAt(const X, Y: Integer): Boolean;
+    { Set a key of the inspected entity ('' removes it; "angle" sets its
+      facing); False when none is selected or the key can't be set }
+    function SetSelectedKey(const AName, AValue: String): Boolean;
+    { "class (x,y) angle a | key=value ..." of the inspected entity }
+    function SelectedText: String;
     property BrushLift: Integer read FBrushLift write FBrushLift;
     property BrushChannel: Integer read FBrushChannel write FBrushChannel;
     property BrushKey: Integer read FBrushKey write FBrushKey;
@@ -111,9 +125,9 @@ type
 
 const
   ToolNames: array[TLevelEditTool] of String = ('Floor', 'Wall', 'Raise', 'Lower', 'Ceil+', 'Ceil-',
-    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water', 'Lift', 'Button', 'Slime', 'Key');
+    'Sky', 'Theme', 'Entity', 'Erase', 'Door', 'Water', 'Lift', 'Button', 'Slime', 'Key', 'Lava', 'Ladder', 'Hills', 'Ramp', 'Window', 'Diagonal', 'Secret', 'Inspect');
   ToolKeys: array[TLevelEditTool] of String = ('1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'O', 'U',
-    'H', 'J', 'M', 'K');
+    'H', 'J', 'M', 'K', 'I', 'R', '', '', '', '', '', '');
   CommandNames: array[TLevelEditCommand] of String = ('New', 'Generate', 'Save', 'Load', 'Play',
     'Export', 'Close');
   { What the Entity tool places; "exit" is a trigger with a changelevel }
@@ -248,6 +262,7 @@ begin
   FBrushWater := 48;
   FBrushLift := 96;
   FBrushKey := 1;
+  FSelected := -1;
   FZoom := 20;
   FHover := Point(-1, -1);
   FLoadIndex := -1;
@@ -553,6 +568,7 @@ procedure TQuakeLevelEditor.RunCommand(const Command: TLevelEditCommand);
 var
   Names: TStringList;
 begin
+  FSelected := -1;
   case Command of
     ecNew:
       begin
@@ -606,6 +622,69 @@ begin
     for X := Min(X0, X1) to Max(X0, X1) do
       ApplyTool(X, Y, False);
   FStrokeCells.Clear;
+end;
+
+function TQuakeLevelEditor.SelectedEntity: TLevelEntity;
+begin
+  if (FSelected >= 0) and (FSelected < FLevel.Entities.Count) then
+    Result := FLevel.Entities[FSelected]
+  else
+    Result := nil;
+end;
+
+function TQuakeLevelEditor.SelectAt(const X, Y: Integer): Boolean;
+begin
+  FSelected := FLevel.EntityAtCell(X, Y);
+  Result := FSelected >= 0;
+  if Result then
+    ShowStatus(SelectedText)
+  else
+    ShowStatus(Format('No entity in (%d,%d)', [X, Y]));
+end;
+
+function TQuakeLevelEditor.SetSelectedKey(const AName, AValue: String): Boolean;
+var
+  E: TLevelEntity;
+  N: String;
+begin
+  E := SelectedEntity;
+  N := LowerCase(Trim(AName));
+  Result := (E <> nil) and (N <> '') and (N <> 'classname') and (N <> 'origin') and (Pos(' ', N) = 0) and
+    (Pos('"', AValue) = 0);
+  if not Result then
+    Exit;
+  PushUndo;
+  if N = 'angle' then
+    E.Angle := StrToFloatDef(AValue, 0)
+  else
+  if AValue = '' then
+  begin
+    if E.Keys.IndexOfName(N) >= 0 then
+      E.Keys.Delete(E.Keys.IndexOfName(N));
+  end else
+    E.Keys.Values[N] := AValue;
+  ShowStatus(SelectedText);
+end;
+
+function TQuakeLevelEditor.SelectedText: String;
+var
+  E: TLevelEntity;
+  X, Y, I: Integer;
+begin
+  E := SelectedEntity;
+  if E = nil then
+    Exit('No entity selected');
+  FLevel.CellAt(E.Origin, X, Y);
+  Result := Format('%s (%d,%d) angle %d', [E.EntClass, X, Y, Round(E.Angle)]);
+  for I := 0 to E.Keys.Count - 1 do
+    Result := Result + ' | ' + E.Keys.Names[I] + '=' + E.Keys.ValueFromIndex[I];
+end;
+
+procedure TQuakeLevelEditor.RoundRect(const X0, Y0, X1, Y1: Integer);
+begin
+  PushUndo;
+  FLevel.CarveEllipse(Min(X0, X1), Min(Y0, Y1), Max(X0, X1), Max(Y0, Y1), FBrushFloor,
+    Max(FBrushCeil, FBrushFloor + LevelMinHeadroom), FBrushTheme);
 end;
 
 procedure TQuakeLevelEditor.PickCell(const X, Y: Integer);
@@ -676,6 +755,8 @@ begin
         C^.Theme := FBrushTheme;
     etEntity:
       PlaceEditorEntity(FLevel, EditorEntityClasses[FEntityIndex], X, Y, FEntityAngle);
+    etInspect:
+      SelectAt(X, Y);
     etErase:
       RemoveCellEntities(FLevel, X, Y);
     etDoor:
@@ -691,8 +772,30 @@ begin
           C^.Button := False;
           C^.Channel := FBrushChannel;
           C^.Key := 0;
+          C^.SecretDoor := False;
         end else
           C^.Channel := 0;
+      end;
+    etSecretDoor:
+      if not C^.Solid then
+      begin
+        { A secret door (looks like the wall of the room beside it, opens
+          when shot) or none again }
+        if C^.Door and C^.SecretDoor then
+        begin
+          C^.Door := False;
+          C^.SecretDoor := False;
+        end else
+        begin
+          C^.Door := True;
+          C^.SecretDoor := True;
+          C^.Key := 0;
+          C^.Channel := 0;
+          C^.Sky := False;
+          C^.Wet := False;
+          C^.Lift := False;
+          C^.Button := False;
+        end;
       end;
     etKeyDoor:
       if not C^.Solid then
@@ -705,6 +808,7 @@ begin
         end else
         begin
           C^.Door := True;
+          C^.SecretDoor := False;
           C^.Key := EnsureRange(FBrushKey, 1, High(LevelKeyClasses));
           C^.Channel := 0;
           C^.Sky := False;
@@ -712,6 +816,97 @@ begin
           C^.Lift := False;
           C^.Button := False;
         end;
+      end;
+    etLava:
+      if not C^.Solid then
+      begin
+        { Lava FBrushWater deep (or none again) }
+        if CellHasWater(C) then
+          C^.Wet := False
+        else
+        begin
+          C^.Wet := True;
+          C^.Lava := True;
+          C^.Slime := False;
+          C^.Water := Min(C^.Floor + FBrushWater, C^.Ceil - 8);
+          C^.Door := False;
+          C^.Ladder := False;
+        end;
+      end;
+    etLadder:
+      if not C^.Solid then
+      begin
+        { A ladder up the highest neighbouring step (or none again) }
+        C^.Ladder := not C^.Ladder;
+        if C^.Ladder then
+        begin
+          C^.Door := False;
+          C^.Lift := False;
+          C^.Button := False;
+          C^.Wet := False;
+        end;
+      end;
+    etDiagonal:
+      if not C^.Solid then
+      begin
+        { A 45-degree wall closing the corner between two walls (or none
+          again) }
+        if C^.Diagonal > 0 then
+          C^.Diagonal := 0
+        else
+        begin
+          C^.Diagonal := FLevel.DiagonalCornerFor(X, Y);
+          if C^.Diagonal = 0 then
+            C^.Diagonal := 1;
+          C^.Door := False;
+          C^.Lift := False;
+          C^.Button := False;
+          C^.Wet := False;
+          C^.Ladder := False;
+          C^.Ramp := False;
+          C^.Window := False;
+        end;
+      end;
+    etWindow:
+      if not C^.Solid then
+      begin
+        { A glass pane across the cell (between its open sides), from the
+          floor (the sill) to the ceiling; or none again }
+        C^.Window := not C^.Window;
+        if C^.Window then
+        begin
+          C^.Door := False;
+          C^.Lift := False;
+          C^.Button := False;
+          C^.Wet := False;
+          C^.Ladder := False;
+          C^.Ramp := False;
+          C^.Sky := False;
+        end;
+      end;
+    etRamp:
+      if not C^.Solid then
+      begin
+        { A slope up to the highest neighbour (or flat again) }
+        C^.Ramp := not C^.Ramp;
+        if C^.Ramp then
+        begin
+          C^.Door := False;
+          C^.Lift := False;
+          C^.Button := False;
+          C^.Wet := False;
+          C^.Ladder := False;
+        end;
+      end;
+    etHills:
+      if not C^.Solid then
+      begin
+        { Rolling ground around the brush floor (TerrainHeight, the same
+          everywhere for a cell, so neighbouring strokes fit together) }
+        C^.Floor := FBrushFloor + TerrainHeight(X, Y);
+        C^.Ceil := Max(C^.Ceil, C^.Floor + LevelMinHeadroom);
+        { Sloping up to higher neighbours }
+        C^.Ramp := not (C^.Door or C^.Lift or C^.Button or C^.Wet or C^.Ladder);
       end;
     etSlime:
       if not C^.Solid then
@@ -723,6 +918,7 @@ begin
         begin
           C^.Wet := True;
           C^.Slime := True;
+          C^.Lava := False;
           C^.Water := Min(C^.Floor + FBrushWater, C^.Ceil - 8);
           C^.Door := False;
         end;
@@ -766,6 +962,7 @@ begin
         begin
           C^.Wet := True;
           C^.Slime := False;
+          C^.Lava := False;
           C^.Water := Min(C^.Floor + FBrushWater, C^.Ceil - 8);
           C^.Door := False;
         end;
@@ -859,6 +1056,7 @@ begin
       Stream := TStringStream.Create(FUndo[FUndo.Count - 1]);
       try
         FLevel.LoadFromStream(Stream);
+        FSelected := -1;
       finally
         Stream.Free;
       end;
@@ -908,6 +1106,12 @@ begin
   if Event.IsKey(keyK) then
     FTool := etKeyDoor
   else
+  if Event.IsKey(keyI) then
+    FTool := etLava
+  else
+  if Event.IsKey(keyR) then
+    FTool := etLadder
+  else
   if Event.IsKey(keyY) then
     FBrushKey := FBrushKey mod High(LevelKeyClasses) + 1
   else
@@ -925,6 +1129,12 @@ begin
   else
   if Event.IsKey(keyB) then
     FBrushWater := Max(8, FBrushWater - 8)
+  else
+  if Event.IsKey(keyQ) and (FTool = etInspect) and (SelectedEntity <> nil) then
+    SetSelectedKey('angle', IntToStr(Round(SelectedEntity.Angle + 45) mod 360))
+  else
+  if Event.IsKey(keyE) and (FTool = etInspect) and (SelectedEntity <> nil) then
+    SetSelectedKey('angle', IntToStr(Round(SelectedEntity.Angle + 315) mod 360))
   else
   if Event.IsKey(keyQ) then
     FEntityAngle := Round(FEntityAngle + 45) mod 360
@@ -1019,6 +1229,7 @@ var
   X, Y, I, CX, CY: Integer;
   C: PLevelCell;
   Col, KeyCol: TCastleColor;
+  Tri: array of TVector2;
   Tint: TVector3;
   E: TLevelEntity;
   Txt, HoverInfo: String;
@@ -1068,6 +1279,9 @@ begin
           Col := Vector4(Col.XYZ * 0.6 + Vector3(0.1, 0.2, 0.45), 1);
       end;
       DrawRectangle(R, Col);
+      if CellHasWater(C) and C^.Lava then
+        DrawRectangle(R, Vector4(1, 0.4, 0.05, 0.65))
+      else
       if CellHasWater(C) and C^.Slime then
         DrawRectangle(R, Vector4(0.45, 0.75, 0.1, 0.55))
       else
@@ -1076,6 +1290,9 @@ begin
       if C^.Door and not C^.Solid then
       begin
         { Locked doors in the colour of their key }
+        if C^.SecretDoor then
+          KeyCol := Vector4(0.7, 0.3, 0.9, 1) { secret doors: purple }
+        else
         if C^.Key = 1 then
           KeyCol := Vector4(0.25, 0.45, 1, 1)
         else
@@ -1086,6 +1303,44 @@ begin
         DrawRectangle(FloatRectangle(R.Left + R.Width * 0.2, R.Bottom, R.Width * 0.6, R.Height),
           Vector4(KeyCol.XYZ * 0.75, 0.85));
         DrawRectangleOutline(R, KeyCol);
+      end;
+      if (C^.Diagonal in [1..4]) and not C^.Solid then
+      begin
+        { The solid half: a dark triangle at its corner }
+        case C^.Diagonal of
+          1: Tri := [Vector2(R.Right, R.Bottom), Vector2(R.Right, R.Top), Vector2(R.Left, R.Top)];
+          2: Tri := [Vector2(R.Right, R.Top), Vector2(R.Left, R.Top), Vector2(R.Left, R.Bottom)];
+          3: Tri := [Vector2(R.Left, R.Top), Vector2(R.Left, R.Bottom), Vector2(R.Right, R.Bottom)];
+          else Tri := [Vector2(R.Left, R.Bottom), Vector2(R.Right, R.Bottom), Vector2(R.Right, R.Top)];
+        end;
+        DrawPrimitive2D(pmTriangles, Tri, Vector4(0.08, 0.08, 0.08, 1));
+      end;
+      if C^.Window and not C^.Solid then
+      begin
+        { Glass: a pale pane across the cell }
+        if FLevel.WindowAxis(X, Y) = 0 then
+          DrawRectangle(FloatRectangle(R.Left + R.Width * 0.4, R.Bottom, R.Width * 0.2, R.Height),
+            Vector4(0.6, 0.85, 1, 0.8))
+        else
+          DrawRectangle(FloatRectangle(R.Left, R.Bottom + R.Height * 0.4, R.Width, R.Height * 0.2),
+            Vector4(0.6, 0.85, 1, 0.8));
+      end;
+      if C^.Ramp and not C^.Solid then
+      begin
+        { An arrow up the slope }
+        I := FLevel.RampDir(X, Y);
+        if I >= 0 then
+          DrawRectangle(FloatRectangle(R.Left + R.Width * IfThen(I = 0, 0.6, IfThen(I = 1, 0.1, 0.35)),
+            R.Bottom + R.Height * IfThen(I = 2, 0.6, IfThen(I = 3, 0.1, 0.35)),
+            R.Width * IfThen(I < 2, 0.3, 0.3), R.Height * 0.3), Vector4(0.95, 0.95, 0.95, 0.8));
+        DrawRectangleOutline(R, Vector4(0.9, 0.9, 0.9, 0.7));
+      end;
+      if C^.Ladder and not C^.Solid then
+      begin
+        { Rungs }
+        for I := 1 to 3 do
+          DrawRectangle(FloatRectangle(R.Left + R.Width * 0.2, R.Bottom + R.Height * I / 4 - R.Height * 0.05,
+            R.Width * 0.6, R.Height * 0.1), Vector4(0.9, 0.85, 0.6, 0.9));
       end;
       if C^.Lift and not C^.Solid then
       begin
@@ -1120,6 +1375,8 @@ begin
     H := Max(4, FZoom * 0.7);
     B := FloatRectangle(R.Left + (R.Width - H) / 2, R.Bottom + (R.Height - H) / 2, H, H);
     DrawRectangle(B, EntityColors[EntityKind(E.EntClass)]);
+    if E = SelectedEntity then
+      DrawRectangleOutline(B.Grow(Max(2, FZoom * 0.12)), Yellow, Max(2, FZoom * 0.08));
     if FZoom >= 14 then
       UIFont.Print(B.Left + (B.Width - UIFont.TextWidth(EntityLetter(E.EntClass))) / 2,
         B.Bottom + (B.Height - UIFont.Height) / 2, Black, EntityLetter(E.EntClass));
@@ -1143,7 +1400,7 @@ begin
     { Toolbar }
     DrawRectangle(ToolbarRect, Vector4(0.09, 0.09, 0.1, 1));
     for T := Low(TLevelEditTool) to High(TLevelEditTool) do
-      Button(ToolButtonRect(Ord(T)), ToolKeys[T] + ' ' + ToolNames[T], T = FTool);
+      Button(ToolButtonRect(Ord(T)), Trim(ToolKeys[T] + ' ' + ToolNames[T]), T = FTool);
     for Cmd := Low(TLevelEditCommand) to High(TLevelEditCommand) do
       Button(CommandButtonRect(Ord(Cmd)), CommandNames[Cmd], False);
 
@@ -1170,16 +1427,20 @@ begin
       else
         HoverInfo := Format('(%d,%d) floor %d ceiling %d %s%s%s%s', [FHover.X, FHover.Y, C^.Floor, C^.Ceil,
           LevelThemes[Min(C^.Theme, High(LevelThemes))].Name, StrUtils.IfThen(C^.Sky, ' sky', ''),
-          StrUtils.IfThen(C^.Door, ' door', '') + StrUtils.IfThen(C^.Lift, ' lift to ' + IntToStr(C^.LiftTop), '') +
+          StrUtils.IfThen(C^.Door, StrUtils.IfThen(C^.SecretDoor, ' secret door', ' door'), '') + StrUtils.IfThen(C^.Lift, ' lift to ' + IntToStr(C^.LiftTop), '') +
             StrUtils.IfThen(C^.Button, ' button', '') + StrUtils.IfThen(C^.Channel > 0, ' channel ' + IntToStr(C^.Channel), '') +
             StrUtils.IfThen(C^.Key = 1, ' blue key', '') + StrUtils.IfThen(C^.Key = 2, ' red key', ''),
-          StrUtils.IfThen(CellHasWater(C), StrUtils.IfThen(C^.Slime, ' slime ', ' water ') + IntToStr(C^.Water), '')]);
+          StrUtils.IfThen(C^.Ladder, ' ladder', '') + StrUtils.IfThen(C^.Ramp, ' ramp', '') + StrUtils.IfThen(C^.Window, ' window', '') + StrUtils.IfThen(C^.Diagonal > 0, ' diagonal', '') +
+          StrUtils.IfThen(CellHasWater(C), StrUtils.IfThen(C^.Lava, ' lava ', StrUtils.IfThen(C^.Slime, ' slime ', ' water ')) + IntToStr(C^.Water), '')]);
       I := FLevel.EntityAtCell(FHover.X, FHover.Y);
       if I >= 0 then
         HoverInfo := HoverInfo + ' - ' + FLevel.Entities[I].EntClass;
     end;
     if FStatusTime > 0 then
       Txt := FStatus
+    else
+    if (FTool = etInspect) and (SelectedEntity <> nil) then
+      Txt := 'Inspect | ' + SelectedText + ' | Q / E turn, console: editor set <key> <value>, editor unset <key>'
     else
       Txt := Format('%s | %s | floor %d ceiling %d water %d lift %d channel %d key %s theme %s | entity %s %d° | %s',
         [FLevel.Name, ToolNames[FTool], FBrushFloor, FBrushCeil, FBrushWater, FBrushLift, FBrushChannel,

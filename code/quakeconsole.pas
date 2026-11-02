@@ -8,7 +8,7 @@ interface
 uses
   SysUtils, Classes, Math,
   CastleVectors, CastleUIControls, CastleControls, CastleKeysMouse, CastleColors,
-  CastleRectangles, CastleGLUtils, CastleWindow;
+  CastleRectangles, CastleGLUtils;
 
 type
   TConsoleCommandEvent = procedure(const Cmd, Args: String) of object;

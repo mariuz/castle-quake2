@@ -35,6 +35,8 @@ type
   public
     ChannelOwner: TObject;
     Channel: TQuakeSoundChannel;
+    { Its gain at the listener when it started (for the limiter) }
+    Load: Single;
     destructor Destroy; override;
   end;
 
@@ -71,6 +73,10 @@ type
     FNamedOwner: TComponent;
     FNamedSounds: specialize TDictionary<String, TQuakeNamedSound>;
     FMusicSound: TCastleSound;
+    { Every playing sound (for the limiter), loop voices apart }
+    FActiveSounds: specialize TList<TQuakePlayingSound>;
+    FListenerRight: TVector3;
+    FLimiterGain, FMixLoad: Single;
     FCurrentMusicTrack: String;
     FEnabled: Boolean;
     function GetSound(const APath: String): TCastleSound;
@@ -158,16 +164,76 @@ type
     procedure PreloadCommonSounds;
 
     property Enabled: Boolean read FEnabled write FEnabled;
+    { The listener's right (CGE coordinates), for Quake 2's stereo
+      loudness (QuakePanLoudness) of the sounds started from now on }
+    property ListenerRight: TVector3 read FListenerRight write FListenerRight;
+    { Master limiter: once a frame, from the summed gains of the playing
+      sounds and loops (MixLoad) moves LimiterGain towards
+      LimiterTarget and sets SoundEngine.Volume to Master * LimiterGain }
+    procedure UpdateMixer(const SecondsPassed, Master: Single);
+    property LimiterGain: Single read FLimiterGain;
+    property MixLoad: Single read FMixLoad;
+    function ActiveSoundCount: Integer;
   end;
+
+const
+  { Summed gain above which the limiter turns the master volume down }
+  LimiterThreshold = 3.0;
+
+{ Quake 2's stereo spatialization (S_SpatializeOrigin) gives each ear
+  0.5 * (1 -/+ Dot), Dot = listener right . direction to the sound:
+  a sound straight ahead is 3 dB quieter than one at a side. OpenAL pans
+  at constant power, so spatial sounds are scaled by the root of Quake's
+  power, Sqrt(0.5 * (1 + Dot^2)), to keep the loudness. }
+function QuakePanLoudness(const Dot: Single): Single;
+
+{ The limiter's gain for a summed load: 1 up to Threshold, then a 2:1
+  compression, Sqrt(Threshold / Load) (OpenAL Soft's own output limiter
+  still catches peaks; this keeps busy fights from pumping it) }
+function LimiterTarget(const Load, Threshold: Single): Single;
+
+{ The limiter's gain after SecondsPassed: down fast (attack 0.03 s), up
+  slowly (release 0.5 s) }
+function LimiterStep(const Current, Target, SecondsPassed: Single): Single;
 
 var
   Sounds: TQuakeSounds;
 
 implementation
 
+function QuakePanLoudness(const Dot: Single): Single;
+var
+  D: Single;
+begin
+  D := EnsureRange(Dot, -1, 1);
+  Result := Sqrt(0.5 * (1 + D * D));
+end;
+
+function LimiterTarget(const Load, Threshold: Single): Single;
+begin
+  if Load <= Threshold then
+    Result := 1
+  else
+    Result := Sqrt(Threshold / Load);
+end;
+
+function LimiterStep(const Current, Target, SecondsPassed: Single): Single;
+var
+  Time: Single;
+begin
+  if Target < Current then
+    Time := 0.03
+  else
+    Time := 0.5;
+  Result := Target + (Current - Target) * Exp(-Max(0, SecondsPassed) / Time);
+end;
+
 constructor TQuakeSounds.Create;
 begin
   inherited Create;
+  FActiveSounds := specialize TList<TQuakePlayingSound>.Create;
+  FListenerRight := Vector3(1, 0, 0);
+  FLimiterGain := 1;
   FSoundCache := specialize TObjectDictionary<String, TCastleSound>.Create([doOwnsValues]);
   FNamedSounds := specialize TDictionary<String, TQuakeNamedSound>.Create;
   FChannelSounds := specialize TList<TQuakePlayingSound>.Create;
@@ -183,6 +249,7 @@ begin
   FreeAndNil(FLoopVoices);
   { Playing sounds outlive us (they free themselves on stop): forget them }
   FreeAndNil(FChannelSounds);
+  FreeAndNil(FActiveSounds);
   FSoundCache.Free;
   FNamedSounds.Free;
   FNamedOwner.Free;
@@ -238,6 +305,8 @@ destructor TQuakePlayingSound.Destroy;
 begin
   if (Sounds <> nil) and (Sounds.FChannelSounds <> nil) then
     Sounds.FChannelSounds.Remove(Self);
+  if (Sounds <> nil) and (Sounds.FActiveSounds <> nil) then
+    Sounds.FActiveSounds.Remove(Self);
   inherited Destroy;
 end;
 
@@ -292,7 +361,31 @@ begin
   Result.FreeOnStop := True;
   { Stay where the sound started, also after the source is freed }
   Result.Follow := False;
+  Result.Load := Volume;
+  FActiveSounds.Add(Result);
   UseChannel(Owner, Channel, Result);
+end;
+
+function TQuakeSounds.ActiveSoundCount: Integer;
+begin
+  Result := FActiveSounds.Count;
+end;
+
+procedure TQuakeSounds.UpdateMixer(const SecondsPassed, Master: Single);
+var
+  Voice: TQuakeLoopVoice;
+  P: TQuakePlayingSound;
+begin
+  FMixLoad := 0;
+  for P in FActiveSounds do
+    FMixLoad := FMixLoad + P.Load;
+  if FLoopVoices <> nil then
+    for Voice in FLoopVoices.Values do
+      if Voice.Requested then
+        FMixLoad := FMixLoad + Max(0, Voice.BestGain);
+  FLimiterGain := LimiterStep(FLimiterGain, LimiterTarget(FMixLoad, LimiterThreshold), SecondsPassed);
+  if SoundEngine <> nil then
+    SoundEngine.Volume := Master * FLimiterGain;
 end;
 
 procedure TQuakeSounds.Play(const APath: String; const Volume: Single;
@@ -520,6 +613,8 @@ var
   Snd: TCastleSound;
   Emitter: TCastleTransform;
   Source: TCastleSoundSource;
+  Playing: TQuakePlayingSound;
+  Dist, Gain: Single;
 begin
   if not FEnabled or (SoundEngine = nil) then
     Exit;
@@ -536,6 +631,12 @@ begin
     Snd := SpatialSound(APath, Attenuation);
     if Snd = nil then
       Exit;
+    { Quake 2's stereo loudness for the direction, and the gain at the
+      listener (S_SpatializeOrigin's distance falloff) for the limiter }
+    Dist := PointsDistance(Position, FListener);
+    Gain := Volume;
+    if Dist > 1 then
+      Gain := Volume * QuakePanLoudness(TVector3.DotProduct(FListenerRight, (Position - FListener) / Dist));
     { A throwaway emitter: the sound doesn't follow it (Follow = False), so
       it keeps playing at Position after the emitter is freed }
     Emitter := TCastleTransform.Create(nil);
@@ -543,7 +644,9 @@ begin
       Emitter.Translation := Position;
       Source := TCastleSoundSource.Create(Emitter);
       Emitter.AddBehavior(Source);
-      Source.Play(NewPlaying(Snd, Volume, Owner, Channel));
+      Playing := NewPlaying(Snd, Gain, Owner, Channel);
+      Playing.Load := Gain * Max(0, 1 - Max(0, Dist - SoundFullVolume) * DistanceMult(Attenuation));
+      Source.Play(Playing);
     finally
       Emitter.Free;
     end;

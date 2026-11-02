@@ -317,12 +317,46 @@ begin
         PVector4Byte(Result.PixelPtr(X, Y))^ := Vector4Byte(40, 40, 40, 255);
 end;
 
+{ Quake 2 Remastered's 32-bit textures: textures/<name>.png or .tga
+  (a replacement of the .wal, or the only image of a mod's texture); nil
+  if there is none }
+function LoadTextureReplacement(const Name: String): TCastleImage;
+const
+  Exts: array[0..1] of String = ('.png', '.tga');
+var
+  Ext, Path: String;
+  Stream: TMemoryStream;
+begin
+  Result := nil;
+  for Ext in Exts do
+  begin
+    Path := 'textures/' + LowerCase(Name) + Ext;
+    if not Pak.FileExists(Path) then
+      Continue;
+    Stream := Pak.GetStream(Path);
+    if Stream = nil then
+      Continue;
+    try
+      try
+        Result := LoadImage(Stream, UriMimeType(Path), [TRGBAlphaImage, TRGBImage]);
+        Exit;
+      except
+        on E: Exception do
+          WritelnWarning('QuakePalette', 'Cannot read texture "%s": %s', [Path, E.Message]);
+      end;
+    finally
+      Stream.Free;
+    end;
+  end;
+end;
+
 function TQuakePalette.LoadWal(const Name: String; out Info: TQuakeWalInfo): Boolean;
 var
   Key: String;
   Data: PByte;
   Size: Cardinal;
   Hdr: ^TWalHeader;
+  Replacement: TCastleImage;
 begin
   Key := WalTextureId(Name);
   if FWalInfos.TryGetValue(Key, Info) then
@@ -346,7 +380,25 @@ begin
     if (Info.Width > 0) and (Info.Height > 0) and
        (Hdr^.Offsets[0] + Cardinal(Info.Width * Info.Height) <= Size) and FHasPalette then
     begin
-      CacheImage(Key, DecodeIndexed(Data + Hdr^.Offsets[0], Info.Width, Info.Height, -1));
+      { A remastered image is drawn instead, at the WAL's texture scale
+        (the map's texture vectors are in WAL texels) }
+      Replacement := LoadTextureReplacement(Name);
+      if Replacement <> nil then
+        CacheImage(Key, Replacement)
+      else
+        CacheImage(Key, DecodeIndexed(Data + Hdr^.Offsets[0], Info.Width, Info.Height, -1));
+      Result := True;
+    end;
+  end else
+  begin
+    { No .wal (a mod's own texture): the image alone, its size for the
+      texture vectors (like the remaster and ericw-tools do) }
+    Replacement := LoadTextureReplacement(Name);
+    if Replacement <> nil then
+    begin
+      Info.Width := Replacement.Width;
+      Info.Height := Replacement.Height;
+      CacheImage(Key, Replacement);
       Result := True;
     end;
   end;

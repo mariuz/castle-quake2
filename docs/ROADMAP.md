@@ -20,8 +20,8 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Audio | 3D sounds, entity channels, merged loop sounds, CD music | Quake 2 attenuation (incl. `ATTN_STATIC`), `CHAN_*` channels, point sounds that outlive entities, loop mixer (one voice per sound, PVS-checked, `SOUND_LOOPATTENUATE`), 32 sources, OGG tracks, named sounds editable in the editor | Stereo panning curve (OpenAL's, not Quake 2's), `s_volume` style master limiter. |
 | Input / options | Key bindings, mouse sensitivity, joystick, skill | Options menu (sensitivity, invert, FOV, volumes), key rebinding, skill selection, saved in `UserConfig`, gamepad (sticks, triggers, menus), touch controls (stick, drag look, buttons, tap menus) | Gamepad button rebinding; gamepad and touch not yet tried on real hardware. |
 | Multiplayer | Deathmatch / coop over UDP | Single player only | Out of scope for now (see below). |
-| Tooling | Console, `+map`, demos | Console, autotest scripts (keys, gamepad, touch), `record` to turn play into a script, screenshot comparison in CI, 279 unit checks, map compatibility report, CGE editor components and designs, F8 inspector, Windows / Linux / Android / WebAssembly builds | Editor property editors. |
-| Level making | qbsp / qrad / qvis on brush maps from an editor | Random levels and an in-game grid editor (doors, key doors, lifts, switches, water, slime, teleporters, sky, themes, entities), compiled at runtime into IBSP v38 maps (BSP, brushes, lightmaps, grid PVS / PHS); `.bsp` export; levels in the CGE editor | Slopes and free-form brushes; height-aware vis. |
+| Tooling | Console, `+map`, demos | Console, autotest scripts (keys, gamepad, touch), `record` to turn play into a script, screenshot comparison in CI, 368 unit checks, map compatibility report, CGE editor components and designs, F8 inspector, Windows / Linux / Android / WebAssembly builds | Editor property editors. |
+| Level making | qbsp / qrad / qvis on brush maps from an editor | Random levels and an in-game grid editor (doors, key doors, lifts, ladders, ramps, diagonal walls, windows, switches, water, slime, lava, teleporters, sky, hills, themes, entities), compiled at runtime into IBSP v38 maps (BSP, brushes, lightmaps, grid PVS / PHS); `.bsp` export; levels in the CGE editor | Free-form brushes (any angle); height-aware vis. |
 
 ## Done so far
 
@@ -31,20 +31,21 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - **Performance**: PVS + areaportal culling of the world and of entities (`novis` to compare), batched particles.
 - **Editor**: views from designs, `TQuakeMap` building levels in the editor with skybox and entity markers, behaviors with published state, monster types (`data/monsters.castle-transform`) and named sounds (`data/sounds.castle-component`).
 - **Reach**: options menu with key rebinding, skill levels, gamepad, touch controls, Android APK and WebAssembly builds.
-- **Engineering**: CI on Windows / Linux / Android / Web, autotests under Mesa (keyboard, virtual gamepad and simulated touch), screenshot references, culling check (vis vs `novis`), map compatibility report, recorded replays, 279 unit checks.
+- **Engineering**: CI on Windows / Linux / Android / Web, autotests under Mesa (keyboard, virtual gamepad and simulated touch), screenshot references, culling check (vis vs `novis`), map compatibility report, recorded replays, 368 unit checks.
 - **Levels**: random levels from a seed (`QuakeLevelGen`, Quake / Doom layout rules: loops, steps, lifts, doors, pools, an exit switch, pacing) and an in-game level editor (`QuakeLevelEditor`: doors, lifts, switches, water, sky, themes, entities), compiled at runtime into Quake 2 maps (`QuakeBspBuilder`); levels show in the CGE editor through `TQuakeMap`.
-- **Releases**: v0.3.0 to v0.12.0, each with Windows / Linux / Android packages and the browser build ([changelog](CHANGELOG.md)).
+- **Releases**: v0.3.0 to v0.20.0, each with Windows / Linux / Android packages and the browser build ([changelog](CHANGELOG.md)).
 
 ## Next (prioritised)
 
-Phases 1–6 are done as far as the demo data and a headless machine allow; Phase 7 (levels) is in progress; v0.3.0 to v0.12.0 are released. In order of value for effort:
+Phases 1–6 are done as far as the demo data and a headless machine allow; Phase 7 (levels) is in progress; v0.3.0 to v0.20.0 are released. In order of value for effort:
 
-1. **More level content** (Phase 7): ladders, lava (needs a lava texture: the demo has none), more themes (and the full game's textures when a retail PAK is loaded), outdoor terrain with height variation; a longer key hunt (several keys, red and blue).
+1. **More level content** (Phase 7): check the discovered themes on a retail `baseq2` (they are tested with a simulated texture directory).
 2. **Try it on real hardware** (needs a phone, a gamepad and a GPU). Touch, gamepads and GPU speed were only tested headless: install the APK, play with a controller, run on a real GPU with `fps` on. Expected follow-ups: touch button sizes and look speed.
-3. **Android release signing and launcher icon** (needs a key): an `AndroidSigningProperties.txt` release key and a proper icon instead of the debug-signed APK.
-4. **Audio polish**: Quake 2's stereo panning curve and a master limiter, so many loud sounds at once don't clip.
-5. **Full game monsters** (needs the retail PAK): attack and move tables (`QuakeMonsterAttacks`, `QuakeMonsterMoves`) for gladiator, chick, mutant, brain, floater, hover, flipper, medic and the bosses; supertank / Makron / Jorg behaviour. Run `--map-report` on a retail `baseq2` to order the work.
-6. **CGE editor property editors** (needs the Lazarus-built editor): a map dropdown and a reload verb for `TQuakeMap`, selectable entities with their key / value pairs.
+3. **Android release signing** (needs a key): an `AndroidSigningProperties.txt` release key instead of the debug-signed APK (the launcher icon is done).
+4. **Full game monsters** (needs the retail PAK): attack and move tables (`QuakeMonsterAttacks`, `QuakeMonsterMoves`) for gladiator, chick, mutant, brain, floater, hover, flipper, medic and the bosses; supertank / Makron / Jorg behaviour. Run `--map-report` on a retail `baseq2` to order the work.
+5. ~~**Selectable entities in the CGE editor**~~: done (`TQuakeEntityTransform` per previewed entity with its class, targets, spawnflags and all keys; with the map dropdown, file dialogs and *Reload Map* verb, tested in the Lazarus-built editor under xvfb).
+
+6. **Call of the Void** (Quake II Remastered mod, `-game q1q2`): the loader is done (mod folders, `rerelease/` layout, loose files, `.pkz`, PNG / TGA textures, QBSP maps; the mod's monsters spawn with a generic AI from `GenericMonsterFacts`). Next, with the mod's files: run `--map-report`, then attack / move tables for the Quake 1 monsters (written from Quake 1's behaviour; the mod's code is GPLv2, this project MIT), its keys (`key_q1_*`), items and weapons, `func_door_secret2`, `func_plat2` and the remaster's other new classes.
 
 Out of scope for now: multiplayer (deathmatch / coop), which needs a client-server split of `TQuakeWorld` and networking.
 
@@ -53,13 +54,13 @@ Out of scope for now: multiplayer (deathmatch / coop), which needs a client-serv
 ### 1. Player-facing polish (highest impact, small)
 - ~~Options menu~~ — done: mouse sensitivity and invert, field of view, sound and music volume, *Controls* page with key rebinding, saved in `UserConfig` (`QuakeSettings`).
 - ~~Skill selection~~ — done: *Single Player* asks Easy / Medium / Hard / Nightmare; skill filters spawnflags, halves damage on easy, speeds up monster attacks from hard on, no pain flinches on nightmare; `skill` console command; kept in savegames.
-- ~~Gamepad~~ — done: CGE's `Controllers` (`QuakeGamepad`): left stick moves, right stick looks (radial deadzone, squared response, mouse sensitivity / invert apply), right trigger fires, A jump, B / left trigger crouch, X use, Y hand grenades, bumpers / D-pad cycle weapons, Menu / View open the menu / help computer; menus work with the D-pad, left stick, A and B. Tested with a virtual pad in the autotests (`GP:` / `GB:` demo actions), not yet on a real controller. Later: button rebinding.
+- ~~Gamepad~~ — done: CGE's `Controllers` (`QuakeGamepad`): left stick moves, right stick looks (radial deadzone, squared response, mouse sensitivity / invert apply), right trigger fires, A jump, B / left trigger crouch, X use, Y hand grenades, bumpers / D-pad cycle weapons, Menu / View open the menu / help computer; menus work with the D-pad, left stick, A and B. Tested with a virtual pad in the autotests (`GP:` / `GB:` demo actions), not yet on a real controller. Button rebinding done too (*Controls → Gamepad Buttons*, `padbind`; sticks, triggers, Menu and D-pad up / down stay fixed).
 - ~~View feel~~ — done: Quake 2's view bob, weapon bob and lag, running tilt, landing dip and damage kicks (`SV_CalcViewOffset`, `SV_CalcGunOffset`, `P_DamageFeedback`), with an *Options → View Bob* switch. Items already rotate (`EF_ROTATE`); Quake 2 items don't bob.
 
 ### 2. Feel of combat
 - **Frame-accurate attacks**: ~~player weapons~~ — done (`QuakeWeaponFrames`: Quake 2's `Weapon_Generic` / `Weapon_Grenade` frame state machine, so animation, refire, switching and damage line up). ~~Monsters~~ — done for the demo's monsters (`QuakeMonsterAttacks`: soldiers, infantry, gunner, berserk, flyer, parasite, tank play their Quake 2 attack sequences at 10 frames a second and fire on the `mframe_t` fire frames, with machinegun bursts that hold a frame, the gunner's chain refire loop, four-grenade volleys, the tank's three rockets, the parasite's drain, per-shot Quake 2 damage). The soldiers' refire jumps (`soldier_attack*_refire`: melee range or half the time on nightmare; the light soldier skips cocking), their duck-and-shoot attack3 from dodges (by skill), the machinegun soldier's attack4, the tank's machinegun and range choice (rockets beyond 250 units) and the flyer's wing-blade melee are done too. Still to do: tables for the full game's other monsters (they keep the generic wind-up attack).
 - **Monster AI gaps**: ~~ambush, trigger-spawned monsters, Quake 2 sight / hearing rules~~ — done (`FindTarget`: front cone and ranges, `show_hostile`, hearing through the PHS and connected areas, `sight_entity` group wake, TRIGGER_SPAWN monsters stay away until triggered). Dodging done too (`check_dodge`: soldiers, infantry, gunners, medics and iron maidens duck under blaster bolts, rockets and BFG balls). Navigation: monsters that lose the player follow Quake 2's player trail (last sighting, then up to 8 breadcrumbs, `p_trail.c`). ~~`trigger_monsterjump`~~ — done (`CheckMonsterTriggers`: horizontal velocity `speed` along the trigger's angle, `height` upward when on the ground, then ballistic flight; not in the demo maps, covered by a unit test); real pathfinding (BSP leaf portals or a walkable grid) only if the trail proves too weak on the full game's maps.
-- ~~Swept player box~~ — done: `QuakeTrace` ports `CM_BoxTrace` over the map's brushes (plus movers in their own space and monster boxes) and the player runs Quake 2's `PM_StepSlideMove`, `PM_CatagorizePosition`, `PM_CheckDuck`, friction, water and ladder moves on it; movers carry riders and push the player (`SV_Push`), monsters don't walk into him. Blocked movers act like Quake 2 too (`SV_Push` keeps the pushed or the old position, else the pusher's `blocked`: doors and plats deal their `dmg` (2) and go back, crusher doors keep going, trains deal 100 unless BLOCK_STOPS). Still to do: monsters moving with the same traces.
+- ~~Swept player box~~ — done: `QuakeTrace` ports `CM_BoxTrace` over the map's brushes (plus movers in their own space and monster boxes) and the player runs Quake 2's `PM_StepSlideMove`, `PM_CatagorizePosition`, `PM_CheckDuck`, friction, water and ladder moves on it; movers carry riders and push the player (`SV_Push`), monsters don't walk into him. Blocked movers act like Quake 2 too (`SV_Push` keeps the pushed or the old position, else the pusher's `blocked`: doors and plats deal their `dmg` (2) and go back, crusher doors keep going, trains deal 100 unless BLOCK_STOPS). ~~Monsters moving with the same traces~~ — done (`SV_movestep`, `M_CheckBottom`).
 
 ### 3. Full game support (needs the retail PAK)
 - ~~**Medic revive**~~, **boss behaviour** (supertank, Makron, jorg); ~~the missing entities (`misc_viper`, `target_blaster`, `func_killbox`, `turret_*`)~~ — done, tested by spawning them on the demo. Test with a local `baseq2` in a nightly-style workflow that is skipped when the PAK isn't available.
@@ -67,7 +68,7 @@ Out of scope for now: multiplayer (deathmatch / coop), which needs a client-serv
 - ~~Map compatibility report~~ — done: `castle-quake2 --map-report report.md` loads every map in the PAKs and lists load times, counts and the unsupported / partially supported entity classes (`QuakeMapReport`); the demo's is in [`map-report-demo.md`](map-report-demo.md) and CI keeps it free of unsupported classes. Run it with a retail `baseq2` to find what to implement next.
 
 ### 4. Editor and inspectability
-- **Property editors** (under `{$ifdef CASTLE_DESIGN_MODE}`): a dropdown of maps in the PAK for `TQuakeMap.MapName`, a file picker for `PakUrl`, a *Reload map* verb (like `TImageGridEditor` in the custom_component sample). Needs the Lazarus-built editor to verify.
+- **Property editors** (under `{$ifdef CASTLE_DESIGN_MODE}`): a dropdown of maps in the PAK for `TQuakeMap.MapName`, a file picker for `PakUrl`, a *Reload map* verb (like `TImageGridEditor` in the custom_component sample). Done (`QuakeMapEditors`), checked in the custom editor built with Lazarus; CI builds that editor (job `build-editor`).
 - **Selectable entities in the editor**: make preview markers / models one transform per entity with a read-only `EntityFields` (key/value pairs) property, so clicking a monster in the editor shows its spawnflags and targets.
 - **Monster prefabs with live behavior**: optionally move from the single `monsters.castle-transform` to a `.castle-transform` per type that also carries the `TQuakeMonster` behavior, so sounds / scale / effects can be added per monster in the editor.
 - **Named sounds by name in code**: replace literal paths (`'sound/items/pkup.wav'`) with `Sounds.PlayNamed('Items_pkup')` gradually, so the design is the single source of truth.
@@ -114,7 +115,8 @@ Out of scope for now: multiplayer (deathmatch / coop), which needs a client-serv
 - [x] Monster steering around obstacles (±45° / ±90° detours) and ledge checks
 - [x] `path_corner` patrols and `point_combat` (hold) combat points; player-clip doesn't block monsters
 - [x] Attacks happen partway through the attack animation (wind-up; pain cancels the shot)
-- [ ] Medic revive, bosses, real pathfinding (needs the full game data: no medic or bosses in the demo)
+- [x] Medic revive (tested with a model-less medic)
+- [ ] Bosses, real pathfinding (needs the full game data: no bosses in the demo)
 - [x] Hand grenades (cook, throw speed by hold time, explode in hand), chaingun spin-up
 
 ### Phase 3 – Flow
@@ -128,8 +130,8 @@ Out of scope for now: multiplayer (deathmatch / coop), which needs a client-serv
 - [x] Views loaded from `.castle-user-interface` designs with published components
 - [x] `TQuakeMap`, HUD, console and menu as registered editor components (`editor_units`)
 - [x] Monsters, items and movers as `TCastleBehavior`s with named transforms (F8 inspector)
-- [ ] Map dropdown / reload verb property editors
-- [ ] Selectable entities with key/value inspection in the editor
+- [x] Map dropdown, PAK / level file dialogs and *Reload Map* verb (`QuakeMapEditors`; CI builds the custom editor)
+- [x] Selectable entities with key/value inspection in the CGE editor (`TQuakeEntityTransform` under `EntityPreview`; the in-game level editor has it too: the *Inspect* tool, `editor select / set / unset`)
 - [x] Design-time skybox (`TQuakeMap.Background`) and entity markers (`PreviewMarkers`: player starts, paths, speakers, trigger volumes)
 - [x] Monster types (`data/monsters.castle-transform`) and named sounds (`data/sounds.castle-component`) editable in the editor
 - [x] CI autotests with screenshots (Linux, xvfb + Mesa)
@@ -157,7 +159,8 @@ Out of scope for now: multiplayer (deathmatch / coop), which needs a client-serv
 ### Phase 6 – Hardware, consistency, full game (next)
 - [ ] Try Android touch, a gamepad and a real GPU; tune touch controls
 - [x] Menu, console and HUD text sized for phone screens (*Interface Size* option, larger on touch screens; checked with 2400 × 1080 screenshots)
-- [ ] Release signing key and launcher icon for Android
+- [x] Launcher icon (`art/icon.png` / `.ico`, original artwork) for Android, Windows and Linux
+- [ ] Release signing key for Android
 - [x] Monster movement on the BSP traces (`SV_movestep`, `M_CheckBottom`, Quake 2 monster boxes, `M_droptofloor`)
 - [x] Monster walk / run frames with Quake 2's per-frame distances (`ai_walk` / `ai_run` tables of the demo monsters)
 - [x] Hitscan, projectiles (grenades bounce off the hit plane), monster sight, lasers and the player trail on the BSP traces; barrels solid again
@@ -175,6 +178,9 @@ Out of scope for now: multiplayer (deathmatch / coop), which needs a client-serv
 - [ ] Attack tables for the full game's monsters, bosses (retail PAK)
 - [x] Tagged release v0.3.0 with Windows, Linux, Android and Web packages (notes from `docs/CHANGELOG.md`)
 
+### Audio
+- [x] Audio polish: Quake 2's stereo loudness by direction (`QuakePanLoudness`) and a master limiter (2:1 above a summed gain of 3, `Sounds.UpdateMixer`)
+
 ### Phase 7 – Levels (new)
 - [x] Level compiler: grid levels (cells with floor / ceiling heights, themes, sky, entities) into Quake 2 IBSP v38 maps at runtime (BSP tree, box brushes, faces, lightmaps, vis)
 - [x] Random level generator with Quake / Doom design rules (loops, steps, pillars, platforms, sky rooms, pacing of monsters and items, secret, exit to the next level)
@@ -184,4 +190,12 @@ Out of scope for now: multiplayer (deathmatch / coop), which needs a client-serv
 - [x] Lifts (`func_plat`) and switches (`func_button` → doors of a channel) in the level editor; the generator adds lifts for big heights and locks the exit behind a switch
 - [x] Real visibility for compiled levels: a grid PVS (sight lines between the regions through open cells) and the PHS from it, so random and edited levels are culled like the original maps
 - [x] Keys and key doors, slime pits and teleporters in the level editor and the generator (the exit locked by a blue key on even seeds, a teleporter from the secret room back to the start)
-- [ ] Ladders, lava, more themes for the full game's textures; outdoor terrain
+- [x] Ladders, lava (a texture made in memory), four more themes (red, brown, and rock / grass outdoors) and outdoor areas with rolling ground, in the editor (Ladder, Lava, Hills tools) and the generator
+- [x] Key hunt in random levels: the blue key of the exit in a vault behind red doors, the red key in the open
+- [x] Real slopes (ramp cells: tilted floor planes and wedge brushes) in corridors, outdoor ground and the editor; windows between rooms (glass panes)
+- [x] The full game's textures as themes (discovered per texture directory of the loaded PAKs) and breakable glass (windows are `func_explosive` glass)
+- [x] Diagonal walls: a cell cut at 45 degrees (a vertical diagonal plane over a prism brush), in the editor and across room corners in random levels
+- [x] Curved walls: round rooms (an ellipse of cells, its staircase cut with diagonal walls) in random levels and the editor (`editor round`)
+- [x] Ambushes: monsters that appear when the player walks into a room (spawnflag 2 + a `trigger_once` over the room) in random levels; box triggers compile into real Quake 2 brush models
+- [x] Light styles in compiled levels: up to 4 lightmap blocks per face (flickering / pulsing styles 1–11, switchable lights with a targetname from style 32 like qrad); random levels have rooms with flickering, fluorescent or pulsing lights
+- [x] Secret doors: Quake 2's `func_door_secret` (shot open, a move down / sideways, a pause, a move back, then back again unless `wait` -1); random levels hide the secret passage behind one that looks like the room's wall; the level editor's *Secret* tool

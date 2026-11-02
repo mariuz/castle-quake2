@@ -27,6 +27,9 @@ var
   CmdWarp: String;
   CmdBaseDir: String;
   CmdPaks: TStringList;
+  { -game <dir> / +set game <dir>: a mod folder loaded over baseq2 (e.g.
+    q1q2, Call of the Void) }
+  CmdGame: String;
 
 procedure ApplicationInitialize;
 
@@ -47,10 +50,59 @@ begin
   end;
 end;
 
+{ A whole game folder like Quake 2 (Remastered) loads it: pak0..pak9.pak,
+  then its .pkz archives (sorted), then its loose files, each over the
+  previous }
+function AddGameDir(const Dir: String): Boolean;
+var
+  SR: TSearchRec;
+  Zips: TStringList;
+  I: Integer;
+begin
+  Result := AddPakDir(Dir);
+  if not DirectoryExists(Dir) then
+    Exit;
+  Zips := TStringList.Create;
+  try
+    if FindFirst(IncludeTrailingPathDelimiter(Dir) + '*', faAnyFile, SR) = 0 then
+    try
+      repeat
+        if ((SR.Attr and faDirectory) = 0) and SameText(ExtractFileExt(SR.Name), '.pkz') then
+          Zips.Add(IncludeTrailingPathDelimiter(Dir) + SR.Name);
+      until FindNext(SR) <> 0;
+    finally
+      FindClose(SR);
+    end;
+    Zips.Sort;
+    for I := 0 to Zips.Count - 1 do
+      if Pak.AddZip(Zips[I]) then
+        Result := True;
+  finally
+    Zips.Free;
+  end;
+  if Pak.AddDirectory(Dir) > 0 then
+    Result := True;
+end;
+
+{ The folders that hold the game folders: the current folder and -basedir,
+  each also as Quake 2 Remastered's "rerelease" layout }
+function GameRoots: TStringList;
+begin
+  Result := TStringList.Create;
+  Result.Add('');
+  Result.Add('rerelease' + PathDelim);
+  if CmdBaseDir <> '' then
+  begin
+    Result.Add(IncludeTrailingPathDelimiter(CmdBaseDir));
+    Result.Add(IncludeTrailingPathDelimiter(CmdBaseDir) + 'rerelease' + PathDelim);
+  end;
+end;
+
 procedure ApplicationInitialize;
 var
   I: Integer;
-  LoadedAny: Boolean;
+  LoadedAny, ModFound: Boolean;
+  Roots: TStringList;
 begin
   I := 1;
   while I <= Parameters.High do
@@ -93,6 +145,16 @@ begin
       LightmapGamma := StrToFloatDef(Parameters[I + 1], LightmapGamma);
       Inc(I);
     end else
+    if ((Parameters[I] = '-game') or (Parameters[I] = '--game')) and (I + 1 <= Parameters.High) then
+    begin
+      CmdGame := Parameters[I + 1];
+      Inc(I);
+    end else
+    if (Parameters[I] = '+set') and (I + 2 <= Parameters.High) and SameText(Parameters[I + 1], 'game') then
+    begin
+      CmdGame := Parameters[I + 2];
+      Inc(I, 2);
+    end else
     if ((Parameters[I] = '-pak') or (Parameters[I] = '--pak')) and (I + 1 <= Parameters.High) then
     begin
       CmdPaks.Add(Parameters[I + 1]);
@@ -117,14 +179,32 @@ begin
   LoadedAny := False;
   if UriFileExists('castle-data:/paks/quake2_demo.pak') then
     LoadedAny := Pak.AddFile('castle-data:/paks/quake2_demo.pak') or LoadedAny;
-  if AddPakDir('baseq2') then
-    LoadedAny := True;
-  if CmdBaseDir <> '' then
-  begin
-    if AddPakDir(IncludeTrailingPathDelimiter(CmdBaseDir) + 'baseq2') then
+  Roots := GameRoots;
+  try
+    { baseq2 (PAKs, .pkz, loose files) in every root; the PAKs right in
+      -basedir too }
+    for I := 0 to Roots.Count - 1 do
+      if AddGameDir(Roots[I] + 'baseq2') then
+        LoadedAny := True;
+    if (CmdBaseDir <> '') and AddPakDir(CmdBaseDir) then
       LoadedAny := True;
-    if AddPakDir(CmdBaseDir) then
-      LoadedAny := True;
+    { Then the mod folder over it, like Quake 2's "game" cvar }
+    if CmdGame <> '' then
+    begin
+      ModFound := False;
+      for I := 0 to Roots.Count - 1 do
+        if DirectoryExists(Roots[I] + CmdGame) then
+        begin
+          ModFound := True;
+          if AddGameDir(Roots[I] + CmdGame) then
+            LoadedAny := True;
+          WritelnLog('GameInitialize', 'Mod "%s" loaded from "%s"', [CmdGame, Roots[I] + CmdGame]);
+        end;
+      if not ModFound then
+        WritelnWarning('GameInitialize', 'Mod folder "%s" not found (looked next to baseq2, also in rerelease/)', [CmdGame]);
+    end;
+  finally
+    Roots.Free;
   end;
   for I := 0 to CmdPaks.Count - 1 do
     if Pak.AddFile(CmdPaks[I]) then
@@ -181,7 +261,7 @@ end;
 initialization
   CmdPaks := TStringList.Create;
   ApplicationProperties.ApplicationName := 'castle-quake2';
-  ApplicationProperties.Version := '0.12.0';
+  ApplicationProperties.Version := '0.20.0';
   LogFileName := 'castle-quake2.log';
   InitializeLog;
   Application.OnInitialize := @ApplicationInitialize;
