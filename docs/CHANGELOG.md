@@ -6,6 +6,7 @@
 - Call of the Void (`-game q1q2`): its maps, textures and models load, and its Quake 1 and hybrid monsters spawn with their model and health and fight with the generic monster AI.
 
 - Secret doors: Quake 2's `func_door_secret` works like the original (opened by a shot or a trigger, it moves down or sideways, pauses, slides back, and closes again after its wait); before, it opened like a plain door when touched. Random levels hide the secret passage behind a secret door that looks like the room's wall, and the level editor has a *Secret* tool.
+- Fixed parts of the sky showing as a dark blue patch: the sides of the skybox were sometimes partly transparent.
 
 ## v0.20.0 — 2026-10-31
 
@@ -75,7 +76,6 @@ Keys, ladders, slime, lava, teleporters and outdoor areas in random and edited l
 - Random levels lock the exit with the blue key on even seeds (with the switch on odd ones), turn a third of the pools into shallow slime pits, and put a teleporter in the secret room that takes you back to the start.
 - Teleporters show their pad (the `dmspot` model), as in Quake 2.
 - Autotest scripts can now stand next to things in parts of the level that are not drawn at the moment.
-- Fixed parts of the sky showing as a dark blue patch: the sides of the skybox were sometimes partly transparent.
 
 ## v0.12.0 — 2026-10-24
 
