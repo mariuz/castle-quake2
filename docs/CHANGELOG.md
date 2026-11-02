@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Mods and Quake II Remastered data: `-game <folder>` (or `+set game <folder>`) loads a mod over `baseq2`, also from the remaster's `rerelease/` folder; game folders load their `.pkz` archives and loose files too; the remaster's PNG / TGA textures replace the WAL images; maps in the extended QBSP format load.
+- Call of the Void (`-game q1q2`): its maps, textures and models load, and its Quake 1 and hybrid monsters spawn with their model and health and fight with the generic monster AI.
+
 - Secret doors: Quake 2's `func_door_secret` works like the original (opened by a shot or a trigger, it moves down or sideways, pauses, slides back, and closes again after its wait); before, it opened like a plain door when touched. Random levels hide the secret passage behind a secret door that looks like the room's wall, and the level editor has a *Secret* tool.
 
 ## v0.20.0 — 2026-10-31

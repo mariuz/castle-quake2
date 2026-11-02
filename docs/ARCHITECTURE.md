@@ -68,6 +68,14 @@ Decoded images are cached and served as uncompressed TGA streams through the `qu
 
 ---
 
+## 3b. Game folders and mods (`QuakePak`, `GameInitialize`)
+
+`TQuakePak` is one index of every file by lower-case path; later sources override earlier ones. Sources, in loading order: the bundled demo PAK, then per game folder (`baseq2`, then the `-game` / `+set game` mod, each also looked up in `rerelease/`, Quake II Remastered's layout, and under `-basedir`) its `pak0..9.pak` (read whole into memory), its `.pkz` archives (zips, `AddZip` with CGE's `TCastleZip`) and its loose files (`AddDirectory`, skipping archives, binaries and dot folders). Zip entries and loose files are indexed with an empty stream and read on first use (`StreamOf`), so a large mod folder costs little until its files are needed.
+
+Quake II Remastered data: `LoadTextureReplacement` serves `textures/<name>.png` / `.tga` instead of the WAL image (the WAL's size stays the texture scale, as the map's texture vectors are in WAL texels; with no WAL the image's size is used). Maps in the extended QBSP format (ericw-tools `-qbism`, ident `QBSP`: 32-bit node / leaf / face / edge / brush side indices, float node and leaf bounds) load into the same wide in-memory records as IBSP maps (`ReadNodesLeafs`, `ReadEdgesFaces`, `ReadBrushSides`, `ReadIndexLump`); `TQuakeBsp.Extended` tells which. The level compiler writes IBSP through `NodeToIBSP`, `LeafToIBSP`, `FaceToIBSP`, `EdgeToIBSP`, `BrushSideToIBSP`.
+
+Monsters a mod adds (Call of the Void's Quake 1 and hybrid monsters) get a generic definition from `GenericMonsterDef` when their model is loaded: `GenericMonsterFacts` holds each class's model folder, health and movement (walk / fly / swim, facts from the mod's `SP_monster_*` functions) and a coarse attack by kind (melee, grenades, lasers, bolts, homing pods, lightning); any other `monster_<name>` with `models/monsters/<name>/tris.md2` gets a ranged default. They use the generic AI (no attack / move tables). The definitions are heap records kept apart from `MonsterDefs`, whose array can be reallocated. The map report marks them as a mod's monster.
+
 ## 4. BSP and world geometry (`QuakeBsp`, `QuakeGeometry`)
 
 - IBSP v38 header with 19 lumps. Planes, nodes, vertices, edges, surfedges, texinfo (76 bytes, with the texture name, flags, value and `nexttexinfo`), faces (20 bytes, 4 light styles), models (48 bytes) and the RGB lighting lump are read.

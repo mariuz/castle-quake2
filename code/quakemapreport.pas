@@ -106,6 +106,9 @@ begin
     Exit(csSupported);
   if FindMonsterDef(CName) <> nil then
   begin
+    if IsGenericMonsterDef(FindMonsterDef(CName)) then
+      Note := 'a mod''s monster (model and health known): generic monster AI, one attack'
+    else
     if CName = 'monster_medic' then
       Note := 'revives dead monsters; generic attack (no attack frames table)'
     else

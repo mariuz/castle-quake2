@@ -13,6 +13,9 @@ uses
 
 const
   BSP_IDENT   = $50534249; { 'IBSP' little-endian }
+  { 'QBSP': the extended format of ericw-tools' -qbism (and Quake 2
+    Remastered): 32-bit indices, float bounds, otherwise like IBSP }
+  QBSP_IDENT  = $50534251;
   BSP_VERSION = 38;
 
   LUMP_ENTITIES    = 0;
@@ -76,6 +79,8 @@ const
   MASK_LIQUID = CONTENTS_LAVA or CONTENTS_SLIME or CONTENTS_WATER;
 
 type
+  TLongWordArray = array of LongWord;
+
   TBSPLump = packed record
     Offset: Cardinal;
     Length: Cardinal;
@@ -93,21 +98,59 @@ type
     PlaneType: LongInt;
   end;
 
-  TBSPNode = packed record
+  { The map in memory: wide enough for both IBSP and QBSP files (the disk
+    layouts are TIBSP* / TQBSP*) }
+  TBSPNode = record
     PlaneNum: LongInt;
     Children: array[0..1] of LongInt; { negative numbers are -(leafs+1) }
+    Mins, Maxs: array[0..2] of Single;
+    FirstFace: LongInt;
+    NumFaces: LongInt;
+  end;
+
+  TBSPLeaf = record
+    Contents: LongInt;
+    Cluster: LongInt;
+    Area: LongInt;
+    Mins, Maxs: array[0..2] of Single;
+    FirstLeafFace, NumLeafFaces: LongInt;
+    FirstLeafBrush, NumLeafBrushes: LongInt;
+  end;
+
+  { Quake 2 dnode_t / dleaf_t on disk (IBSP) }
+  TIBSPNode = packed record
+    PlaneNum: LongInt;
+    Children: array[0..1] of LongInt;
     Mins, Maxs: array[0..2] of SmallInt;
     FirstFace: Word;
     NumFaces: Word;
   end;
 
-  TBSPLeaf = packed record
+  TIBSPLeaf = packed record
     Contents: LongInt;
     Cluster: SmallInt;
     Area: SmallInt;
     Mins, Maxs: array[0..2] of SmallInt;
     FirstLeafFace, NumLeafFaces: Word;
     FirstLeafBrush, NumLeafBrushes: Word;
+  end;
+
+  { The same in a QBSP file }
+  TQBSPNode = packed record
+    PlaneNum: LongInt;
+    Children: array[0..1] of LongInt;
+    Mins, Maxs: array[0..2] of Single;
+    FirstFace: LongWord;
+    NumFaces: LongWord;
+  end;
+
+  TQBSPLeaf = packed record
+    Contents: LongInt;
+    Cluster: LongInt;
+    Area: LongInt;
+    Mins, Maxs: array[0..2] of Single;
+    FirstLeafFace, NumLeafFaces: LongWord;
+    FirstLeafBrush, NumLeafBrushes: LongWord;
   end;
 
   { Quake 2 dareas_t: an area's portals in the area portal lump }
@@ -127,18 +170,38 @@ type
     FirstSide, NumSides, Contents: LongInt;
   end;
 
-  { Quake 2 dbrushside_t }
-  TBSPBrushSide = packed record
+  { Quake 2 dbrushside_t (in memory; TIBSPBrushSide / TQBSPBrushSide on disk) }
+  TBSPBrushSide = record
+    PlaneNum: LongInt;
+    TexInfo: LongInt;
+  end;
+
+  TIBSPBrushSide = packed record
     PlaneNum: Word;
     TexInfo: SmallInt;
+  end;
+
+  TQBSPBrushSide = packed record
+    PlaneNum: LongWord;
+    TexInfo: LongInt;
   end;
 
   TBSPBrushArray = array of TBSPBrush;
   TBSPBrushSideArray = array of TBSPBrushSide;
 
-  TBSPEdge = packed record
+  TBSPEdge = record
+    V0: LongWord;
+    V1: LongWord;
+  end;
+
+  TIBSPEdge = packed record
     V0: Word;
     V1: Word;
+  end;
+
+  TQBSPEdge = packed record
+    V0: LongWord;
+    V1: LongWord;
   end;
 
   TBSPTexInfo = packed record
@@ -150,12 +213,32 @@ type
     NextTexInfo: LongInt; { for animations, -1 = end of chain }
   end;
 
-  TBSPFace = packed record
+  TBSPFace = record
+    PlaneId: LongInt;
+    Side: LongInt;
+    FirstEdge: LongInt;
+    NumEdges: LongInt;
+    TexInfoId: LongInt;
+    Styles: array[0..3] of Byte;
+    LightmapOffset: LongInt;
+  end;
+
+  TIBSPFace = packed record
     PlaneId: Word;
     Side: SmallInt;
     FirstEdge: LongInt;
     NumEdges: SmallInt;
     TexInfoId: SmallInt;
+    Styles: array[0..3] of Byte;
+    LightmapOffset: LongInt;
+  end;
+
+  TQBSPFace = packed record
+    PlaneId: LongWord;
+    Side: LongInt;
+    FirstEdge: LongInt;
+    NumEdges: LongInt;
+    TexInfoId: LongInt;
     Styles: array[0..3] of Byte;
     LightmapOffset: LongInt;
   end;
@@ -232,11 +315,13 @@ type
     FPlanes: TBSPPlaneArray;
     FNodes: TBSPNodeArray;
     FLeafs: TBSPLeafArray;
-    FLeafFaces: array of Word;
+    FLeafFaces: TLongWordArray;
     { Collision brushes (CM_BoxTrace): brushes, their sides, brushes per leaf }
     FBrushes: TBSPBrushArray;
     FBrushSides: TBSPBrushSideArray;
-    FLeafBrushes: array of Word;
+    FLeafBrushes: TLongWordArray;
+    { Loaded from a QBSP (extended) file }
+    FExtended: Boolean;
     { Visibility lump (Quake 2 dvis_t): cluster count, then per cluster the
       offsets of its run-length compressed PVS and PHS rows }
     FVisData: TBytes;
@@ -265,6 +350,13 @@ type
     procedure ParseEntities(const Text: String);
     procedure LoadTextures;
     procedure LoadLadderBrushes(const Data: PByte; const Hdr: Pointer);
+    { Lumps whose layout differs between IBSP and QBSP, into the wide
+      records in memory }
+    procedure ReadNodesLeafs(const Data: PByte; const Hdr: TBSPHeader; const Extended: Boolean);
+    procedure ReadEdgesFaces(const Data: PByte; const Hdr: TBSPHeader; const Extended: Boolean);
+    procedure ReadBrushSides(const Data: PByte; const Hdr: TBSPHeader; const Extended: Boolean);
+    procedure ReadIndexLump(const Data: PByte; const Lump: TBSPLump; const Extended: Boolean;
+      var Indexes: TLongWordArray);
     procedure ComputeExtents;
     function RecursiveLightPoint(const NodeIdx: Integer; const Start, Stop: TVector3;
       out Samples: TLightPointSamples): Integer;
@@ -358,6 +450,8 @@ type
 
     property MapName: String read FMapName;
     property Faces: TBSPFaceArray read FFaces;
+    { The map was a QBSP file (ericw-tools -qbism, Quake 2 Remastered) }
+    property Extended: Boolean read FExtended;
     property FaceExtents: TFaceExtentsArray read FExtents;
     property FaceCount: Integer read GetFaceCount;
     property Models: TBSPModelArray read FModels;
@@ -383,7 +477,71 @@ var
     it (e.g. a generated level, QuakeLevelGen) and return True }
   MissingMapHook: function(const MapPath: String): Boolean = nil;
 
+{ The IBSP disk records of the wide records in memory (the level compiler
+  writes IBSP files) }
+function NodeToIBSP(const N: TBSPNode): TIBSPNode;
+function LeafToIBSP(const L: TBSPLeaf): TIBSPLeaf;
+function FaceToIBSP(const F: TBSPFace): TIBSPFace;
+function EdgeToIBSP(const E: TBSPEdge): TIBSPEdge;
+function BrushSideToIBSP(const S: TBSPBrushSide): TIBSPBrushSide;
+
 implementation
+
+function NodeToIBSP(const N: TBSPNode): TIBSPNode;
+var
+  I: Integer;
+begin
+  Result.PlaneNum := N.PlaneNum;
+  Result.Children := N.Children;
+  for I := 0 to 2 do
+  begin
+    Result.Mins[I] := EnsureRange(Floor(N.Mins[I]), -32768, 32767);
+    Result.Maxs[I] := EnsureRange(Ceil(N.Maxs[I]), -32768, 32767);
+  end;
+  Result.FirstFace := N.FirstFace;
+  Result.NumFaces := N.NumFaces;
+end;
+
+function LeafToIBSP(const L: TBSPLeaf): TIBSPLeaf;
+var
+  I: Integer;
+begin
+  Result.Contents := L.Contents;
+  Result.Cluster := L.Cluster;
+  Result.Area := L.Area;
+  for I := 0 to 2 do
+  begin
+    Result.Mins[I] := EnsureRange(Floor(L.Mins[I]), -32768, 32767);
+    Result.Maxs[I] := EnsureRange(Ceil(L.Maxs[I]), -32768, 32767);
+  end;
+  Result.FirstLeafFace := L.FirstLeafFace;
+  Result.NumLeafFaces := L.NumLeafFaces;
+  Result.FirstLeafBrush := L.FirstLeafBrush;
+  Result.NumLeafBrushes := L.NumLeafBrushes;
+end;
+
+function FaceToIBSP(const F: TBSPFace): TIBSPFace;
+begin
+  Result.PlaneId := F.PlaneId;
+  Result.Side := F.Side;
+  Result.FirstEdge := F.FirstEdge;
+  Result.NumEdges := F.NumEdges;
+  Result.TexInfoId := F.TexInfoId;
+  Result.Styles := F.Styles;
+  Result.LightmapOffset := F.LightmapOffset;
+end;
+
+function EdgeToIBSP(const E: TBSPEdge): TIBSPEdge;
+begin
+  Result.V0 := E.V0;
+  Result.V1 := E.V1;
+end;
+
+function BrushSideToIBSP(const S: TBSPBrushSide): TIBSPBrushSide;
+begin
+  Result.PlaneNum := S.PlaneNum;
+  Result.TexInfo := S.TexInfo;
+end;
 
 { TQuakeFaceExtents }
 
@@ -650,8 +808,186 @@ begin
   end;
 end;
 
+procedure TQuakeBsp.ReadNodesLeafs(const Data: PByte; const Hdr: TBSPHeader; const Extended: Boolean);
+var
+  I, J: Integer;
+  INodes: ^TIBSPNode;
+  QNodes: ^TQBSPNode;
+  ILeafs: ^TIBSPLeaf;
+  QLeafs: ^TQBSPLeaf;
+begin
+  if Extended then
+  begin
+    SetLength(FNodes, Hdr.Lumps[LUMP_NODES].Length div SizeOf(TQBSPNode));
+    QNodes := Pointer(Data + Hdr.Lumps[LUMP_NODES].Offset);
+    for I := 0 to High(FNodes) do
+    begin
+      FNodes[I].PlaneNum := QNodes[I].PlaneNum;
+      FNodes[I].Children := QNodes[I].Children;
+      for J := 0 to 2 do
+      begin
+        FNodes[I].Mins[J] := QNodes[I].Mins[J];
+        FNodes[I].Maxs[J] := QNodes[I].Maxs[J];
+      end;
+      FNodes[I].FirstFace := QNodes[I].FirstFace;
+      FNodes[I].NumFaces := QNodes[I].NumFaces;
+    end;
+    SetLength(FLeafs, Hdr.Lumps[LUMP_LEAFS].Length div SizeOf(TQBSPLeaf));
+    QLeafs := Pointer(Data + Hdr.Lumps[LUMP_LEAFS].Offset);
+    for I := 0 to High(FLeafs) do
+    begin
+      FLeafs[I].Contents := QLeafs[I].Contents;
+      FLeafs[I].Cluster := QLeafs[I].Cluster;
+      FLeafs[I].Area := QLeafs[I].Area;
+      for J := 0 to 2 do
+      begin
+        FLeafs[I].Mins[J] := QLeafs[I].Mins[J];
+        FLeafs[I].Maxs[J] := QLeafs[I].Maxs[J];
+      end;
+      FLeafs[I].FirstLeafFace := QLeafs[I].FirstLeafFace;
+      FLeafs[I].NumLeafFaces := QLeafs[I].NumLeafFaces;
+      FLeafs[I].FirstLeafBrush := QLeafs[I].FirstLeafBrush;
+      FLeafs[I].NumLeafBrushes := QLeafs[I].NumLeafBrushes;
+    end;
+  end else
+  begin
+    SetLength(FNodes, Hdr.Lumps[LUMP_NODES].Length div SizeOf(TIBSPNode));
+    INodes := Pointer(Data + Hdr.Lumps[LUMP_NODES].Offset);
+    for I := 0 to High(FNodes) do
+    begin
+      FNodes[I].PlaneNum := INodes[I].PlaneNum;
+      FNodes[I].Children := INodes[I].Children;
+      for J := 0 to 2 do
+      begin
+        FNodes[I].Mins[J] := INodes[I].Mins[J];
+        FNodes[I].Maxs[J] := INodes[I].Maxs[J];
+      end;
+      FNodes[I].FirstFace := INodes[I].FirstFace;
+      FNodes[I].NumFaces := INodes[I].NumFaces;
+    end;
+    SetLength(FLeafs, Hdr.Lumps[LUMP_LEAFS].Length div SizeOf(TIBSPLeaf));
+    ILeafs := Pointer(Data + Hdr.Lumps[LUMP_LEAFS].Offset);
+    for I := 0 to High(FLeafs) do
+    begin
+      FLeafs[I].Contents := ILeafs[I].Contents;
+      FLeafs[I].Cluster := ILeafs[I].Cluster;
+      FLeafs[I].Area := ILeafs[I].Area;
+      for J := 0 to 2 do
+      begin
+        FLeafs[I].Mins[J] := ILeafs[I].Mins[J];
+        FLeafs[I].Maxs[J] := ILeafs[I].Maxs[J];
+      end;
+      FLeafs[I].FirstLeafFace := ILeafs[I].FirstLeafFace;
+      FLeafs[I].NumLeafFaces := ILeafs[I].NumLeafFaces;
+      FLeafs[I].FirstLeafBrush := ILeafs[I].FirstLeafBrush;
+      FLeafs[I].NumLeafBrushes := ILeafs[I].NumLeafBrushes;
+    end;
+  end;
+end;
+
+procedure TQuakeBsp.ReadEdgesFaces(const Data: PByte; const Hdr: TBSPHeader; const Extended: Boolean);
+var
+  I: Integer;
+  IEdges: ^TIBSPEdge;
+  QEdges: ^TQBSPEdge;
+  IFaces: ^TIBSPFace;
+  QFaces: ^TQBSPFace;
+begin
+  if Extended then
+  begin
+    SetLength(FEdges, Hdr.Lumps[LUMP_EDGES].Length div SizeOf(TQBSPEdge));
+    QEdges := Pointer(Data + Hdr.Lumps[LUMP_EDGES].Offset);
+    for I := 0 to High(FEdges) do
+    begin
+      FEdges[I].V0 := QEdges[I].V0;
+      FEdges[I].V1 := QEdges[I].V1;
+    end;
+    SetLength(FFaces, Hdr.Lumps[LUMP_FACES].Length div SizeOf(TQBSPFace));
+    QFaces := Pointer(Data + Hdr.Lumps[LUMP_FACES].Offset);
+    for I := 0 to High(FFaces) do
+    begin
+      FFaces[I].PlaneId := QFaces[I].PlaneId;
+      FFaces[I].Side := QFaces[I].Side;
+      FFaces[I].FirstEdge := QFaces[I].FirstEdge;
+      FFaces[I].NumEdges := QFaces[I].NumEdges;
+      FFaces[I].TexInfoId := QFaces[I].TexInfoId;
+      FFaces[I].Styles := QFaces[I].Styles;
+      FFaces[I].LightmapOffset := QFaces[I].LightmapOffset;
+    end;
+  end else
+  begin
+    SetLength(FEdges, Hdr.Lumps[LUMP_EDGES].Length div SizeOf(TIBSPEdge));
+    IEdges := Pointer(Data + Hdr.Lumps[LUMP_EDGES].Offset);
+    for I := 0 to High(FEdges) do
+    begin
+      FEdges[I].V0 := IEdges[I].V0;
+      FEdges[I].V1 := IEdges[I].V1;
+    end;
+    SetLength(FFaces, Hdr.Lumps[LUMP_FACES].Length div SizeOf(TIBSPFace));
+    IFaces := Pointer(Data + Hdr.Lumps[LUMP_FACES].Offset);
+    for I := 0 to High(FFaces) do
+    begin
+      FFaces[I].PlaneId := IFaces[I].PlaneId;
+      FFaces[I].Side := IFaces[I].Side;
+      FFaces[I].FirstEdge := IFaces[I].FirstEdge;
+      FFaces[I].NumEdges := IFaces[I].NumEdges;
+      FFaces[I].TexInfoId := IFaces[I].TexInfoId;
+      FFaces[I].Styles := IFaces[I].Styles;
+      FFaces[I].LightmapOffset := IFaces[I].LightmapOffset;
+    end;
+  end;
+end;
+
+procedure TQuakeBsp.ReadBrushSides(const Data: PByte; const Hdr: TBSPHeader; const Extended: Boolean);
+var
+  I: Integer;
+  ISides: ^TIBSPBrushSide;
+  QSides: ^TQBSPBrushSide;
+begin
+  if Extended then
+  begin
+    SetLength(FBrushSides, Hdr.Lumps[LUMP_BRUSHSIDES].Length div SizeOf(TQBSPBrushSide));
+    QSides := Pointer(Data + Hdr.Lumps[LUMP_BRUSHSIDES].Offset);
+    for I := 0 to High(FBrushSides) do
+    begin
+      FBrushSides[I].PlaneNum := QSides[I].PlaneNum;
+      FBrushSides[I].TexInfo := QSides[I].TexInfo;
+    end;
+  end else
+  begin
+    SetLength(FBrushSides, Hdr.Lumps[LUMP_BRUSHSIDES].Length div SizeOf(TIBSPBrushSide));
+    ISides := Pointer(Data + Hdr.Lumps[LUMP_BRUSHSIDES].Offset);
+    for I := 0 to High(FBrushSides) do
+    begin
+      FBrushSides[I].PlaneNum := ISides[I].PlaneNum;
+      FBrushSides[I].TexInfo := ISides[I].TexInfo;
+    end;
+  end;
+end;
+
+procedure TQuakeBsp.ReadIndexLump(const Data: PByte; const Lump: TBSPLump; const Extended: Boolean;
+  var Indexes: TLongWordArray);
+var
+  I: Integer;
+  Words: PWord;
+begin
+  if Extended then
+  begin
+    SetLength(Indexes, Lump.Length div SizeOf(LongWord));
+    if Length(Indexes) > 0 then
+      Move((Data + Lump.Offset)^, Indexes[0], Length(Indexes) * SizeOf(LongWord));
+  end else
+  begin
+    SetLength(Indexes, Lump.Length div SizeOf(Word));
+    Words := Pointer(Data + Lump.Offset);
+    for I := 0 to High(Indexes) do
+      Indexes[I] := Words[I];
+  end;
+end;
+
 function TQuakeBsp.LoadFromPak(const AMapPath: String): Boolean;
 var
+  IsQbsp: Boolean;
   Data: PByte;
   Size: Cardinal;
   Hdr: TBSPHeader;
@@ -678,12 +1014,13 @@ begin
     Exit;
 
   Move(Data^, Hdr, SizeOf(Hdr));
-  if (Hdr.Ident <> BSP_IDENT) or (Hdr.Version <> BSP_VERSION) then
+  if ((Hdr.Ident <> BSP_IDENT) and (Hdr.Ident <> QBSP_IDENT)) or (Hdr.Version <> BSP_VERSION) then
   begin
-    WritelnWarning('QuakeBsp', 'Map "%s" is not a Quake 2 IBSP v38 map (version %d)',
+    WritelnWarning('QuakeBsp', 'Map "%s" is not a Quake 2 IBSP / QBSP v38 map (version %d)',
       [AMapPath, Hdr.Version]);
     Exit;
   end;
+  IsQbsp := Hdr.Ident = QBSP_IDENT;
   for I := 0 to LUMP_COUNT - 1 do
     if not LumpValid(I) then
     begin
@@ -699,17 +1036,8 @@ begin
   if Length(FPlanes) > 0 then
     Move((Data + Hdr.Lumps[LUMP_PLANES].Offset)^, FPlanes[0], Length(FPlanes) * SizeOf(TBSPPlane));
 
-  SetLength(FNodes, Hdr.Lumps[LUMP_NODES].Length div SizeOf(TBSPNode));
-  if Length(FNodes) > 0 then
-    Move((Data + Hdr.Lumps[LUMP_NODES].Offset)^, FNodes[0], Length(FNodes) * SizeOf(TBSPNode));
-
-  SetLength(FLeafs, Hdr.Lumps[LUMP_LEAFS].Length div SizeOf(TBSPLeaf));
-  if Length(FLeafs) > 0 then
-    Move((Data + Hdr.Lumps[LUMP_LEAFS].Offset)^, FLeafs[0], Length(FLeafs) * SizeOf(TBSPLeaf));
-
-  SetLength(FLeafFaces, Hdr.Lumps[LUMP_LEAFFACES].Length div SizeOf(Word));
-  if Length(FLeafFaces) > 0 then
-    Move((Data + Hdr.Lumps[LUMP_LEAFFACES].Offset)^, FLeafFaces[0], Length(FLeafFaces) * SizeOf(Word));
+  ReadNodesLeafs(Data, Hdr, IsQbsp);
+  ReadIndexLump(Data, Hdr.Lumps[LUMP_LEAFFACES], IsQbsp, FLeafFaces);
 
   FClusterCount := 0;
   SetLength(FVisData, Hdr.Lumps[LUMP_VISIBILITY].Length);
@@ -737,9 +1065,7 @@ begin
   if Length(FVertices) > 0 then
     Move((Data + Hdr.Lumps[LUMP_VERTICES].Offset)^, FVertices[0], Length(FVertices) * SizeOf(TVector3));
 
-  SetLength(FEdges, Hdr.Lumps[LUMP_EDGES].Length div SizeOf(TBSPEdge));
-  if Length(FEdges) > 0 then
-    Move((Data + Hdr.Lumps[LUMP_EDGES].Offset)^, FEdges[0], Length(FEdges) * SizeOf(TBSPEdge));
+  ReadEdgesFaces(Data, Hdr, IsQbsp);
 
   SetLength(FSurfEdges, Hdr.Lumps[LUMP_SURFEDGES].Length div SizeOf(LongInt));
   if Length(FSurfEdges) > 0 then
@@ -749,9 +1075,6 @@ begin
   if Length(FTexInfos) > 0 then
     Move((Data + Hdr.Lumps[LUMP_TEXINFO].Offset)^, FTexInfos[0], Length(FTexInfos) * SizeOf(TBSPTexInfo));
 
-  SetLength(FFaces, Hdr.Lumps[LUMP_FACES].Length div SizeOf(TBSPFace));
-  if Length(FFaces) > 0 then
-    Move((Data + Hdr.Lumps[LUMP_FACES].Offset)^, FFaces[0], Length(FFaces) * SizeOf(TBSPFace));
 
   SetLength(FModels, Hdr.Lumps[LUMP_MODELS].Length div SizeOf(TBSPModel));
   if Length(FModels) > 0 then
@@ -766,15 +1089,12 @@ begin
   SetLength(FBrushes, Hdr.Lumps[LUMP_BRUSHES].Length div SizeOf(TBSPBrush));
   if Length(FBrushes) > 0 then
     Move((Data + Hdr.Lumps[LUMP_BRUSHES].Offset)^, FBrushes[0], Length(FBrushes) * SizeOf(TBSPBrush));
-  SetLength(FBrushSides, Hdr.Lumps[LUMP_BRUSHSIDES].Length div SizeOf(TBSPBrushSide));
-  if Length(FBrushSides) > 0 then
-    Move((Data + Hdr.Lumps[LUMP_BRUSHSIDES].Offset)^, FBrushSides[0], Length(FBrushSides) * SizeOf(TBSPBrushSide));
-  SetLength(FLeafBrushes, Hdr.Lumps[LUMP_LEAFBRUSHES].Length div SizeOf(Word));
-  if Length(FLeafBrushes) > 0 then
-    Move((Data + Hdr.Lumps[LUMP_LEAFBRUSHES].Offset)^, FLeafBrushes[0], Length(FLeafBrushes) * SizeOf(Word));
+  ReadBrushSides(Data, Hdr, IsQbsp);
+  ReadIndexLump(Data, Hdr.Lumps[LUMP_LEAFBRUSHES], IsQbsp, FLeafBrushes);
   LoadLadderBrushes(Data, @Hdr);
 
-  WritelnLog('QuakeBsp', 'Loaded map "%s": %d faces, %d vertices, %d texinfos, %d models, %d entities, %d clusters, %d areas',
+  FExtended := IsQbsp;
+  WritelnLog('QuakeBsp', 'Loaded map "%s"' + Copy(' (QBSP)', 1, 7 * Ord(IsQbsp)) + ': %d faces, %d vertices, %d texinfos, %d models, %d entities, %d clusters, %d areas',
     [AMapPath, Length(FFaces), Length(FVertices), Length(FTexInfos), Length(FModels), FEntities.Count,
      FClusterCount, Length(FAreas)]);
   Result := Length(FModels) > 0;

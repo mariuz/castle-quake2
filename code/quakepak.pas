@@ -7,7 +7,7 @@ interface
 
 uses
   SysUtils, Classes, Generics.Collections,
-  CastleDownload, CastleUriUtils, CastleLog;
+  CastleDownload, CastleUriUtils, CastleLog, CastleZip;
 
 type
   { Single file entry inside a Quake PAK archive. }
@@ -30,7 +30,17 @@ type
     { Normalized path -> index in FEntries, for O(1) lookups }
     FIndex: specialize TDictionary<String, Integer>;
     FProtocolRegistered: Boolean;
+    { Files loaded on first use (loose files of a game folder, .pkz
+      entries): per stream index, the zip (index in FZips, -1 for a file
+      on disk) and the disk path or path in the zip; FStreams holds nil
+      until loaded }
+    FZips: specialize TObjectList<TCastleZip>;
+    FLazyZip: specialize TList<Integer>;
+    FLazyPath: TStringList;
     function FindEntryIndex(const APath: String): Integer;
+    { The stream of a PAK index, loading a lazy file now (nil if it fails) }
+    function StreamOf(const PakIndex: Integer): TMemoryStream;
+    procedure AddLazyEntry(const APath, Source: String; const ZipIndex: Integer; const Size: Int64);
   public
     constructor Create;
     destructor Destroy; override;
@@ -41,6 +51,16 @@ type
 
     { Add a PAK archive from file or castle-data URL. Returns true if successful. }
     function AddFile(const AUrlOrFilename: String): Boolean;
+
+    { Add every file under a folder (a game folder like baseq2 or a mod's),
+      named by its path inside it, over what was loaded before. Files are
+      read when first used. Skips .pak / .pkz archives and dot folders.
+      Returns the number of files added. }
+    function AddDirectory(const Dir: String): Integer;
+
+    { Add a .pkz archive (a zip, Quake 2 Remastered's mod packages), its
+      files read when first used. Returns true if it could be opened. }
+    function AddZip(const FileName: String): Boolean;
 
     { Loaded PAK files, comma separated (for reports) }
     function PakList: String;
@@ -109,6 +129,9 @@ begin
   FEntries := TQuakePakEntryList.Create;
   FIndex := specialize TDictionary<String, Integer>.Create;
   FProtocolRegistered := False;
+  FZips := specialize TObjectList<TCastleZip>.Create(True);
+  FLazyZip := specialize TList<Integer>.Create;
+  FLazyPath := TStringList.Create;
 end;
 
 destructor TQuakePak.Destroy;
@@ -123,7 +146,134 @@ begin
   FFilenames.Free;
   FEntries.Free;
   FIndex.Free;
+  FLazyPath.Free;
+  FLazyZip.Free;
+  FZips.Free;
   inherited Destroy;
+end;
+
+function TQuakePak.StreamOf(const PakIndex: Integer): TMemoryStream;
+var
+  Src: TStream;
+begin
+  Result := FStreams[PakIndex];
+  if (Result <> nil) or (PakIndex >= FLazyZip.Count) or (FLazyPath[PakIndex] = '') then
+    Exit;
+  try
+    if FLazyZip[PakIndex] >= 0 then
+      Src := FZips[FLazyZip[PakIndex]].Read(FLazyPath[PakIndex])
+    else
+      Src := TFileStream.Create(FLazyPath[PakIndex], fmOpenRead or fmShareDenyWrite);
+    try
+      Result := TMemoryStream.Create;
+      Result.CopyFrom(Src, 0);
+      Result.Position := 0;
+    finally
+      Src.Free;
+    end;
+  except
+    on E: Exception do
+    begin
+      WritelnWarning('QuakePak', 'Cannot read "%s": %s', [FLazyPath[PakIndex], E.Message]);
+      FreeAndNil(Result);
+      Exit;
+    end;
+  end;
+  FStreams[PakIndex] := Result;
+end;
+
+procedure TQuakePak.AddLazyEntry(const APath, Source: String; const ZipIndex: Integer; const Size: Int64);
+var
+  Entry: TQuakePakEntry;
+  Idx: Integer;
+begin
+  Entry.Path := NormalizePath(APath);
+  Entry.Offset := 0;
+  Entry.Size := Size;
+  Entry.PakIndex := FStreams.Add(nil);
+  FFilenames.Add(Source);
+  while FLazyZip.Count < Entry.PakIndex do
+  begin
+    FLazyZip.Add(-1);
+    FLazyPath.Add('');
+  end;
+  if ZipIndex >= 0 then
+    FLazyPath.Add(APath)
+  else
+    FLazyPath.Add(Source);
+  FLazyZip.Add(ZipIndex);
+  Idx := FindEntryIndex(Entry.Path);
+  if Idx >= 0 then
+    FEntries[Idx] := Entry
+  else
+    FIndex.AddOrSetValue(Entry.Path, FEntries.Add(Entry));
+end;
+
+function TQuakePak.AddDirectory(const Dir: String): Integer;
+
+  procedure Scan(const Folder, Prefix: String);
+  var
+    SR: TSearchRec;
+    Ext: String;
+  begin
+    if FindFirst(IncludeTrailingPathDelimiter(Folder) + '*', faAnyFile, SR) = 0 then
+    try
+      repeat
+        if (SR.Name = '') or (SR.Name[1] = '.') then
+          Continue;
+        if (SR.Attr and faDirectory) <> 0 then
+          Scan(IncludeTrailingPathDelimiter(Folder) + SR.Name, Prefix + SR.Name + '/')
+        else
+        begin
+          Ext := LowerCase(ExtractFileExt(SR.Name));
+          if (Ext = '.pak') or (Ext = '.pkz') or (Ext = '.dll') or (Ext = '.so') or (Ext = '.exe') then
+            Continue;
+          AddLazyEntry(Prefix + SR.Name, IncludeTrailingPathDelimiter(Folder) + SR.Name, -1, SR.Size);
+          Inc(Result);
+        end;
+      until FindNext(SR) <> 0;
+    finally
+      FindClose(SR);
+    end;
+  end;
+
+begin
+  Result := 0;
+  if not DirectoryExists(Dir) then
+    Exit;
+  Scan(ExcludeTrailingPathDelimiter(Dir), '');
+  if Result > 0 then
+    WritelnLog('QuakePak', 'Added folder "%s": %d loose files (total indexed: %d)', [Dir, Result, FEntries.Count]);
+end;
+
+function TQuakePak.AddZip(const FileName: String): Boolean;
+var
+  Zip: TCastleZip;
+  ZipIndex, I: Integer;
+  Name: String;
+begin
+  Result := False;
+  Zip := TCastleZip.Create;
+  try
+    Zip.Open(FilenameToUriSafe(ExpandFileName(FileName)));
+  except
+    on E: Exception do
+    begin
+      WritelnWarning('QuakePak', 'Cannot open "%s": %s', [FileName, E.Message]);
+      Zip.Free;
+      Exit;
+    end;
+  end;
+  ZipIndex := FZips.Add(Zip);
+  for I := 0 to Zip.Files.Count - 1 do
+  begin
+    Name := Zip.Files[I];
+    if (Name = '') or (Name[Length(Name)] = '/') then
+      Continue; { folders }
+    AddLazyEntry(Name, 'zip:' + FileName + ':' + Name, ZipIndex, 0);
+  end;
+  WritelnLog('QuakePak', 'Loaded "%s": %d files (total indexed: %d)', [FileName, Zip.Files.Count, FEntries.Count]);
+  Result := True;
 end;
 
 function TQuakePak.GetFileCount: Integer;
@@ -286,7 +436,16 @@ begin
     Exit;
 
   Entry := FEntries[Idx];
-  Src := FStreams[Entry.PakIndex];
+  Src := StreamOf(Entry.PakIndex);
+  if Src = nil then
+    Exit;
+  { Lazy files: their real size is known once loaded }
+  if (Entry.Offset = 0) and (FFilenames[Entry.PakIndex] <> '') and (Entry.Size <> Src.Size) and
+     (Entry.PakIndex < FLazyPath.Count) and (FLazyPath[Entry.PakIndex] <> '') then
+  begin
+    Entry.Size := Src.Size;
+    FEntries[Idx] := Entry;
+  end;
   if Entry.Offset + Entry.Size > Cardinal(Src.Size) then
   begin
     WritelnWarning('QuakePak', 'File entry "%s" points out of bounds', [APath]);
@@ -312,7 +471,14 @@ begin
     Exit;
 
   Entry := FEntries[Idx];
-  Src := FStreams[Entry.PakIndex];
+  Src := StreamOf(Entry.PakIndex);
+  if Src = nil then
+    Exit;
+  if (Entry.PakIndex < FLazyPath.Count) and (FLazyPath[Entry.PakIndex] <> '') and (Entry.Size <> Src.Size) then
+  begin
+    Entry.Size := Src.Size;
+    FEntries[Idx] := Entry;
+  end;
   if Entry.Offset + Entry.Size > Cardinal(Src.Size) then
     Exit;
 

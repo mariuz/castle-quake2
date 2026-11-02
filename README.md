@@ -116,6 +116,19 @@ PAKs are loaded in this order (later ones override earlier ones):
 2. `baseq2/pak0.pak`, `pak1.pak`, ... next to the executable — a full Quake 2 install.
 3. `-basedir <quake2 dir>` (loads `<dir>/baseq2/pak*.pak`) and `-pak <file>`.
 
+A game folder (`baseq2`, or a mod's) is loaded whole: `pak0.pak`..`pak9.pak`, then its `.pkz` archives, then its loose files, each over the previous. Quake 2 Remastered's layout (`<dir>/rerelease/baseq2`) is found too, and its 32-bit textures (`textures/<name>.png` / `.tga`) replace the `.wal` images.
+
+#### Mods: Call of the Void
+
+`-game <folder>` (or `+set game <folder>`, as in Quake 2) loads a mod's folder next to `baseq2` over it. [Call of the Void](https://www.moddb.com/mods/quake-ii-call-of-the-void), the Quake 1 / 2 crossover for Quake II Remastered, installs as `rerelease/q1q2`:
+
+```
+castle-quake2 -basedir "C:\Program Files (x86)\Steam\steamapps\common\Quake 2" -game q1q2 +map q2e1start
+castle-quake2 -basedir <same> -game q1q2 --map-report cotv-report.md   # what the mod's maps still need
+```
+
+What works: its maps (IBSP or the extended QBSP format), textures (PNG / TGA), models and sounds load; its Quake 1 and hybrid monsters (dogs, ogres, knights, fiends, shamblers, scrags, vores, grunts, the `_strogg` / `_prototype` hybrids, the bosses) spawn with their model and health and fight with the generic monster AI (one attack each: melee, grenades, lasers, bolts, homing pods or lightning, by kind). Not yet: their own animations and attack sequences, the mod's new weapons, items, keys and special entities (the map report lists them), and Quake II Remastered's own new features.
+
 ### Tests
 
 ```powershell

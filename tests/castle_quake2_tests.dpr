@@ -24,7 +24,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, Zipper;
 
 var
   Passed, Failed: Integer;
@@ -2729,6 +2729,207 @@ end;
 
 const
   PakPath = '../data/paks/quake2_demo.pak';
+{ Bytes of an IBSP map rewritten as a QBSP map (the same data in the
+  extended layout), like ericw-tools' -qbism output }
+function IbspToQbsp(const Data: PByte; const Size: Cardinal): TMemoryStream;
+var
+  Hdr, Out: TBSPHeader;
+  L, I, Count: Integer;
+  Lumps: array[0..LUMP_COUNT - 1] of TBytes;
+  IN_: ^TIBSPNode; QN: TQBSPNode;
+  IL: ^TIBSPLeaf; QL: TQBSPLeaf;
+  IF_: ^TIBSPFace; QF: TQBSPFace;
+  IE: ^TIBSPEdge; QE: TQBSPEdge;
+  ISd: ^TIBSPBrushSide; QS: TQBSPBrushSide;
+  W: PWord; LW: LongWord;
+  J: Integer;
+
+  procedure Put(const Lump: Integer; const Rec; const RecSize, Index: Integer);
+  begin
+    Move(Rec, Lumps[Lump][Index * RecSize], RecSize);
+  end;
+
+begin
+  Move(Data^, Hdr, SizeOf(Hdr));
+  for L := 0 to LUMP_COUNT - 1 do
+  begin
+    SetLength(Lumps[L], Hdr.Lumps[L].Length);
+    if Hdr.Lumps[L].Length > 0 then
+      Move((Data + Hdr.Lumps[L].Offset)^, Lumps[L][0], Hdr.Lumps[L].Length);
+  end;
+  Count := Hdr.Lumps[LUMP_NODES].Length div SizeOf(TIBSPNode);
+  IN_ := Pointer(Data + Hdr.Lumps[LUMP_NODES].Offset);
+  SetLength(Lumps[LUMP_NODES], Count * SizeOf(TQBSPNode));
+  for I := 0 to Count - 1 do
+  begin
+    QN.PlaneNum := IN_[I].PlaneNum;
+    QN.Children := IN_[I].Children;
+    for J := 0 to 2 do
+    begin
+      QN.Mins[J] := IN_[I].Mins[J];
+      QN.Maxs[J] := IN_[I].Maxs[J];
+    end;
+    QN.FirstFace := IN_[I].FirstFace;
+    QN.NumFaces := IN_[I].NumFaces;
+    Put(LUMP_NODES, QN, SizeOf(QN), I);
+  end;
+  Count := Hdr.Lumps[LUMP_LEAFS].Length div SizeOf(TIBSPLeaf);
+  IL := Pointer(Data + Hdr.Lumps[LUMP_LEAFS].Offset);
+  SetLength(Lumps[LUMP_LEAFS], Count * SizeOf(TQBSPLeaf));
+  for I := 0 to Count - 1 do
+  begin
+    QL.Contents := IL[I].Contents;
+    QL.Cluster := IL[I].Cluster;
+    QL.Area := IL[I].Area;
+    for J := 0 to 2 do
+    begin
+      QL.Mins[J] := IL[I].Mins[J];
+      QL.Maxs[J] := IL[I].Maxs[J];
+    end;
+    QL.FirstLeafFace := IL[I].FirstLeafFace;
+    QL.NumLeafFaces := IL[I].NumLeafFaces;
+    QL.FirstLeafBrush := IL[I].FirstLeafBrush;
+    QL.NumLeafBrushes := IL[I].NumLeafBrushes;
+    Put(LUMP_LEAFS, QL, SizeOf(QL), I);
+  end;
+  Count := Hdr.Lumps[LUMP_FACES].Length div SizeOf(TIBSPFace);
+  IF_ := Pointer(Data + Hdr.Lumps[LUMP_FACES].Offset);
+  SetLength(Lumps[LUMP_FACES], Count * SizeOf(TQBSPFace));
+  for I := 0 to Count - 1 do
+  begin
+    QF.PlaneId := IF_[I].PlaneId;
+    QF.Side := IF_[I].Side;
+    QF.FirstEdge := IF_[I].FirstEdge;
+    QF.NumEdges := IF_[I].NumEdges;
+    QF.TexInfoId := IF_[I].TexInfoId;
+    QF.Styles := IF_[I].Styles;
+    QF.LightmapOffset := IF_[I].LightmapOffset;
+    Put(LUMP_FACES, QF, SizeOf(QF), I);
+  end;
+  Count := Hdr.Lumps[LUMP_EDGES].Length div SizeOf(TIBSPEdge);
+  IE := Pointer(Data + Hdr.Lumps[LUMP_EDGES].Offset);
+  SetLength(Lumps[LUMP_EDGES], Count * SizeOf(TQBSPEdge));
+  for I := 0 to Count - 1 do
+  begin
+    QE.V0 := IE[I].V0;
+    QE.V1 := IE[I].V1;
+    Put(LUMP_EDGES, QE, SizeOf(QE), I);
+  end;
+  Count := Hdr.Lumps[LUMP_BRUSHSIDES].Length div SizeOf(TIBSPBrushSide);
+  ISd := Pointer(Data + Hdr.Lumps[LUMP_BRUSHSIDES].Offset);
+  SetLength(Lumps[LUMP_BRUSHSIDES], Count * SizeOf(TQBSPBrushSide));
+  for I := 0 to Count - 1 do
+  begin
+    QS.PlaneNum := ISd[I].PlaneNum;
+    QS.TexInfo := ISd[I].TexInfo;
+    Put(LUMP_BRUSHSIDES, QS, SizeOf(QS), I);
+  end;
+  for L in [LUMP_LEAFFACES, LUMP_LEAFBRUSHES] do
+  begin
+    Count := Hdr.Lumps[L].Length div SizeOf(Word);
+    W := Pointer(Data + Hdr.Lumps[L].Offset);
+    SetLength(Lumps[L], Count * SizeOf(LongWord));
+    for I := 0 to Count - 1 do
+    begin
+      LW := W[I];
+      Put(L, LW, SizeOf(LW), I);
+    end;
+  end;
+  Result := TMemoryStream.Create;
+  Out := Hdr;
+  Out.Ident := QBSP_IDENT;
+  Result.WriteBuffer(Out, SizeOf(Out));
+  for L := 0 to LUMP_COUNT - 1 do
+  begin
+    while Result.Position mod 4 <> 0 do
+      Result.WriteByte(0);
+    Out.Lumps[L].Offset := Result.Position;
+    Out.Lumps[L].Length := Length(Lumps[L]);
+    if Length(Lumps[L]) > 0 then
+      Result.WriteBuffer(Lumps[L][0], Length(Lumps[L]));
+  end;
+  Result.Position := 0;
+  Result.WriteBuffer(Out, SizeOf(Out));
+  Result.Position := 0;
+end;
+
+procedure TestModSupport;
+var
+  Dir: String;
+  Img: TRGBImage;
+  Info: TQuakeWalInfo;
+  Zipper: TZipper;
+  Md2: TMemoryStream;
+  Def: PQuakeMonsterDef;
+  Data: PByte;
+  Size: Cardinal;
+  A, B: TQuakeBsp;
+  I, Same: Integer;
+  P: TVector3;
+begin
+  { A mod folder: loose files (a PNG-only texture) and a .pkz with a
+    model of a monster this port has no code for (a Quake 1 dog) }
+  Dir := GetTempDir + 'castle_quake2_modtest' + PathDelim;
+  ForceDirectories(Dir + 'textures' + PathDelim + 'cotvtest');
+  Img := TRGBImage.Create(16, 8);
+  try
+    Img.Clear(Vector4Byte(200, 40, 40, 255));
+    SaveImage(Img, FilenameToUriSafe(Dir + 'textures' + PathDelim + 'cotvtest' + PathDelim + 'onlypng.png'));
+  finally
+    Img.Free;
+  end;
+  Check(Pak.AddDirectory(Dir) >= 1, 'a mod folder''s loose files are added');
+  Check(Palette.LoadWal('cotvtest/onlypng', Info) and (Info.Width = 16) and (Info.Height = 8),
+    'a texture with only a PNG (Quake 2 Remastered / mods) loads, at the image''s size');
+
+  Check(FindMonsterDef('monster_dog') = nil, 'no generic monster without its model');
+  Md2 := Pak.GetStream('models/monsters/soldier/tris.md2');
+  Zipper := TZipper.Create;
+  try
+    Zipper.FileName := Dir + 'pak9.pkz';
+    Zipper.Entries.AddFileEntry(Md2, 'models/monsters/dog/tris.md2');
+    Zipper.ZipAllFiles;
+  finally
+    Zipper.Free;
+    Md2.Free;
+  end;
+  Check(Pak.AddZip(Dir + 'pak9.pkz') and Pak.FileExists('models/monsters/dog/tris.md2') and
+    (Pak.GetStream('models/monsters/dog/tris.md2') <> nil), 'a .pkz archive''s files are read');
+  Def := FindMonsterDef('monster_dog');
+  Check((Def <> nil) and IsGenericMonsterDef(Def) and (Def^.Health = 50) and (Def^.Attack = akMelee) and
+    (Def^.Model = 'models/monsters/dog/tris.md2'), 'a Call of the Void monster gets a generic definition (model, health 50, melee)');
+  Check(FindMonsterDef('monster_dog') = Def, 'the generic definition is made once');
+  Check(FindMonsterDef('monster_ogre') = nil, 'but only when its model is there');
+
+  { QBSP: demo1 rewritten in the extended layout reads the same }
+  Data := Pak.GetData('maps/demo1.bsp', Size);
+  Pak.AddMemoryFile('maps/qbsptest.bsp', IbspToQbsp(Data, Size));
+  A := TQuakeBsp.Create;
+  B := TQuakeBsp.Create;
+  try
+    Check(A.LoadFromPak('maps/demo1.bsp') and B.LoadFromPak('maps/qbsptest.bsp') and B.Extended and not A.Extended,
+      'a QBSP (extended) map loads');
+    Same := 0;
+    for I := 0 to Min(A.FaceCount, B.FaceCount) - 1 do
+      if (A.Faces[I].NumEdges = B.Faces[I].NumEdges) and (A.Faces[I].TexInfoId = B.Faces[I].TexInfoId) and
+         TVector3.Equals(A.GetFaceVertex(I, 0), B.GetFaceVertex(I, 0)) then
+        Inc(Same);
+    Check((A.FaceCount = B.FaceCount) and (Same = A.FaceCount) and (A.ClusterCount = B.ClusterCount),
+      'its faces, vertices and clusters match the IBSP map');
+    Same := 0;
+    for I := 0 to 99 do
+    begin
+      P := Vector3(-1000 + I * 23, -800 + I * 17, -100 + I * 5);
+      if A.PointContents(P) = B.PointContents(P) then
+        Inc(Same);
+    end;
+    Check(Same = 100, 'and its tree gives the same contents');
+  finally
+    A.Free;
+    B.Free;
+  end;
+end;
+
 begin
   if (ParamCount >= 2) and (ParamStr(1) = '--generate-designs') then
   begin
@@ -2787,8 +2988,9 @@ begin
   TestMonsterMoves;
   TestTrace;
   TestMonsterJump;
-  { Last: it adds textures to the PAKs }
+  { Last: they add files to the PAKs }
   TestLevelThemes;
+  TestModSupport;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then

@@ -217,6 +217,72 @@ begin
     Move(A[0], Result[0], Length(Result));
 end;
 
+{ The wide in-memory records as IBSP disk records, for a lump }
+function NodesBytes(const List: TNodeList): TBytes;
+var
+  I: Integer;
+  D: TIBSPNode;
+begin
+  SetLength(Result, List.Count * SizeOf(TIBSPNode));
+  for I := 0 to List.Count - 1 do
+  begin
+    D := NodeToIBSP(List[I]);
+    Move(D, Result[I * SizeOf(D)], SizeOf(D));
+  end;
+end;
+
+function LeafsBytes(const List: TLeafList): TBytes;
+var
+  I: Integer;
+  D: TIBSPLeaf;
+begin
+  SetLength(Result, List.Count * SizeOf(TIBSPLeaf));
+  for I := 0 to List.Count - 1 do
+  begin
+    D := LeafToIBSP(List[I]);
+    Move(D, Result[I * SizeOf(D)], SizeOf(D));
+  end;
+end;
+
+function FacesBytes(const List: TFaceList): TBytes;
+var
+  I: Integer;
+  D: TIBSPFace;
+begin
+  SetLength(Result, List.Count * SizeOf(TIBSPFace));
+  for I := 0 to List.Count - 1 do
+  begin
+    D := FaceToIBSP(List[I]);
+    Move(D, Result[I * SizeOf(D)], SizeOf(D));
+  end;
+end;
+
+function EdgesBytes(const List: TEdgeList): TBytes;
+var
+  I: Integer;
+  D: TIBSPEdge;
+begin
+  SetLength(Result, List.Count * SizeOf(TIBSPEdge));
+  for I := 0 to List.Count - 1 do
+  begin
+    D := EdgeToIBSP(List[I]);
+    Move(D, Result[I * SizeOf(D)], SizeOf(D));
+  end;
+end;
+
+function BrushSidesBytes(const List: TBrushSideList): TBytes;
+var
+  I: Integer;
+  D: TIBSPBrushSide;
+begin
+  SetLength(Result, List.Count * SizeOf(TIBSPBrushSide));
+  for I := 0 to List.Count - 1 do
+  begin
+    D := BrushSideToIBSP(List[I]);
+    Move(D, Result[I * SizeOf(D)], SizeOf(D));
+  end;
+end;
+
 function VecKey(const V: TVector3): String;
 begin
   Result := Format('%.2f %.2f %.2f', [V.X, V.Y, V.Z]);
@@ -2382,9 +2448,9 @@ begin
     Vis.Free;
   end;
 
-  BytesLump(LUMP_NODES, specialize ListBytes<TBSPNode>(Nodes));
+  BytesLump(LUMP_NODES, NodesBytes(Nodes));
   BytesLump(LUMP_TEXINFO, specialize ListBytes<TBSPTexInfo>(TexInfos));
-  BytesLump(LUMP_FACES, specialize ListBytes<TBSPFace>(Faces));
+  BytesLump(LUMP_FACES, FacesBytes(Faces));
   if Lighting.Size > 0 then
     Lump(LUMP_LIGHTING, Lighting.Memory, Lighting.Size)
   else
@@ -2392,15 +2458,15 @@ begin
     Zero := 0;
     Lump(LUMP_LIGHTING, @Zero, 1);
   end;
-  BytesLump(LUMP_LEAFS, specialize ListBytes<TBSPLeaf>(Leafs));
+  BytesLump(LUMP_LEAFS, LeafsBytes(Leafs));
   BytesLump(LUMP_LEAFFACES, specialize ListBytes<Word>(LeafFaces));
   BytesLump(LUMP_LEAFBRUSHES, specialize ListBytes<Word>(LeafBrushes));
-  BytesLump(LUMP_EDGES, specialize ListBytes<TBSPEdge>(Edges));
+  BytesLump(LUMP_EDGES, EdgesBytes(Edges));
   BytesLump(LUMP_SURFEDGES, specialize ListBytes<LongInt>(SurfEdges));
 
   BytesLump(LUMP_MODELS, specialize ListBytes<TBSPModel>(Models));
   BytesLump(LUMP_BRUSHES, specialize ListBytes<TBSPBrush>(Brushes));
-  BytesLump(LUMP_BRUSHSIDES, specialize ListBytes<TBSPBrushSide>(BrushSides));
+  BytesLump(LUMP_BRUSHSIDES, BrushSidesBytes(BrushSides));
   Lump(LUMP_POP, nil, 0);
   Areas[0] := Default(TBSPArea);
   Areas[1] := Default(TBSPArea);
