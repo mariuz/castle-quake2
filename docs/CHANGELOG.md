@@ -6,6 +6,7 @@
 - Call of the Void (`-game q1q2`): its maps, textures and models load, and its Quake 1 and hybrid monsters spawn with their model and health and fight with the generic monster AI.
 
 - Secret doors: Quake 2's `func_door_secret` works like the original (opened by a shot or a trigger, it moves down or sideways, pauses, slides back, and closes again after its wait); before, it opened like a plain door when touched. Random levels hide the secret passage behind a secret door that looks like the room's wall, and the level editor has a *Secret* tool.
+- Fixed parts of the sky showing as a dark blue patch: the sides of the skybox were sometimes partly transparent.
 
 ## v0.20.0 — 2026-10-31
 
