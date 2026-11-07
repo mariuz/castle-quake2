@@ -127,7 +127,7 @@ castle-quake2 -basedir "C:\Program Files (x86)\Steam\steamapps\common\Quake 2" -
 castle-quake2 -basedir <same> -game q1q2 --map-report cotv-report.md   # what the mod's maps still need
 ```
 
-What works: its maps (IBSP or the extended QBSP format), textures (PNG / TGA), models and sounds load; its Quake 1 and hybrid monsters (dogs, ogres, knights, fiends, shamblers, scrags, vores, grunts, the `_strogg` / `_prototype` hybrids, the bosses) spawn with their model and health and fight with the generic monster AI (one attack each: melee, grenades, lasers, bolts, homing pods or lightning, by kind). Not yet: their own animations and attack sequences, the mod's new weapons, items, keys and special entities (the map report lists them), and Quake II Remastered's own new features.
+What works: its maps (IBSP or the extended QBSP format), textures (PNG / TGA), models and sounds load; its Quake 1 and hybrid monsters (dogs, ogres, knights, fiends, shamblers, scrags, vores, grunts, the `_strogg` / `_prototype` hybrids, the bosses) spawn with their model and health and fight with the generic monster AI (one attack each: melee, grenades, lasers, bolts, homing pods or lightning, by kind). Its keys work too (the Quake 1 gold / silver keys and runes, and Quake II Remastered's new keys). Not yet: the monsters' own animations and attack sequences, the mod's new weapons, items and special entities (the map report lists them), and Quake II Remastered's own new features.
 
 ### Tests
 

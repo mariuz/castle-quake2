@@ -478,6 +478,24 @@ const
   KEY_RED          = 1 shl 6;
   KEY_COMMANDER    = 1 shl 7;
   KEY_AIRSTRIKE    = 1 shl 8;
+  { Quake II Remastered's keys (the N64 levels, the mission packs) and Call
+    of the Void's Quake 1 keys and runes }
+  KEY_EXPLOSIVE_CHARGES = 1 shl 9;
+  KEY_YELLOW            = 1 shl 10;
+  KEY_POWER_CORE        = 1 shl 11;
+  KEY_GREEN             = 1 shl 12;
+  KEY_NUKE_CONTAINER    = 1 shl 13;
+  KEY_NUKE              = 1 shl 14;
+  KEY_Q1_RUNE1          = 1 shl 15;
+  KEY_Q1_RUNE2          = 1 shl 16;
+  KEY_Q1_RUNE3          = 1 shl 17;
+  KEY_Q1_RUNE4          = 1 shl 18;
+  KEY_Q1_BASE_GOLD      = 1 shl 19;
+  KEY_Q1_BASE_SILVER    = 1 shl 20;
+  KEY_Q1_MEDIEVAL_GOLD  = 1 shl 21;
+  KEY_Q1_MEDIEVAL_SILVER = 1 shl 22;
+  KEY_Q1_RUNIC_GOLD     = 1 shl 23;
+  KEY_Q1_RUNIC_SILVER   = 1 shl 24;
 
   { Weapon slots: 1 Blaster .. 10 BFG10K, 11 Hand Grenades }
   WeaponSlots = 11;
@@ -489,7 +507,7 @@ const
   POWERUP_PACK = 5;
   POWERUP_OTHER = 6;
 
-  ItemDefs: array[0..41] of TQuakeItemDef = (
+  ItemDefs: array[0..57] of TQuakeItemDef = (
     (ClassName: 'weapon_shotgun'; Category: icWeapon; Model: 'models/weapons/g_shotg/tris.md2'; Icon: 'w_shotgun'; Name: 'Shotgun'; Sound: 'sound/misc/w_pkup.wav'; Weapon: 2; AmmoType: atShells; Amount: 10; Param: 0),
     (ClassName: 'weapon_supershotgun'; Category: icWeapon; Model: 'models/weapons/g_shotg2/tris.md2'; Icon: 'w_sshotgun'; Name: 'Super Shotgun'; Sound: 'sound/misc/w_pkup.wav'; Weapon: 3; AmmoType: atShells; Amount: 10; Param: 0),
     (ClassName: 'weapon_machinegun'; Category: icWeapon; Model: 'models/weapons/g_machn/tris.md2'; Icon: 'w_machinegun'; Name: 'Machinegun'; Sound: 'sound/misc/w_pkup.wav'; Weapon: 4; AmmoType: atBullets; Amount: 50; Param: 0),
@@ -536,7 +554,26 @@ const
     (ClassName: 'key_blue_key'; Category: icKey; Model: 'models/items/keys/key/tris.md2'; Icon: 'k_bluekey'; Name: 'Blue Key'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_BLUE; Param: 0),
     (ClassName: 'key_red_key'; Category: icKey; Model: 'models/items/keys/red_key/tris.md2'; Icon: 'k_redkey'; Name: 'Red Key'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_RED; Param: 0),
     (ClassName: 'key_commander_head'; Category: icKey; Model: 'models/monsters/commandr/head/tris.md2'; Icon: 'k_comhead'; Name: 'Commander''s Head'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_COMMANDER; Param: 0),
-    (ClassName: 'key_airstrike_target'; Category: icKey; Model: 'models/items/keys/target/tris.md2'; Icon: 'i_airstrike'; Name: 'Airstrike Marker'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_AIRSTRIKE; Param: 0)
+    (ClassName: 'key_airstrike_target'; Category: icKey; Model: 'models/items/keys/target/tris.md2'; Icon: 'i_airstrike'; Name: 'Airstrike Marker'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_AIRSTRIKE; Param: 0),
+    { Quake II Remastered and Call of the Void (models and names from the
+      mod's item list; its medieval / runic key names are swapped there,
+      kept as players see them; no icons known yet) }
+    (ClassName: 'key_explosive_charges'; Category: icKey; Model: 'models/items/n64/charge/tris.md2'; Icon: ''; Name: 'Explosive Charges'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_EXPLOSIVE_CHARGES; Param: 0),
+    (ClassName: 'key_yellow_key'; Category: icKey; Model: 'models/items/n64/yellow_key/tris.md2'; Icon: ''; Name: 'Yellow Key'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_YELLOW; Param: 0),
+    (ClassName: 'key_power_core'; Category: icKey; Model: 'models/items/n64/power_core/tris.md2'; Icon: ''; Name: 'Power Core'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_POWER_CORE; Param: 0),
+    (ClassName: 'key_green_key'; Category: icKey; Model: 'models/items/keys/green_key/tris.md2'; Icon: ''; Name: 'Green Key'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_GREEN; Param: 0),
+    (ClassName: 'key_nuke_container'; Category: icKey; Model: 'models/weapons/g_nuke/tris.md2'; Icon: ''; Name: 'Antimatter Pod'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_NUKE_CONTAINER; Param: 0),
+    (ClassName: 'key_nuke'; Category: icKey; Model: 'models/weapons/g_nuke/tris.md2'; Icon: ''; Name: 'Antimatter Bomb'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_NUKE; Param: 0),
+    (ClassName: 'key_q1_rune_end1'; Category: icKey; Model: 'models/items/keys/end1/end1.md2'; Icon: ''; Name: 'Rune of Earth Magic'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_RUNE1; Param: 0),
+    (ClassName: 'key_q1_rune_end2'; Category: icKey; Model: 'models/items/keys/end2/end2.md2'; Icon: ''; Name: 'Rune of Black Magic'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_RUNE2; Param: 0),
+    (ClassName: 'key_q1_rune_end3'; Category: icKey; Model: 'models/items/keys/end3/end3.md2'; Icon: ''; Name: 'Rune of Hell Magic'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_RUNE3; Param: 0),
+    (ClassName: 'key_q1_rune_end4'; Category: icKey; Model: 'models/items/keys/end4/end4.md2'; Icon: ''; Name: 'Rune of Elder Magic'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_RUNE4; Param: 0),
+    (ClassName: 'key_q1_base_gold_key'; Category: icKey; Model: 'models/items/keys/base/b_g_key.md2'; Icon: ''; Name: 'Gold Keycard'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_BASE_GOLD; Param: 0),
+    (ClassName: 'key_q1_base_silver_key'; Category: icKey; Model: 'models/items/keys/base/b_s_key.md2'; Icon: ''; Name: 'Silver Keycard'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_BASE_SILVER; Param: 0),
+    (ClassName: 'key_q1_medieval_gold_key'; Category: icKey; Model: 'models/items/keys/medieval/m_g_key.md2'; Icon: ''; Name: 'Runic Gold Key'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_MEDIEVAL_GOLD; Param: 0),
+    (ClassName: 'key_q1_medieval_silver_key'; Category: icKey; Model: 'models/items/keys/medieval/m_s_key.md2'; Icon: ''; Name: 'Runic Silver Key'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_MEDIEVAL_SILVER; Param: 0),
+    (ClassName: 'key_q1_runic_gold_key'; Category: icKey; Model: 'models/items/keys/wizard/w_g_key.md2'; Icon: ''; Name: 'Medieval Gold Key'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_RUNIC_GOLD; Param: 0),
+    (ClassName: 'key_q1_runic_silver_key'; Category: icKey; Model: 'models/items/keys/wizard/w_s_key.md2'; Icon: ''; Name: 'Medieval Silver Key'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_RUNIC_SILVER; Param: 0)
   );
 
   { Weapon slots 1..11 (key 0 selects slot 10, G slot 11) }

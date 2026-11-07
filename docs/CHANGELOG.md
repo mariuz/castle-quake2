@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Call of the Void's keys (the Quake 1 gold and silver keys and the four runes) and Quake II Remastered's new keys (explosive charges, yellow and green keys, power core, antimatter pod and bomb) can be picked up and open their `trigger_key` locks.
+
 ## v0.21.0 — 2026-11-07
 
 Call of the Void and Quake II Remastered data, Quake 2's secret doors, a sky fix. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.

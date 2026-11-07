@@ -2866,6 +2866,8 @@ var
   A, B: TQuakeBsp;
   I, Same: Integer;
   P: TVector3;
+  Bits: Cardinal;
+  KeysOk: Boolean;
 begin
   { A mod folder: loose files (a PNG-only texture) and a .pkz with a
     model of a monster this port has no code for (a Quake 1 dog) }
@@ -2900,6 +2902,20 @@ begin
     (Def^.Model = 'models/monsters/dog/tris.md2'), 'a Call of the Void monster gets a generic definition (model, health 50, melee)');
   Check(FindMonsterDef('monster_dog') = Def, 'the generic definition is made once');
   Check(FindMonsterDef('monster_ogre') = nil, 'but only when its model is there');
+
+  { Keys: Quake II Remastered's and Call of the Void's too, each its own bit }
+  Bits := 0;
+  KeysOk := True;
+  for I := Low(ItemDefs) to High(ItemDefs) do
+    if ItemDefs[I].Category = icKey then
+    begin
+      if (ItemDefs[I].Amount <= 0) or ((ItemDefs[I].Amount and (ItemDefs[I].Amount - 1)) <> 0) or
+         ((Bits and Cardinal(ItemDefs[I].Amount)) <> 0) then
+        KeysOk := False;
+      Bits := Bits or Cardinal(ItemDefs[I].Amount);
+    end;
+  Check(KeysOk and (FindItemDef('key_q1_base_gold_key') <> nil) and (FindItemDef('key_green_key') <> nil) and
+    (FindItemDef('key_q1_rune_end4')^.Name = 'Rune of Elder Magic'), 'every key (remaster and Call of the Void ones too) has its own bit');
 
   { QBSP: demo1 rewritten in the extended layout reads the same }
   Data := Pak.GetData('maps/demo1.bsp', Size);
