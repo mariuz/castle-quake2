@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The level editor's export also writes the lava texture a level with lava needs (`textures/castle/lava.wal`, made in memory here), so another Quake 2 engine shows the lava too.
+
 ## v0.23.0 — 2026-11-09
 
 Exported levels render in other Quake 2 engines (checked in Yamagi Quake II). Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.

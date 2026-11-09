@@ -153,7 +153,7 @@ implementation
 uses
   Math, StrUtils, CastleGLUtils, CastleControls, CastleComponentSerialize, CastleLog, CastleUriUtils,
   CastleFilesUtils, CastleFindFiles, CastleDownload,
-  QuakeSettings, QuakeLevelGen, QuakeBspBuilder;
+  QuakeSettings, QuakeLevelGen, QuakeBspBuilder, QuakePak;
 
 const
   EntityColors: array[0..5] of TCastleColor = (
@@ -532,6 +532,39 @@ begin
 end;
 
 function TQuakeLevelEditor.ExportBsp: String;
+
+  { Textures this port makes in memory (castle/lava) are written next to the
+    map, so castle-config:/ holds a game folder (maps/, textures/) another
+    Quake 2 engine can use }
+  procedure ExportGeneratedTextures;
+  var
+    X, Y: Integer;
+    HasLava: Boolean;
+    Wal: TMemoryStream;
+    Out: TStream;
+  begin
+    HasLava := False;
+    for Y := 0 to FLevel.Height - 1 do
+      for X := 0 to FLevel.Width - 1 do
+        if CellHasWater(FLevel.Cell(X, Y)) and FLevel.Cell(X, Y)^.Lava then
+          HasLava := True;
+    if not HasLava then
+      Exit;
+    Wal := Pak.GetStream('textures/' + LevelLavaTexture + '.wal');
+    if Wal = nil then
+      Exit;
+    try
+      Out := UrlSaveStream('castle-config:/textures/' + LevelLavaTexture + '.wal');
+      try
+        Out.CopyFrom(Wal, Wal.Size);
+      finally
+        Out.Free;
+      end;
+    finally
+      Wal.Free;
+    end;
+  end;
+
 var
   Stream: TMemoryStream;
   Stats: TBspBuildStats;
@@ -553,6 +586,7 @@ begin
     finally
       Stream.Free;
     end;
+    ExportGeneratedTextures;
     ShowStatus(Format('Exported %s (%d faces, %d brushes); path %s',
       [Result, Stats.Faces, Stats.Brushes, UriToFilenameSafe(Result)]));
   except
