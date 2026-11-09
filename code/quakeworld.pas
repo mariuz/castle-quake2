@@ -199,6 +199,13 @@ type
       const Speed: Single; const Damage: Integer; const FromPlayer: Boolean;
       const Owner: TQuakeMonster = nil);
     procedure UpdateProjectiles(const SecondsPassed: Single);
+    { BFG ball in flight (bfg_think): lasers to the monsters (or the player,
+      for a monster's ball) within 256 units, through monsters, 10 damage each }
+    procedure BfgLasers(const Proj: TQuakeProjectile);
+    { BFG effect (bfg_explode, 0.1 s after the impact): everything visible from
+      the blast and from the shooter within SplashRadius takes
+      SplashDamage * (1 - sqrt(dist / radius)), with a TE_BFG_EXPLOSION on it }
+    procedure BfgEffect(const Proj: TQuakeProjectile);
     { Rockets, blaster bolts and BFG balls light their surroundings }
     procedure AddProjectileLights;
     { Send the dynamic lights nearest to the player to the world shader }
@@ -2358,7 +2365,8 @@ begin
       pkRocket, pkBlasterBolt:
         Lighting.AddLight(Proj.Transform.Translation, 200, Vector3(1, 1, 0));
       pkBfg:
-        Lighting.AddLight(Proj.Transform.Translation, 200, Vector3(0, 1, 0));
+        if not Proj.Exploding then
+          Lighting.AddLight(Proj.Transform.Translation, 200, Vector3(0, 1, 0));
     end;
 end;
 
@@ -2462,8 +2470,11 @@ begin
       end;
     pkBfg:
       begin
-        Proj.SplashDamage := 200;
+        { weapon_bfg_fire: fire_bfg(damage 500, speed 400, radius 1000); the
+          shot's Damage is the 200 of the core hit, both times the quad }
+        Proj.SplashDamage := Damage * 5 div 2;
         Proj.SplashRadius := 1000;
+        Proj.LaserTimer := 0.1;
       end;
   end;
   FProjectiles.Add(Proj);
@@ -2626,6 +2637,134 @@ begin
   end;
 end;
 
+function MonsterCenter(const M: TQuakeMonster): TVector3;
+begin
+  Result := CgeToQuake(M.Transform.Translation) + (M.BoxMins + M.BoxMaxs) * 0.5;
+end;
+
+procedure TQuakeWorld.BfgLasers(const Proj: TQuakeProjectile);
+const
+  LaserMask = CONTENTS_SOLID or CONTENTS_MONSTER or CONTENTS_DEADMONSTER;
+  LaserDamage = 10; { single player }
+var
+  Origin: TVector3;
+
+  procedure LaserAt(const Target: TVector3);
+  var
+    Dir, Start, Stop: TVector3;
+    Ignore: TObject;
+    T: TQuakeTrace;
+    I: Integer;
+  begin
+    Dir := (Target - Origin).Normalize;
+    Start := Origin;
+    Stop := Origin + Dir * 2048;
+    Ignore := nil;
+    { Through monsters (and the player), hurting each, until something else }
+    for I := 0 to 7 do
+    begin
+      T := WorldTrace(Start, Stop, TVector3.Zero, TVector3.Zero, LaserMask, Ignore);
+      if not T.Hit then
+        Break;
+      if T.Ent is TQuakeMonster then
+      begin
+        if T.Ent <> Proj.Owner then
+          TQuakeMonster(T.Ent).TakeDamage(LaserDamage);
+      end else
+      if T.Ent is TQuakePlayerMovement then
+      begin
+        if not Proj.FromPlayer then
+          DamagePlayer(LaserDamage, QuakeToCge(Origin));
+      end else
+        Break;
+      Ignore := T.Ent;
+      Start := T.EndPos;
+    end;
+    Particles.SpawnBfgLaser(QuakeToCge(Origin), QuakeToCge(T.EndPos));
+  end;
+
+var
+  M: TQuakeMonster;
+  Center: TVector3;
+begin
+  Origin := CgeToQuake(Proj.Transform.Translation);
+  for M in FMonsters do
+    if M.IsAlive and (M <> Proj.Owner) and M.Transform.Exists then
+    begin
+      Center := MonsterCenter(M);
+      if PointsDistance(Center, Origin) <= 256 then
+        LaserAt(Center);
+    end;
+  if not Proj.FromPlayer and not FDead then
+  begin
+    Center := CgeToQuake(FPlayerPos - Vector3(0, 22, 0));
+    if PointsDistance(Center, Origin) <= 256 then
+      LaserAt(Center);
+  end;
+end;
+
+procedure TQuakeWorld.BfgEffect(const Proj: TQuakeProjectile);
+const
+  SightMask = CONTENTS_SOLID or CONTENTS_WINDOW;
+var
+  Origin, Shooter: TVector3;
+
+  { CanDamage, simplified to the centre: no brush between the two points }
+  function Clear(const A, B: TVector3): Boolean;
+  begin
+    Result := not WorldTrace(A, B, TVector3.Zero, TVector3.Zero, SightMask, nil).Hit;
+  end;
+
+  function Points(const Center: TVector3): Integer;
+  var
+    Dist: Single;
+  begin
+    Result := 0;
+    Dist := PointsDistance(Center, Origin);
+    if (Dist > Proj.SplashRadius) or not Clear(Origin, Center) or not Clear(Shooter, Center) then
+      Exit;
+    Result := Round(Proj.SplashDamage * (1 - Sqrt(Dist / Proj.SplashRadius)));
+  end;
+
+  procedure HitEffect(const CgePos: TVector3);
+  begin
+    { TE_BFG_EXPLOSION: the s_bfg2 sprite and a green light }
+    Particles.SpawnBfgHit(CgePos);
+    Lighting.AddLight(CgePos, 350, Vector3(0, 1, 0), 0.4);
+  end;
+
+var
+  M: TQuakeMonster;
+  N: Integer;
+begin
+  Origin := CgeToQuake(Proj.Transform.Translation);
+  if Proj.FromPlayer then
+    Shooter := CgeToQuake(FPlayerPos)
+  else
+  if Proj.Owner <> nil then
+    Shooter := MonsterCenter(Proj.Owner)
+  else
+    Shooter := Origin;
+  for M in FMonsters do
+    if (M <> Proj.Owner) and not M.Gibbed and M.Transform.Exists then
+    begin
+      N := Points(MonsterCenter(M));
+      if N <= 0 then
+        Continue;
+      HitEffect(M.Transform.Translation);
+      M.TakeDamage(N);
+    end;
+  if not Proj.FromPlayer and not FDead then
+  begin
+    N := Points(CgeToQuake(FPlayerPos - Vector3(0, 22, 0)));
+    if N > 0 then
+    begin
+      HitEffect(FPlayerPos - Vector3(0, 22, 0));
+      DamagePlayer(N, Proj.Transform.Translation);
+    end;
+  end;
+end;
+
 procedure TQuakeWorld.UpdateProjectiles(const SecondsPassed: Single);
 var
   I: Integer;
@@ -2651,9 +2790,22 @@ begin
     if Proj.Life <= 0 then
     begin
       if Proj.Kind in [pkGrenade, pkHandGrenade] then
-        Explode(OldPos, Proj.SplashDamage * DamageMultiplier, Proj.SplashRadius, Proj.FromPlayer);
+        Explode(OldPos, Proj.SplashDamage * DamageMultiplier, Proj.SplashRadius, Proj.FromPlayer)
+      else
+      if Proj.Exploding then
+        BfgEffect(Proj);
       FProjectiles.Delete(I);
       Continue;
+    end;
+
+    if (Proj.Kind = pkBfg) and not Proj.Exploding then
+    begin
+      Proj.LaserTimer := Proj.LaserTimer - SecondsPassed;
+      if Proj.LaserTimer <= 0 then
+      begin
+        Proj.LaserTimer := Proj.LaserTimer + 0.1;
+        BfgLasers(Proj);
+      end;
     end;
 
     StepLen := Proj.Velocity.Length * SecondsPassed;
@@ -2719,10 +2871,18 @@ begin
           pkRocket: Explode(NewPos, Proj.SplashDamage * DamageMultiplier, Proj.SplashRadius, Proj.FromPlayer);
           pkBfg:
             begin
+              { bfg_touch: the core blast (T_RadiusDamage 200 within 100), the
+                s_bfg3 explosion, then the BFG effect a frame later from
+                where the ball was 0.1 s before }
               Particles.SpawnBfgExplosion(NewPos);
               Lighting.AddLight(NewPos, 350, Vector3(0, 1, 0), 0.5);
               Sounds.PlayAtPoint('sound/weapons/bfg__x1b.wav', NewPos);
-              Explode(NewPos, Proj.SplashDamage * DamageMultiplier, Proj.SplashRadius * 0.3, Proj.FromPlayer, False);
+              Explode(NewPos, 200, 100, Proj.FromPlayer, False);
+              Proj.Exploding := True;
+              Proj.Life := 0.1;
+              NewPos := NewPos - Proj.Velocity * 0.1;
+              Proj.Velocity := TVector3.Zero;
+              Proj.Transform.Exists := False;
             end;
           else
             begin
@@ -2730,7 +2890,8 @@ begin
               Sounds.PlayAtPoint('sound/weapons/lashit.wav', NewPos);
             end;
         end;
-        Remove := True;
+        { an exploding BFG ball stays until its effect went off }
+        Remove := not Proj.Exploding;
       end;
     end;
 
@@ -3247,6 +3408,7 @@ begin
     O.Add('life', FProjectiles[I].Life);
     O.Add('fromPlayer', FProjectiles[I].FromPlayer);
     O.Add('owner', FMonsters.IndexOf(FProjectiles[I].Owner));
+    O.Add('exploding', FProjectiles[I].Exploding);
     Arr.Add(O);
   end;
   Result.Add('projectiles', Arr);
@@ -3451,6 +3613,8 @@ begin
       Proj.SplashDamage := O.Get('splashDamage', 0);
       Proj.SplashRadius := O.Get('splashRadius', 0.0);
       Proj.Life := O.Get('life', Proj.Life);
+      Proj.Exploding := O.Get('exploding', False);
+      Proj.Transform.Exists := not Proj.Exploding;
       Idx := O.Get('owner', -1);
       if (Idx >= 0) and (Idx < FMonsters.Count) then
         Proj.Owner := FMonsters[Idx];

@@ -41,6 +41,7 @@ The full feature list, with the engine parts each feature uses, is in [FEATURES.
 | ![Soldier](docs/screenshot-soldier.png) | ![Railgun](docs/screenshot-railgun.png) |
 | ![Help computer](docs/screenshot-help-computer.png) | ![Barrel explosion](docs/screenshot-explosion.png) |
 | ![Random level from above](docs/screenshot-random-level.png) | ![Level editor](docs/screenshot-level-editor.png) |
+| ![BFG10K ball in flight](docs/screenshot-bfg-ball.png) | ![BFG10K explosion and its effect](docs/screenshot-bfg-effect.png) |
 
 ---
 

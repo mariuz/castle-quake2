@@ -149,6 +149,11 @@ type
 
     { Large green BFG explosion }
     procedure SpawnBfgExplosion(const Pos: TVector3);
+    { TE_BFG_EXPLOSION: the translucent sprites/s_bfg2.sp2 on a target hit by
+      the BFG effect }
+    procedure SpawnBfgHit(const Pos: TVector3);
+    { TE_BFG_LASER: a short green beam from the ball to a target }
+    procedure SpawnBfgLaser(const FromPos, ToPos: TVector3);
   public
     { Set by the world: gibs land on and bounce off the map's brushes
       (else render meshes are ray cast) }
@@ -822,6 +827,41 @@ begin
     FGibs.Add(TQuakeGib.Create(FParent, Debris[I], Pos,
       Vector3((Random - 0.5) * 500, 250 + Random * 300, (Random - 0.5) * 500)));
     FGibs.Last.Metallic := True;
+  end;
+end;
+
+procedure TQuakeParticleManager.SpawnBfgHit(const Pos: TVector3);
+var
+  Explosion: TQuakeExplosionModel;
+begin
+  if FParent = nil then
+    Exit;
+  Explosion := TQuakeExplosionModel.CreateSprite(FParent, Pos, 'sprites/s_bfg2.sp2');
+  FExplosions.Add(Explosion);
+  if Explosion.Sprite <> nil then
+    { RF_TRANSLUCENT, alpha 0.30 }
+    Explosion.Sprite.SetTransparency(0.7);
+end;
+
+procedure TQuakeParticleManager.SpawnBfgLaser(const FromPos, ToPos: TVector3);
+var
+  Dir: TVector3;
+  Len, D: Single;
+begin
+  if FParent = nil then
+    Exit;
+  Dir := ToPos - FromPos;
+  Len := Dir.Length;
+  if Len < 1 then
+    Exit;
+  Dir := Dir / Len;
+  { CL_ParseLaser: a green beam for 0.1 s }
+  D := 0;
+  while D < Len do
+  begin
+    FParticles.Add(TQuakeParticle.Create(FParent, FromPos + Dir * D, TVector3.Zero, pkTrail,
+      0.1, 1.5, 1.5, Vector3(0.3, 1.0, 0.3)));
+    D := D + 6;
   end;
 end;
 

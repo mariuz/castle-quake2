@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- BFG10K like Quake 2's: in flight the ball lasers the monsters within 256 units (10 damage every 0.1 s, through monsters, `bfg_think`), its impact deals the core blast (200 within 100) and 0.1 s later the BFG effect hits everything visible from the blast and from the shooter within 1000 units for up to 500 damage (`bfg_explode`), each target flashing with the translucent `s_bfg2` sprite and a green light. Before, the impact was a bigger rocket blast. Kept in savegames. Screenshots in the README.
 - Underwater view warp: with your eyes in water, slime or lava the picture ripples like in Quake 2's software renderer (`D_WarpScreen`: rows and columns shifted by a moving sine, 3 pixels at 320 × 240), a screen effect on the main viewport.
 - Exported levels play through in Yamagi Quake II: key doors, the secret area and the exit work there. The exit of an exported level now leads back to the map itself, since the next random level (`rand<seed+1>`) exists only in this port; before, the other engine stopped with "Couldn't load maps/rand9.bsp". CI now checks the export.
 

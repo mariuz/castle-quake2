@@ -347,6 +347,11 @@ type
     Life: Single;
     FromPlayer: Boolean;
     Owner: TQuakeMonster;
+    { BFG ball: seconds to its next laser think (bfg_think, every 0.1 s) }
+    LaserTimer: Single;
+    { BFG ball that hit something: stopped and hidden, its "BFG effect"
+      (bfg_explode) goes off when Life runs out }
+    Exploding: Boolean;
     constructor Create(const Parent: TCastleTransform; const AKind: TProjectileKind;
       const Pos, Vel: TVector3; const ADamage: Integer; const AFromPlayer: Boolean);
     destructor Destroy; override;

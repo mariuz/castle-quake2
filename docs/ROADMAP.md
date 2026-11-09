@@ -11,7 +11,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Sky | Skybox, `skyrotate`, `skyaxis` | Skybox via `TCastleBackground`, rotating (`skyrotate` / `skyaxis`, `sky` console command) | — |
 | Liquids | Warped water / lava (`SURF_WARP`), contents | Warp shader, non-solid liquid surfaces, swimming, drowning, lava / slime damage, underwater tints | — |
 | Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp, skins, shells (quad, invulnerability, power armor) | `EF_POWERSCREEN` model, glow, rotating / bobbing items. |
-| Sprites | SP2 (BFG, explosions) | SP2 loader, BFG ball / explosion sprites | Other sprite users (bubbles, flashes). |
+| Sprites | SP2 (BFG, explosions) | SP2 loader, BFG ball / explosion / effect sprites (the demo's other sprites are unused in Quake 2 too) | — |
 | Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove as `TQuakePlayerMovement`: the 32 × 32 × 56 box traced against the BSP brushes, movers and monsters (`CM_BoxTrace`, `PM_StepSlideMove`), movers carry and push the player, water currents and conveyor belts (`PM_AddCurrents`) | — |
 | Weapons | 10 + hand grenades, frame-timed | 10 + hand grenades on Quake 2's gun frames (`Weapon_Generic`: fire frames, refire, put away / raise, chaingun spin, BFG delay, grenade cook) | — |
 | Monsters | Full AI (`ai_run`, dodge, ambush, bosses), skill levels | Quake 2 perception (`FindTarget`, PHS hearing, group wake, ambush, trigger spawn), player trail pursuit, dodging, attacks on Quake 2's attack frames (demo monsters), `trigger_monsterjump`, patrols, combat points, 19 types tunable in the editor, skill 0–3 | Attack tables for the full game's monsters; bosses. |
