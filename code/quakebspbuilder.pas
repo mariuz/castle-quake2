@@ -2034,6 +2034,45 @@ begin
       end;
     end;
   end;
+  { Faces on no node's plane (ladders: their brush is a detail brush inside
+    the leaf): a node on the face's plane above the leaf, both children the
+    same leaf, so contents and traces don't change }
+  for Leaf := 0 to Leafs.Count - 1 do
+  begin
+    L := Leafs[Leaf];
+    for J := L.FirstLeafFace to L.FirstLeafFace + L.NumLeafFaces - 1 do
+    begin
+      K := LeafFaces[J];
+      if (K >= WorldFaces) or (FaceNode[K] >= 0) or (LeafParent[Leaf] < 0) then
+        Continue;
+      { A node already inserted above this leaf on that plane? }
+      Node := LeafParent[Leaf];
+      if (Nodes[Node].PlaneNum = Faces[K].PlaneId) and (Nodes[Node].Children[0] = -(Leaf + 1)) and
+         (Nodes[Node].Children[1] = -(Leaf + 1)) then
+      begin
+        FaceNode[K] := Node;
+        Continue;
+      end;
+      N := Default(TBSPNode);
+      N.PlaneNum := Faces[K].PlaneId;
+      N.Children[0] := -(Leaf + 1);
+      N.Children[1] := -(Leaf + 1);
+      N.Mins := L.Mins;
+      N.Maxs := L.Maxs;
+      C := Nodes.Add(N);
+      { Hang it where the leaf was }
+      N := Nodes[Node];
+      for I := 0 to 1 do
+        if N.Children[I] = -(Leaf + 1) then
+          N.Children[I] := C;
+      Nodes[Node] := N;
+      SetLength(NodeParent, Nodes.Count);
+      NodeParent[C] := Node;
+      LeafParent[Leaf] := C;
+      FaceNode[K] := C;
+    end;
+  end;
+
   { New order: node by node, then the faces no node can hold }
   SetLength(Order, 0);
   SetLength(NewIndex, WorldFaces);

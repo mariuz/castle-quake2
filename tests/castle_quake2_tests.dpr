@@ -2226,7 +2226,7 @@ begin
           if Bsp.Faces[K].PlaneId <> Bsp.Nodes[I].PlaneNum then
             Inc(Wrong);
         end;
-      Check((Wrong = 0) and (Listed >= Bsp.Models[0].NumFaces - 16),
+      Check((Wrong = 0) and (Listed = Bsp.Models[0].NumFaces),
         Format('random level 3: its nodes list %d of %d world faces, all on their planes', [Listed, Bsp.Models[0].NumFaces]));
     finally
       Bsp.Free;
