@@ -37,6 +37,9 @@ type
     VisPercent: Integer;
     { Time spent on the visibility, in milliseconds }
     VisMsec: Integer;
+    { World faces no node on their plane holds (other Quake 2 engines don't
+      draw them) }
+    LooseFaces: Integer;
   end;
 
 { The map file of a level }
@@ -195,6 +198,11 @@ type
     procedure BuildWindows;
     { Box triggers (trigger_* with mins / maxs keys) as brush models }
     procedure BuildTriggerBoxes;
+    { Quake 2 engines draw a world face only when a node on its plane lists
+      it (R_RecursiveWorldNode): give every world face such a node (an
+      ancestor of a leaf that lists it) and make each node's faces
+      contiguous. Returns the faces left without one. }
+    function AttachFacesToNodes(const WorldFaces: Integer): Integer;
     { Grid sight from (AX, AY) to (BX, BY), in cells }
     function SightClear(const AX, AY, BX, BY: Double): Boolean;
     function RegionsSee(const A, B: TRegion): Boolean;
@@ -1977,6 +1985,92 @@ begin
     Result.Data[I] := StrToFloatDef(Parts[I], 0, DefaultFormatSettings);
 end;
 
+function TBuilder.AttachFacesToNodes(const WorldFaces: Integer): Integer;
+var
+  NodeParent, LeafParent, FaceNode, NewIndex: array of Integer;
+  I, J, K, C, Leaf, Node, Count: Integer;
+  Order: array of Integer;
+  OldFaces: array of TBSPFace;
+  N: TBSPNode;
+  L: TBSPLeaf;
+begin
+  SetLength(NodeParent, Nodes.Count);
+  SetLength(LeafParent, Leafs.Count);
+  for I := 0 to High(NodeParent) do
+    NodeParent[I] := -1;
+  for I := 0 to High(LeafParent) do
+    LeafParent[I] := -1;
+  for I := 0 to Nodes.Count - 1 do
+    for J := 0 to 1 do
+    begin
+      C := Nodes[I].Children[J];
+      if C >= 0 then
+        NodeParent[C] := I
+      else
+        LeafParent[-(C + 1)] := I;
+    end;
+  { Each world face: the nearest ancestor of a leaf listing it whose plane is
+    the face's plane }
+  SetLength(FaceNode, WorldFaces);
+  for I := 0 to WorldFaces - 1 do
+    FaceNode[I] := -1;
+  for Leaf := 0 to Leafs.Count - 1 do
+  begin
+    L := Leafs[Leaf];
+    for J := L.FirstLeafFace to L.FirstLeafFace + L.NumLeafFaces - 1 do
+    begin
+      K := LeafFaces[J];
+      if (K >= WorldFaces) or (FaceNode[K] >= 0) then
+        Continue;
+      Node := LeafParent[Leaf];
+      while Node >= 0 do
+      begin
+        if Nodes[Node].PlaneNum = Faces[K].PlaneId then
+        begin
+          FaceNode[K] := Node;
+          Break;
+        end;
+        Node := NodeParent[Node];
+      end;
+    end;
+  end;
+  { New order: node by node, then the faces no node can hold }
+  SetLength(Order, 0);
+  SetLength(NewIndex, WorldFaces);
+  for I := 0 to Nodes.Count - 1 do
+  begin
+    N := Nodes[I];
+    N.FirstFace := Length(Order);
+    for K := 0 to WorldFaces - 1 do
+      if FaceNode[K] = I then
+      begin
+        NewIndex[K] := Length(Order);
+        SetLength(Order, Length(Order) + 1);
+        Order[High(Order)] := K;
+      end;
+    N.NumFaces := Length(Order) - N.FirstFace;
+    Nodes[I] := N;
+  end;
+  Count := 0;
+  for K := 0 to WorldFaces - 1 do
+    if FaceNode[K] < 0 then
+    begin
+      NewIndex[K] := Length(Order);
+      SetLength(Order, Length(Order) + 1);
+      Order[High(Order)] := K;
+      Inc(Count);
+    end;
+  SetLength(OldFaces, WorldFaces);
+  for K := 0 to WorldFaces - 1 do
+    OldFaces[K] := Faces[K];
+  for K := 0 to WorldFaces - 1 do
+    Faces[K] := OldFaces[Order[K]];
+  for J := 0 to LeafFaces.Count - 1 do
+    if LeafFaces[J] < WorldFaces then
+      LeafFaces[J] := NewIndex[LeafFaces[J]];
+  Result := Count;
+end;
+
 procedure TBuilder.BuildTriggerBoxes;
 var
   I: Integer;
@@ -2558,7 +2652,7 @@ end;
 function BuildLevelBsp(const Level: TQuakeLevel; out Stats: TBspBuildStats): TMemoryStream;
 var
   B: TBuilder;
-  Root: Integer;
+  Root, LooseFaces: Integer;
   WorldModel: TBSPModel;
 begin
   Stats := Default(TBspBuildStats);
@@ -2578,6 +2672,7 @@ begin
     if Root <> 0 then
       raise Exception.Create('The level BSP has no root node');
     B.BuildFaces;
+    LooseFaces := B.AttachFacesToNodes(B.Faces.Count);
     { Model 0: the world; then a model per door }
     WorldModel := Default(TBSPModel);
     WorldModel.Mins := Vector3(0, 0, B.ZMin);
@@ -2593,12 +2688,13 @@ begin
     B.BuildTriggerBoxes;
     Result := B.Write(Stats);
     Stats.Models := B.Models.Count;
+    Stats.LooseFaces := LooseFaces;
   finally
     B.Free;
   end;
-  WritelnLog('QuakeBspBuilder', 'Built "%s": %d nodes, %d leafs, %d clusters (%d %% visible, %d ms), %d faces, %d brushes, %d models, %d lightmap bytes',
+  WritelnLog('QuakeBspBuilder', 'Built "%s": %d nodes, %d leafs, %d clusters (%d %% visible, %d ms), %d faces (%d on no node), %d brushes, %d models, %d lightmap bytes',
     [Level.Name, Stats.Nodes, Stats.Leafs, Stats.Clusters, Stats.VisPercent, Stats.VisMsec,
-     Stats.Faces, Stats.Brushes, Stats.Models, Stats.LightBytes]);
+     Stats.Faces, Stats.LooseFaces, Stats.Brushes, Stats.Models, Stats.LightBytes]);
 end;
 
 function RegisterLevelMap(const Level: TQuakeLevel): String;

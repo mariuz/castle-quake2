@@ -2191,6 +2191,51 @@ begin
   end;
 end;
 
+procedure TestLevelNodeFaces;
+var
+  Level: TQuakeLevel;
+  Report: TLevelGenReport;
+  Stats: TBspBuildStats;
+  Bsp: TQuakeBsp;
+  MapName: String;
+  I, K, Listed, Wrong: Integer;
+begin
+  { Other Quake 2 engines draw a world face only from a node on its plane:
+    every face of a level without ladders has one, and the faces a node
+    lists lie on its plane }
+  Level := MakeTestLevel;
+  try
+    Level.Name := 'unittest_nodefaces';
+    BuildLevelBsp(Level, Stats).Free;
+    Check(Stats.LooseFaces = 0, 'every world face of a compiled level sits on a node (Quake 2 renderers draw them)');
+  finally
+    Level.Free;
+  end;
+  Level := GenerateLevel(3, DefaultLevelGenOptions, Report);
+  try
+    MapName := RegisterLevelMap(Level);
+    Bsp := TQuakeBsp.Create;
+    try
+      Bsp.LoadFromPak('maps/' + MapName + '.bsp');
+      Listed := 0;
+      Wrong := 0;
+      for I := 0 to High(Bsp.Nodes) do
+        for K := Bsp.Nodes[I].FirstFace to Bsp.Nodes[I].FirstFace + Bsp.Nodes[I].NumFaces - 1 do
+        begin
+          Inc(Listed);
+          if Bsp.Faces[K].PlaneId <> Bsp.Nodes[I].PlaneNum then
+            Inc(Wrong);
+        end;
+      Check((Wrong = 0) and (Listed >= Bsp.Models[0].NumFaces - 16),
+        Format('random level 3: its nodes list %d of %d world faces, all on their planes', [Listed, Bsp.Models[0].NumFaces]));
+    finally
+      Bsp.Free;
+    end;
+  finally
+    Level.Free;
+  end;
+end;
+
 procedure TestLevelAmbushes;
 var
   Level: TQuakeLevel;
@@ -2995,6 +3040,7 @@ begin
   TestLevelLiftsSwitches;
   TestLevelGen;
   TestLevelAmbushes;
+  TestLevelNodeFaces;
   TestLevelSecretDoors;
   TestLevelLightStyles;
   TestMapLevelUrl;

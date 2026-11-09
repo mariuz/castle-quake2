@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Exported levels (random levels and the level editor's) now render in other Quake 2 engines: walls, steps, water and diagonal walls were missing there (Quake 2's renderers only draw faces a BSP node lists). Checked in Yamagi Quake II with its software and OpenGL renderers.
+
 ## v0.22.0 — 2026-11-09
 
 Call of the Void's and Quake II Remastered's keys. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
