@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.23.0 — 2026-11-09
+
+Exported levels render in other Quake 2 engines (checked in Yamagi Quake II). Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - Exported levels (random levels and the level editor's) now render in other Quake 2 engines: walls, steps, water and diagonal walls were missing there (Quake 2's renderers only draw faces a BSP node lists). Checked in Yamagi Quake II with its software and OpenGL renderers.
 
