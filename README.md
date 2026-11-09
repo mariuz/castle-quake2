@@ -11,6 +11,22 @@ A port of **Quake 2** to the **Castle Game Engine** (Object Pascal / Free Pascal
 
 ---
 
+## Why this port?
+
+If you just want to play Quake 2 as well as possible, use **Quake II Remastered** (the official release, with new content) or a mature source port such as **Yamagi Quake II** (faithful, well tested) or **vkQuake2** (a Vulkan renderer). This port doesn't try to beat them at that: it can't yet play the full game end to end, and it has no multiplayer.
+
+What it offers instead:
+
+- **New levels without tools.** Every seed of *Random Level* is a new level built with Quake / Doom layout rules (loops, secrets behind walls you shoot, key hunts, ambushes, slime and lava, ladders and lifts, flickering lights), and the in-game **level editor** lets you paint your own and play it straight away. Both are compiled at runtime into real Quake 2 maps (BSP, lightmaps, visibility), which you can export as `.bsp` files.
+- **Play anywhere from one codebase**: in the browser (WebAssembly, nothing to install), on Android (touch controls, gamepads) and on Windows and Linux.
+- **Mods**: Quake 2 mods and Quake II Remastered data load over the base game (`-game`), including the remaster's PNG / TGA textures and extended maps. Call of the Void, the Quake 1 / 2 crossover, is in progress: its maps, monsters and keys load.
+- **A readable Quake 2 to learn from.** The code is Object Pascal on a general-purpose game engine, not a C engine from 1997, and [ARCHITECTURE.md](docs/ARCHITECTURE.md) maps each Quake 2 system (BSP, lightmaps, pmove, monster AI, entities) to the engine parts it uses. Quake 2 maps open in the Castle Game Engine's visual editor, with their entities selectable.
+- **Tested by machine**: about 370 unit checks and dozens of scripted play sessions run on every change, with screenshot comparisons, so behaviour doesn't silently drift.
+
+What it doesn't do (yet): multiplayer, the full retail game checked from start to finish, and measured performance on real graphics cards (CI only renders in software). The [roadmap](docs/ROADMAP.md) has the details.
+
+---
+
 ## Features (and the Castle Game Engine parts they use)
 
 - **Quake 2 BSP (IBSP v38) world geometry**

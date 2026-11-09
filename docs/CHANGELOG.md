@@ -26,7 +26,7 @@ Flickering, pulsing and switchable lights in compiled levels. Windows, Linux and
 Ambushes in random levels and selectable map entities in the CGE editor. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - Ambushes in random levels: in some later rooms, extra monsters appear when you walk in (Quake 2's trigger-spawned monsters and a `trigger_once` over the room).
-- Box triggers of compiled levels (the exit, ambushes) are real Quake 2 brush models now, so exported `.bsp` files work in Quake 2 itself.
+- Box triggers of compiled levels (the exit, ambushes) are real Quake 2 brush models now, so exported `.bsp` files follow the Quake 2 format more closely (not yet tried in Quake 2 itself or other engines).
 
 - CGE editor: map entities are selectable. With *PreviewEntities* / *PreviewMarkers* on, every entity is listed under *EntityPreview*; selecting one shows its class, targetname, target, spawnflags and all its keys.
 - Fixed: saving a design in the CGE editor wrote the whole generated map (world, movers) into the file. Only `TQuakeMap`'s own properties are saved now.
