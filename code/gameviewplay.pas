@@ -15,6 +15,7 @@ uses
   CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound,
   QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad, QuakeTouch,
+  X3DNodes, X3DFields, CastleRenderOptions,
   QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevel, QuakeLevelGen, QuakeLevelEditor, QuakeBspBuilder, QuakeTrace, fpjson, jsonparser, CastleDownload, CastleUriUtils;
 
 type
@@ -45,6 +46,9 @@ type
     LabelFps: TCastleLabel;
   private
     FWorld: TQuakeWorld;
+    FWaterWarp: TScreenEffectNode;
+    FWaterWarpTime: TSFFloat;
+    FWaterWarpClock: Single;
     FCameraMode: TCameraMode;
     FMapName: String;
     FAutoTestMap: String;
@@ -101,6 +105,9 @@ type
     { Look along Quake yaw / pitch (pitch positive looks down), keeping the velocity }
     procedure SetLook(const YawDeg, PitchDeg: Single);
     procedure UpdateDeathView(const SecondsPassed: Single);
+    { Underwater view warp (Quake 2 software renderer's D_WarpScreen) }
+    procedure CreateWaterWarp;
+    procedure UpdateWaterWarp(const SecondsPassed: Single);
     function WantMouseLook: Boolean;
     procedure TouchUse(Sender: TObject);
     procedure TouchNextWeapon(Sender: TObject);
@@ -493,6 +500,7 @@ begin
   Menu.OnMenuAction := @HandleMenuAction;
   SetCameraMode(FCameraMode);
   ApplySettings;
+  CreateWaterWarp;
 
   if FMapReportFile <> '' then
   begin
@@ -527,6 +535,9 @@ begin
   Particles.SetParent(nil);
   { The world references design components, which are freed by inherited Stop }
   FreeAndNil(FWorld);
+  { Owned by MainViewport's screen effects, freed with the design }
+  FWaterWarp := nil;
+  FWaterWarpTime := nil;
   inherited Stop;
 end;
 
@@ -1543,6 +1554,58 @@ begin
   FRecorder.Sample(Input);
 end;
 
+procedure TViewPlay.CreateWaterWarp;
+var
+  Shader: TComposedShaderNode;
+  Part: TShaderPartNode;
+begin
+  { D_WarpScreen: every row is shifted sideways and every column up / down by
+    a sine of the other coordinate (AMP2 = 3 pixels, CYCLE = 128 pixels,
+    SPEED = 20 table steps a second, at 320 x 240), the picture shrunk a
+    little so the edges stay covered. Scaled with the screen height. }
+  Part := TShaderPartNode.Create;
+  Part.ShaderType := stFragment;
+  Part.Contents :=
+    'uniform float time;' + LineEnding +
+    'void main(void)' + LineEnding +
+    '{' + LineEnding +
+    '  vec2 size = vec2(float(screen_width), float(screen_height));' + LineEnding +
+    '  float s = size.y / 240.0;' + LineEnding +
+    '  float amp = 3.0 * s;' + LineEnding +
+    '  float k = 6.2831853 / (128.0 * s);' + LineEnding +
+    '  float phase = time * 6.2831853 * 20.0 / 128.0;' + LineEnding +
+    '  vec2 p = screenf_position();' + LineEnding +
+    '  vec2 q = (p - size * 0.5) * (1.0 - 2.0 * amp / size) + size * 0.5;' + LineEnding +
+    '  q += amp * vec2(sin(p.y * k + phase), sin(p.x * k + phase));' + LineEnding +
+    '  gl_FragColor = screenf_get_color(q);' + LineEnding +
+    '}';
+  Shader := TComposedShaderNode.Create;
+  Shader.SetParts([Part]);
+  FWaterWarpTime := TSFFloat.Create(Shader, True, 'time', 0);
+  Shader.AddCustomField(FWaterWarpTime);
+  FWaterWarp := TScreenEffectNode.Create;
+  FWaterWarp.SetShaders([Shader]);
+  FWaterWarp.Enabled := False;
+  MainViewport.AddScreenEffect(FWaterWarp);
+end;
+
+procedure TViewPlay.UpdateWaterWarp(const SecondsPassed: Single);
+var
+  Underwater: Boolean;
+begin
+  if FWaterWarp = nil then
+    Exit;
+  { The eye is in water, slime or lava (RDF_UNDERWATER) }
+  Underwater := Hud.UnderwaterType <> 0;
+  if FWaterWarp.Enabled <> Underwater then
+    FWaterWarp.Enabled := Underwater;
+  if Underwater then
+  begin
+    FWaterWarpClock := FWaterWarpClock + SecondsPassed;
+    FWaterWarpTime.Send(FWaterWarpClock);
+  end;
+end;
+
 procedure TViewPlay.UpdateDeathView(const SecondsPassed: Single);
 const
   DropTime = 0.3;
@@ -1627,6 +1690,7 @@ begin
   Sounds.UpdateMixer(SecondsPassed, Settings.SoundVolume / 100);
   WalkNavigation.Exists := not FWorld.Dead;
   UpdateDeathView(SecondsPassed);
+  UpdateWaterWarp(SecondsPassed);
 
   if FWorld.TeleportPending then
   begin

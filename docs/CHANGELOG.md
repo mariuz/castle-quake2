@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Underwater view warp: with your eyes in water, slime or lava the picture ripples like in Quake 2's software renderer (`D_WarpScreen`: rows and columns shifted by a moving sine, 3 pixels at 320 × 240), a screen effect on the main viewport.
 - Exported levels play through in Yamagi Quake II: key doors, the secret area and the exit work there. The exit of an exported level now leads back to the map itself, since the next random level (`rand<seed+1>`) exists only in this port; before, the other engine stopped with "Couldn't load maps/rand9.bsp". CI now checks the export.
 
 ## v0.24.0 — 2026-11-09
