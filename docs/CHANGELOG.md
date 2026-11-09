@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.24.0 — 2026-11-09
+
+Exported levels with lava keep their lava texture in other engines, and the documentation is reorganised into shorter pages. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - The level editor's export also writes the lava texture a level with lava needs (`textures/castle/lava.wal`, made in memory here), so another Quake 2 engine shows the lava too.
 - Documentation reorganised: a shorter README (why this port, getting started, controls), with the details moved to new pages: [FEATURES.md](FEATURES.md), [LEVELS.md](LEVELS.md) (random levels, the editor and its commands, exporting), [MODDING.md](MODDING.md) and [TESTING.md](TESTING.md) (unit tests, demo script actions, recording, screenshot comparison).
