@@ -206,6 +206,10 @@ jobs:
           # Call of the Void's keys: a trigger_key needing the Quake 1 gold keycard refuses until the key (no model in the demo) is picked up
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/q1key --demo 'W:1.5,Y,O:notarget,O:spawn trigger_key targetname tk item key_q1_base_gold_key target nothing,E:tk,W:0.5,O:spawn key_q1_base_gold_key origin "128 -330 24",W:1,E:tk,W:0.5,S,Q' > test_output/q1key.log 2>&1
           grep -q 'trigger_key "tk": you need the Gold Keycard' test_output/q1key.log && grep -q 'trigger_key "tk" unlocks' test_output/q1key.log && ! grep -q Exception test_output/q1key.log || { echo "::error::Call of the Void keys (see q1key.log)"; exit 1; }
+          # Export for other engines: every face on a node, and the exit (rand9 here, a map only this port makes) leads back to the exported map; the saved level keeps rand9
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/export --demo "O:editor generate 8,O:editor save exportci,O:editor export,O:editor close,Q" > test_output/export.log 2>&1
+          C="$HOME/.config/castle-quake2"
+          grep -q "(0 on no node)" test_output/export.log && grep -q "Exported castle-config:/maps/exportci.bsp" test_output/export.log && grep -aq '"map" "exportci"' "$C/maps/exportci.bsp" && ! grep -aq '"map" "rand9"' "$C/maps/exportci.bsp" && grep -q rand9 "$C/levels/exportci.json" && ! grep -q Exception test_output/export.log || { echo "::error::Level export (see export.log)"; exit 1; }
           # Random Level from the menu (the menus pass "random": a new seed)
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/menurand --demo "W:1,B:escape,B:down,B:down,B:down,B:enter,B:down,B:enter,W:2,V,Q" > test_output/menurand.log 2>&1
           grep -q "QuakeLevelGen: Generated rand" test_output/menurand.log && ! grep -q "Failed to load level" test_output/menurand.log && ! grep -q Exception test_output/menurand.log || { echo "::error::Random Level from the menu failed (see menurand.log)"; exit 1; }

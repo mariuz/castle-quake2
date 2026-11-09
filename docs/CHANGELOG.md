@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Exported levels play through in Yamagi Quake II: key doors, the secret area and the exit work there. The exit of an exported level now leads back to the map itself, since the next random level (`rand<seed+1>`) exists only in this port; before, the other engine stopped with "Couldn't load maps/rand9.bsp". CI now checks the export.
+
 ## v0.24.0 — 2026-11-09
 
 Exported levels with lava keep their lava texture in other engines, and the documentation is reorganised into shorter pages. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.

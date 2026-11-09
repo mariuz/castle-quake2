@@ -44,7 +44,7 @@ Phases 1–6 are done as far as the demo data and a headless machine allow; Phas
 3. **Android release signing** (needs a key): an `AndroidSigningProperties.txt` release key instead of the debug-signed APK (the launcher icon is done).
 4. **Full game monsters** (needs the retail PAK): attack and move tables (`QuakeMonsterAttacks`, `QuakeMonsterMoves`) for gladiator, chick, mutant, brain, floater, hover, flipper, medic and the bosses; supertank / Makron / Jorg behaviour. Run `--map-report` on a retail `baseq2` to order the work.
 5. **Call of the Void** (Quake II Remastered mod, `-game q1q2`): the loader is done (mod folders, `rerelease/` layout, loose files, `.pkz`, PNG / TGA textures, QBSP maps; the mod's monsters spawn with a generic AI from `GenericMonsterFacts`). Next, with the mod's files: run `--map-report`, then attack / move tables for the Quake 1 monsters (written from Quake 1's behaviour; the mod's code is GPLv2, this project MIT), items and weapons (its keys are done: the Quake 1 keys and runes and the remaster's six new keys), `func_door_secret2`, `func_plat2` and the remaster's other new classes.
-6. **Exported levels in more engines**: they load and render in Yamagi Quake II; try the remaster, vkQuake2 and q2pro, and play one through there (doors, lifts, keys, the exit).
+6. **Exported levels in more engines**: they load, render and play through in Yamagi Quake II (key doors, secrets, the exit); try the remaster, vkQuake2 and q2pro, and a level with lifts and switches.
 
 Out of scope for now: multiplayer (deathmatch / coop), which needs a client-server split of `TQuakeWorld` and networking.
 

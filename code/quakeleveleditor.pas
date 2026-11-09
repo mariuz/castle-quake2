@@ -565,15 +565,51 @@ function TQuakeLevelEditor.ExportBsp: String;
     end;
   end;
 
+  { Exits to rand<seed> lead to maps only this port makes: point them at the
+    exported map itself, so another engine restarts it instead of stopping
+    with "Couldn't load maps/rand<seed>.bsp". Returns the old map names. }
+  function PointExitsHome: TStringList;
+  var
+    I: Integer;
+    E: TLevelEntity;
+    Seed: Cardinal;
+  begin
+    Result := TStringList.Create;
+    for I := 0 to FLevel.Entities.Count - 1 do
+    begin
+      E := FLevel.Entities[I];
+      if (E.EntClass = 'target_changelevel') and IsRandomMapName(E.Key('map'), Seed) then
+      begin
+        Result.AddObject(E.Key('map'), E);
+        E.SetKey('map', FLevel.Name);
+      end;
+    end;
+  end;
+
+  procedure RestoreExits(const OldMaps: TStringList);
+  var
+    I: Integer;
+  begin
+    for I := 0 to OldMaps.Count - 1 do
+      TLevelEntity(OldMaps.Objects[I]).SetKey('map', OldMaps[I]);
+  end;
+
 var
   Stream: TMemoryStream;
   Stats: TBspBuildStats;
   Out: TStream;
+  OldMaps: TStringList;
 begin
   Result := '';
   SafeName;
   try
-    Stream := BuildLevelBsp(FLevel, Stats);
+    OldMaps := PointExitsHome;
+    try
+      Stream := BuildLevelBsp(FLevel, Stats);
+    finally
+      RestoreExits(OldMaps);
+      OldMaps.Free;
+    end;
     try
       Result := 'castle-config:/maps/' + FLevel.Name + '.bsp';
       Out := UrlSaveStream(Result);

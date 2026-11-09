@@ -72,7 +72,13 @@ editor select <x> <y> | set <key> <value> | unset <key>
 
 *Export* (or `editor export`) writes the map to the user config folder as `maps/<name>.bsp`, plus, for a level with lava, the lava texture it needs (`textures/castle/lava.wal`, which this port generates). That folder has the layout of a Quake 2 game folder: copy `maps/` and `textures/` into your `baseq2` and run `map <name>` in the other engine. The textures themselves come from the Quake 2 data you already have (the shareware demo's are enough).
 
-An exported random level has been checked in **Yamagi Quake II** with its software and OpenGL renderers: it loads, every wall, floor, water surface and ladder is drawn, and the game runs on it. Other engines have not been tried yet.
+A level's exit leads to the next random level (`rand<seed+1>`), which only this port can make, so the exported map's exit leads back to the map itself: the other engine restarts it, keeping your inventory. The saved level is not changed.
+
+Exported random levels have been checked in **Yamagi Quake II** with its software and OpenGL renderers:
+- they load, and every wall, floor, water surface and ladder is drawn;
+- `rand8`'s key hunt plays through: the red and blue key doors say "You need the Red Key" / "You need the Blue Key" until you carry the key, then open; the secret area counts; the exit restarts the map.
+
+Other engines have not been tried yet.
 
 Where the user config folder is: `~/.config/castle-quake2/` on Linux, `%LOCALAPPDATA%\castle-quake2\` on Windows.
 
