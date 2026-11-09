@@ -10,7 +10,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Lighting | RGB lightmaps, 4 styles, dynamic lights | All 4 styles (animated, switchable, ramps), 2x overbright, LightPoint model tint with all light styles (models flicker and switch with the lights), dynamic lights on the world and models | More than 4 surface lights at once. |
 | Sky | Skybox, `skyrotate`, `skyaxis` | Skybox via `TCastleBackground`, rotating (`skyrotate` / `skyaxis`, `sky` console command) | — |
 | Liquids | Warped water / lava (`SURF_WARP`), contents | Warp shader, non-solid liquid surfaces, swimming, drowning, lava / slime damage, underwater tints | — |
-| Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp, skins, shells (quad, invulnerability, power armor) | `EF_POWERSCREEN` model, glow, rotating / bobbing items. |
+| Models | MD2 with lerp, skins, `EF_*` effects | MD2 with lerp, skins, shells (quad, invulnerability, power shield), the power screen model (`EF_POWERSCREEN`) | An item inventory (Quake 2 single player uses powerups from it; here they're used on pickup). |
 | Sprites | SP2 (BFG, explosions) | SP2 loader, BFG ball / explosion / effect sprites (the demo's other sprites are unused in Quake 2 too) | — |
 | Player physics | Pmove (air control, water, ladders, crouch slide) | Pmove as `TQuakePlayerMovement`: the 32 × 32 × 56 box traced against the BSP brushes, movers and monsters (`CM_BoxTrace`, `PM_StepSlideMove`), movers carry and push the player, water currents and conveyor belts (`PM_AddCurrents`) | — |
 | Weapons | 10 + hand grenades, frame-timed | 10 + hand grenades on Quake 2's gun frames (`Weapon_Generic`: fire frames, refire, put away / raise, chaingun spin, BFG delay, grenade cook) | — |

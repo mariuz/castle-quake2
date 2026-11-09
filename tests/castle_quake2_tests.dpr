@@ -321,10 +321,11 @@ end;
 
 const
   { Sounds the game code plays by literal path, named in the sounds design }
-  DesignSoundPaths: array[0..63] of String = (
+  DesignSoundPaths: array[0..68] of String = (
     'sound/doors/dr1_end.wav',
     'sound/doors/dr1_mid.wav',
     'sound/doors/dr1_strt.wav',
+    'sound/items/airout.wav',
     'sound/items/damage3.wav',
     'sound/items/l_health.wav',
     'sound/items/m_health.wav',
@@ -341,6 +342,8 @@ const
     'sound/misc/menu2.wav',
     'sound/misc/menu3.wav',
     'sound/misc/pc_up.wav',
+    'sound/misc/power1.wav',
+    'sound/misc/power2.wav',
     'sound/misc/secret.wav',
     'sound/misc/talk1.wav',
     'sound/misc/tele1.wav',
@@ -361,6 +364,8 @@ const
     'sound/player/male/pain25_1.wav',
     'sound/player/male/pain50_1.wav',
     'sound/player/male/pain75_1.wav',
+    'sound/player/u_breath1.wav',
+    'sound/player/u_breath2.wav',
     'sound/player/watr_in.wav',
     'sound/player/watr_out.wav',
     'sound/player/watr_un.wav',

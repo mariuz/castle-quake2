@@ -30,6 +30,13 @@ type
     Goals, TotalGoals: Integer;
     LevelTime: Single;
     QuadTime, InvulnTime: Single;
+    { Rebreather / environment suit seconds left, silenced shots left }
+    BreatherTime, EnviroTime: Single;
+    SilencerShots: Integer;
+    { Power screens / shields carried, and whether power armor is on
+      (Quake 2 FL_POWER_ARMOR; it runs on cells) }
+    PowerScreens, PowerShields: Integer;
+    PowerArmorOn: Boolean;
     GodMode: Boolean;
   end;
 
@@ -245,6 +252,12 @@ begin
     S := S + Format('   QUAD %d', [Ceil(Stats.QuadTime)]);
   if Stats.InvulnTime > 0 then
     S := S + Format('   INVULNERABLE %d', [Ceil(Stats.InvulnTime)]);
+  if Stats.EnviroTime > 0 then
+    S := S + Format('   ENVIRO SUIT %d', [Ceil(Stats.EnviroTime)]);
+  if Stats.BreatherTime > 0 then
+    S := S + Format('   REBREATHER %d', [Ceil(Stats.BreatherTime)]);
+  if Stats.SilencerShots > 0 then
+    S := S + Format('   SILENCER %d', [Stats.SilencerShots]);
   FStatsLabel.Caption := S;
   { Larger text on phones (Options -> Interface Size); labels add UIScale }
   if FMessageLabel.FontSize <> 28 * InterfaceScale then
@@ -366,7 +379,15 @@ begin
   if FStats.QuadTime > 0 then
     DrawRectangle(R, Vector4(0.0, 0.0, 1.0, 0.08));
   if FStats.InvulnTime > 0 then
-    DrawRectangle(R, Vector4(1.0, 1.0, 0.0, 0.08));
+    DrawRectangle(R, Vector4(1.0, 1.0, 0.0, 0.08))
+  else
+  { SV_CalcBlend: environment suit green, rebreather pale green (blinking
+    in their last 3 seconds) }
+  if (FStats.EnviroTime > 3) or ((FStats.EnviroTime > 0) and (Frac(FStats.EnviroTime * 2.5) < 0.5)) then
+    DrawRectangle(R, Vector4(0.0, 1.0, 0.0, 0.08))
+  else
+  if (FStats.BreatherTime > 3) or ((FStats.BreatherTime > 0) and (Frac(FStats.BreatherTime * 2.5) < 0.5)) then
+    DrawRectangle(R, Vector4(0.4, 1.0, 0.4, 0.04));
   if FPickupFlash > 0 then
     DrawRectangle(R, Vector4(1.0, 1.0, 0.3, FPickupFlash * 0.4));
 
@@ -412,6 +433,19 @@ begin
       Img.Draw(FloatRectangle(X + 50 * Sc, Y, 24 * Sc, 24 * Sc));
 
     X := W / 2 + 54 * Sc;
+    { G_SetStats: with power armor on, its cells and icon (flashing with the
+      armor's when there is armor too) }
+    if FStats.PowerArmorOn and (FStats.Ammo[atCells] > 0) and
+       ((FStats.Armor <= 0) or (Frac(FStats.LevelTime / 1.6) < 0.5)) then
+    begin
+      DrawNumber(X, Y, FStats.Ammo[atCells], 3, False, Sc);
+      if FStats.PowerShields > 0 then
+        Img := Pic('i_powershield')
+      else
+        Img := Pic('i_powerscreen');
+      if Img <> nil then
+        Img.Draw(FloatRectangle(X + 50 * Sc, Y, 24 * Sc, 24 * Sc));
+    end else
     if FStats.Armor > 0 then
     begin
       DrawNumber(X, Y, FStats.Armor, 3, False, Sc);

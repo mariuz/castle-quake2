@@ -161,6 +161,8 @@ type
     FWalking: Boolean;
     { Power armor absorbed a hit recently: show the green shell (powerarmor_time) }
     FPowerArmorFlash: Single;
+    { EF_POWERSCREEN: models/items/armor/effect, made on the first hit }
+    FScreenModel: TQuakeMd2Instance;
     { Seconds to stand at the current path_corner ("wait") }
     FPauseTime: Single;
     { Fraction of the attack animation at which the attack happens }
@@ -1373,6 +1375,7 @@ end;
 destructor TQuakeMonster.Destroy;
 begin
   { BeforeDestruction already detached this behavior from Transform }
+  FreeAndNil(FScreenModel);
   FreeAndNil(Model);
   FreeAndNil(Transform);
   FreeAndNil(FAttack);
@@ -1815,13 +1818,36 @@ begin
       FLightTimer := 0.1;
       Model.SetTint(Lighting.SampleLight(Transform.Translation));
     end;
-    { M_SetEffects: green shell while the power armor is absorbing }
+    { M_SetEffects while the power armor is absorbing: a power screen shows
+      EF_POWERSCREEN (the screen model, translucent with a green shell, in
+      front of the monster), a power shield a green shell }
     if FPowerArmorFlash > 0 then
     begin
       FPowerArmorFlash := FPowerArmorFlash - SecondsPassed;
-      Model.SetShell(Vector3(0, 1, 0));
+      if PowerArmorType = paScreen then
+      begin
+        if FScreenModel = nil then
+        begin
+          FScreenModel := Md2Manager.CreateInstance('models/items/armor/effect/tris.md2');
+          if FScreenModel <> nil then
+          begin
+            FScreenModel.Scene.Collides := False;
+            FScreenModel.Scene.Pickable := False;
+            FScreenModel.SetTransparency(0.7);
+            FScreenModel.SetShell(Vector3(0, 1, 0));
+            Transform.Add(FScreenModel.Scene);
+          end;
+        end;
+        if FScreenModel <> nil then
+          FScreenModel.Scene.Exists := True;
+      end else
+        Model.SetShell(Vector3(0, 1, 0));
     end else
+    begin
       Model.SetShell(TVector3.Zero);
+      if FScreenModel <> nil then
+        FScreenModel.Scene.Exists := False;
+    end;
   end;
 
   if TurretDriver then

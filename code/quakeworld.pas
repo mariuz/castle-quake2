@@ -121,6 +121,9 @@ type
     FLastWaterLevel: Integer;
     FAirFinished: Single;
     FLiquidDamageTimer: Single;
+    { Rebreather / environment suit breathing sounds (u_breath1 / 2) }
+    FBreathTimer: Single;
+    FBreathSound: Boolean;
     { target_earthquake shakes: entity -> end time; time of the next shove /
       sound per quake }
     FQuakes: array of record
@@ -199,6 +202,14 @@ type
       const Speed: Single; const Damage: Integer; const FromPlayer: Boolean;
       const Owner: TQuakeMonster = nil);
     procedure UpdateProjectiles(const SecondsPassed: Single);
+    { Damage the player's power armor absorbs (and the cells it uses) }
+    function AbsorbPlayerPowerArmor(const Damage: Integer; const FromPos: TVector3): Integer;
+    { Rebreather, environment suit and power armor timers and sounds }
+    procedure UpdatePlayerItems(const SecondsPassed: Single);
+    { PlayerNoise(PNOISE_WEAPON), unless the silencer uses up a shot }
+    procedure WeaponNoise;
+    { 0.2 while the silencer has shots (MZ_SILENCED), else 1 }
+    function SilencedVolume: Single;
     { BFG ball in flight (bfg_think): lasers to the monsters (or the player,
       for a monster's ball) within 256 units, through monsters, 10 damage each }
     procedure BfgLasers(const Proj: TQuakeProjectile);
@@ -298,12 +309,19 @@ type
     property PlayerGravity: Single read FPlayerGravity;
 
     { Damage the player (armor absorbs part of it) }
-    procedure DamagePlayer(const Amount: Integer; const FromPos: TVector3);
+    { NoArmor: Quake 2 DAMAGE_NO_ARMOR (drowning): armor and power armor don't help }
+    procedure DamagePlayer(const Amount: Integer; const FromPos: TVector3;
+      const NoArmor: Boolean = False);
+    { Use_PowerArmor: switch the power screen / shield on or off }
+    procedure TogglePowerArmor;
 
     procedure CheatGiveAll;
     procedure CheatGodMode;
     { give quad / give invulnerability: 30 seconds, like the items }
     procedure CheatPowerup(const Quad: Boolean);
+    { give <item>: an item by its name ("power shield") or classname, as if
+      picked up; False if there is no such item }
+    function CheatGiveItem(const AName: String): Boolean;
 
     { Attach the view weapon to the camera }
     procedure AttachWeaponToCamera(const Camera: TCastleTransform);
@@ -1088,6 +1106,29 @@ begin
       case Def^.Param of
         POWERUP_QUAD: FStats.QuadTime := FStats.QuadTime + Def^.Amount;
         POWERUP_INVULN: FStats.InvulnTime := FStats.InvulnTime + Def^.Amount;
+        { Used on pickup here (Quake 2 single player keeps them in the
+          inventory until used): Use_Breather, Use_Envirosuit, Use_Silencer }
+        POWERUP_OTHER:
+          if Def^.ClassName = 'item_breather' then
+            FStats.BreatherTime := FStats.BreatherTime + 30
+          else
+          if Def^.ClassName = 'item_enviro' then
+            FStats.EnviroTime := FStats.EnviroTime + 30
+          else
+          if Def^.ClassName = 'item_silencer' then
+            Inc(FStats.SilencerShots, 30)
+          else
+          if (Def^.ClassName = 'item_power_screen') or (Def^.ClassName = 'item_power_shield') then
+          begin
+            if Def^.ClassName = 'item_power_screen' then
+              Inc(FStats.PowerScreens)
+            else
+              Inc(FStats.PowerShields);
+            { Switched on with the first one, like Quake 2 deathmatch's
+              auto-use; the powerarmor command switches it }
+            if not FStats.PowerArmorOn then
+              TogglePowerArmor;
+          end;
         POWERUP_ADRENALINE:
           begin
             Inc(FStats.MaxHealth);
@@ -2315,6 +2356,45 @@ begin
     SelectWeapon(1);
 end;
 
+function TQuakeWorld.SilencedVolume: Single;
+begin
+  if FStats.SilencerShots > 0 then
+    Result := 0.2
+  else
+    Result := 1;
+end;
+
+procedure TQuakeWorld.WeaponNoise;
+begin
+  if FStats.SilencerShots > 0 then
+    Dec(FStats.SilencerShots)
+  else
+    PlayerNoise(FPlayerPos);
+end;
+
+procedure TQuakeWorld.UpdatePlayerItems(const SecondsPassed: Single);
+
+  { airout.wav as 3 seconds are left (remaining == 30 frames) }
+  procedure Tick(var Time: Single);
+  begin
+    if Time <= 0 then
+      Exit;
+    if (Time > 3) and (Time - SecondsPassed <= 3) then
+      Sounds.Play('sound/items/airout.wav', 1, chItem);
+    Time := Max(0, Time - SecondsPassed);
+  end;
+
+begin
+  Tick(FStats.EnviroTime);
+  Tick(FStats.BreatherTime);
+  { G_SetStats: power armor goes off when the cells run out }
+  if FStats.PowerArmorOn and (FStats.Ammo[atCells] <= 0) then
+  begin
+    FStats.PowerArmorOn := False;
+    Sounds.Play('sound/misc/power2.wav', 1, chItem);
+  end;
+end;
+
 procedure TQuakeWorld.GunEvent(const Event: TGunEvent);
 begin
   case Event of
@@ -2322,10 +2402,10 @@ begin
     geBfgFlash:
       begin
         { weapon_bfg_fire frame 9: flash and sound, the ball follows on frame 17 }
-        Sounds.Play(WeaponDefs[10].Sound, 1, chWeapon);
+        Sounds.Play(WeaponDefs[10].Sound, SilencedVolume, chWeapon);
         Lighting.TriggerMuzzleFlash(FPlayerPos + FPlayerDir * 16);
         FLastFireTime := FTime;
-        PlayerNoise(FPlayerPos);
+        WeaponNoise;
       end;
     geNoAmmo:
       begin
@@ -2963,7 +3043,64 @@ begin
   end;
 end;
 
-procedure TQuakeWorld.DamagePlayer(const Amount: Integer; const FromPos: TVector3);
+function TQuakeWorld.AbsorbPlayerPowerArmor(const Damage: Integer; const FromPos: TVector3): Integer;
+var
+  Forward, ToHit: TVector3;
+  DamagePerCell, Part, Cells: Integer;
+begin
+  { Quake 2 CheckPowerArmor for a client: the shield if carried, else the
+    screen, which only stops hits from the front; cells pay for it }
+  Result := 0;
+  Cells := FStats.Ammo[atCells];
+  if not FStats.PowerArmorOn or (Cells <= 0) or (Damage <= 0) then
+    Exit;
+  if FStats.PowerShields > 0 then
+  begin
+    DamagePerCell := 2;
+    Part := (2 * Damage) div 3;
+  end else
+  if FStats.PowerScreens > 0 then
+  begin
+    Forward := Vector3(FPlayerDir.X, 0, FPlayerDir.Z);
+    ToHit := FromPos - FPlayerPos;
+    ToHit.Y := 0;
+    if Forward.IsZero or ToHit.IsZero or
+       (TVector3.DotProduct(ToHit.Normalize, Forward.Normalize) <= 0.3) then
+      Exit;
+    DamagePerCell := 1;
+    Part := Damage div 3;
+  end else
+    Exit;
+  Result := Min(Cells * DamagePerCell, Part);
+  if Result <= 0 then
+    Exit;
+  FStats.Ammo[atCells] := Max(0, Cells - Result div DamagePerCell);
+  { TE_SCREEN_SPARKS / TE_SHIELD_SPARKS }
+  Sounds.Play('sound/weapons/lashit.wav', 1, chAuto);
+end;
+
+procedure TQuakeWorld.TogglePowerArmor;
+begin
+  if (FStats.PowerScreens = 0) and (FStats.PowerShields = 0) then
+    Exit;
+  if FStats.PowerArmorOn then
+  begin
+    FStats.PowerArmorOn := False;
+    Sounds.Play('sound/misc/power2.wav', 1, chAuto);
+  end else
+  if FStats.Ammo[atCells] <= 0 then
+  begin
+    if FHud <> nil then
+      FHud.ShowMessage('No cells for power armor.', 2);
+  end else
+  begin
+    FStats.PowerArmorOn := True;
+    Sounds.Play('sound/misc/power1.wav', 1, chAuto);
+  end;
+end;
+
+procedure TQuakeWorld.DamagePlayer(const Amount: Integer; const FromPos: TVector3;
+  const NoArmor: Boolean);
 var
   Save, Take: Integer;
 begin
@@ -2973,7 +3110,10 @@ begin
   { Quake 2 T_Damage: half damage on easy }
   if GameSkill = 0 then
     Take := Max(1, Take div 2);
-  if (FStats.Armor > 0) and (FStats.ArmorType > 0) then
+  { Power armor first, then armor (T_Damage: CheckPowerArmor, CheckArmor) }
+  if not NoArmor then
+    Take := Take - AbsorbPlayerPowerArmor(Take, FromPos);
+  if (not NoArmor) and (FStats.Armor > 0) and (FStats.ArmorType > 0) then
   begin
     Save := Min(FStats.Armor, Ceil(ArmorProtection[FStats.ArmorType] * Take));
     FStats.Armor := FStats.Armor - Save;
@@ -3077,6 +3217,7 @@ begin
   FStats.LevelTime := FStats.LevelTime + SecondsPassed;
   FStats.QuadTime := Max(0, FStats.QuadTime - SecondsPassed);
   FStats.InvulnTime := Max(0, FStats.InvulnTime - SecondsPassed);
+  UpdatePlayerItems(SecondsPassed);
   FPainSoundTimer := FPainSoundTimer - SecondsPassed;
   { Projectile lights of the previous frame }
   Lighting.EndFrame;
@@ -3222,17 +3363,18 @@ begin
   if Slot <> 10 then { the BFG flashed on frame 9 }
   begin
     Lighting.TriggerMuzzleFlash(MuzzlePos);
+    { MZ_SILENCED: the muzzle flash sound at 0.2 volume }
     if Slot in [4, 5] then
-      Sounds.Play(Format('sound/weapons/machgf%db.wav', [1 + Random(5)]), 1, chWeapon)
+      Sounds.Play(Format('sound/weapons/machgf%db.wav', [1 + Random(5)]), SilencedVolume, chWeapon)
     else
-      Sounds.Play(Def.Sound, 1, chWeapon);
+      Sounds.Play(Def.Sound, SilencedVolume, chWeapon);
   end;
   if Mult > 1 then
     Sounds.Play('sound/items/damage3.wav', 1, chItem);
 
   { Firing makes noise (PNOISE_WEAPON) and shows the player hostile }
   FLastFireTime := FTime;
-  PlayerNoise(Origin);
+  WeaponNoise;
 
   case Slot of
     1: SpawnProjectile(pkBlasterBolt, MuzzlePos, Dir, 1000, 15 * Mult, True);
@@ -3334,6 +3476,12 @@ begin
   O.Add('levelTime', FStats.LevelTime);
   O.Add('quad', FStats.QuadTime);
   O.Add('invuln', FStats.InvulnTime);
+  O.Add('breather', FStats.BreatherTime);
+  O.Add('enviro', FStats.EnviroTime);
+  O.Add('silencer', FStats.SilencerShots);
+  O.Add('powerScreens', FStats.PowerScreens);
+  O.Add('powerShields', FStats.PowerShields);
+  O.Add('powerArmorOn', FStats.PowerArmorOn);
   Arr := TJSONArray.Create;
   for A := Low(TAmmoType) to High(TAmmoType) do
     Arr.Add(FStats.Ammo[A]);
@@ -3518,6 +3666,12 @@ begin
     FStats.LevelTime := O.Get('levelTime', 0.0);
     FStats.QuadTime := O.Get('quad', 0.0);
     FStats.InvulnTime := O.Get('invuln', 0.0);
+    FStats.BreatherTime := O.Get('breather', 0.0);
+    FStats.EnviroTime := O.Get('enviro', 0.0);
+    FStats.SilencerShots := O.Get('silencer', 0);
+    FStats.PowerScreens := O.Get('powerScreens', 0);
+    FStats.PowerShields := O.Get('powerShields', 0);
+    FStats.PowerArmorOn := O.Get('powerArmorOn', False);
     Arr := O.Get('ammo', TJSONArray(nil));
     if Arr <> nil then
       for A := Low(TAmmoType) to High(TAmmoType) do
@@ -4244,21 +4398,41 @@ begin
   if (FLastWaterLevel = 3) and (Level < 3) and (FAirFinished < FTime + 7) then
     Sounds.Play('sound/player/gasp1.wav', 1, chVoice);
 
-  { Drowning: 12 seconds of air, then 2 damage per second, increasing }
+  { Drowning: 12 seconds of air, then 2 damage per second, increasing;
+    the rebreather and environment suit give air (P_WorldEffects) }
   if Level < 3 then
     FAirFinished := FTime + 12
   else
-  if FTime > FAirFinished then
   begin
-    FLiquidDamageTimer := FLiquidDamageTimer - SecondsPassed;
-    if FLiquidDamageTimer <= 0 then
+    if (FStats.BreatherTime > 0) or (FStats.EnviroTime > 0) then
     begin
-      FLiquidDamageTimer := 1;
-      DamagePlayer(Min(15, 2 + 2 * Trunc(FTime - FAirFinished)), FPlayerPos);
+      FAirFinished := FTime + 10;
+      { u_breath1 / u_breath2 every 2.5 s }
+      FBreathTimer := FBreathTimer - SecondsPassed;
+      if FBreathTimer <= 0 then
+      begin
+        FBreathTimer := 2.5;
+        FBreathSound := not FBreathSound;
+        if FBreathSound then
+          Sounds.Play('sound/player/u_breath1.wav', 1, chAuto)
+        else
+          Sounds.Play('sound/player/u_breath2.wav', 1, chAuto);
+        PlayerNoise(FPlayerPos);
+      end;
+    end;
+    if FTime > FAirFinished then
+    begin
+      FLiquidDamageTimer := FLiquidDamageTimer - SecondsPassed;
+      if FLiquidDamageTimer <= 0 then
+      begin
+        FLiquidDamageTimer := 1;
+        DamagePlayer(Min(15, 2 + 2 * Trunc(FTime - FAirFinished)), FPlayerPos, True);
+      end;
     end;
   end;
 
-  { Lava: 30 per second per water level; slime: 10 (no enviro suit here) }
+  { Lava: 3 per water level a frame (1 with the environment suit); slime: 1,
+    none with the suit }
   if (Level > 0) and ((WType and (CONTENTS_LAVA or CONTENTS_SLIME)) <> 0) then
   begin
     FLiquidDamageTimer := FLiquidDamageTimer - SecondsPassed;
@@ -4266,8 +4440,13 @@ begin
     begin
       FLiquidDamageTimer := 0.1;
       if (WType and CONTENTS_LAVA) <> 0 then
-        DamagePlayer(3 * Level, FPlayerPos)
-      else
+      begin
+        if FStats.EnviroTime > 0 then
+          DamagePlayer(Level, FPlayerPos)
+        else
+          DamagePlayer(3 * Level, FPlayerPos);
+      end else
+      if FStats.EnviroTime <= 0 then
         DamagePlayer(Level, FPlayerPos);
     end;
   end;
@@ -4314,6 +4493,21 @@ begin
   FStats.Keys := $1FF;
   if FHud <> nil then
     FHud.ShowMessage('All weapons, ammo, armor and keys');
+end;
+
+function TQuakeWorld.CheatGiveItem(const AName: String): Boolean;
+var
+  I: Integer;
+begin
+  for I := Low(ItemDefs) to High(ItemDefs) do
+    if SameText(ItemDefs[I].Name, AName) or SameText(ItemDefs[I].ClassName, AName) then
+    begin
+      Result := GiveItem(@ItemDefs[I]);
+      if Result and (FHud <> nil) then
+        FHud.ShowMessage(ItemDefs[I].Name, 2);
+      Exit(True);
+    end;
+  Result := False;
 end;
 
 procedure TQuakeWorld.CheatPowerup(const Quad: Boolean);

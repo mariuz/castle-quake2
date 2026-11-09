@@ -22,6 +22,12 @@
     },
     {
       "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Items_airout",
+      "QuakePath" : "sound/items/airout.wav",
+      "Url" : "quakepak:/sound/items/airout.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
       "Name" : "Items_damage3",
       "QuakePath" : "sound/items/damage3.wav",
       "Url" : "quakepak:/sound/items/damage3.wav"
@@ -115,6 +121,18 @@
       "Name" : "Misc_pc_up",
       "QuakePath" : "sound/misc/pc_up.wav",
       "Url" : "quakepak:/sound/misc/pc_up.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_power1",
+      "QuakePath" : "sound/misc/power1.wav",
+      "Url" : "quakepak:/sound/misc/power1.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Misc_power2",
+      "QuakePath" : "sound/misc/power2.wav",
+      "Url" : "quakepak:/sound/misc/power2.wav"
     },
     {
       "$$ClassName" : "TQuakeNamedSound",
@@ -235,6 +253,18 @@
       "Name" : "Player_male_pain75_1",
       "QuakePath" : "sound/player/male/pain75_1.wav",
       "Url" : "quakepak:/sound/player/male/pain75_1.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Player_u_breath1",
+      "QuakePath" : "sound/player/u_breath1.wav",
+      "Url" : "quakepak:/sound/player/u_breath1.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Player_u_breath2",
+      "QuakePath" : "sound/player/u_breath2.wav",
+      "Url" : "quakepak:/sound/player/u_breath2.wav"
     },
     {
       "$$ClassName" : "TQuakeNamedSound",

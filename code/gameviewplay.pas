@@ -2024,6 +2024,14 @@ begin
   if (Cmd = 'give') and (Args = 'invulnerability') then
     FWorld.CheatPowerup(False)
   else
+  if Cmd = 'give' then
+  begin
+    if not FWorld.CheatGiveItem(Args) then
+      Console.Print('Unknown item: ' + Args);
+  end else
+  if Cmd = 'powerarmor' then
+    FWorld.TogglePowerArmor
+  else
   if Cmd = 'notarget' then
   begin
     NoTarget := not NoTarget;
@@ -2050,6 +2058,8 @@ begin
     Console.Print('  god          - Toggle god mode');
     Console.Print('  give all     - All weapons, ammo, armor, keys');
     Console.Print('  give quad / give invulnerability - Powerups');
+    Console.Print('  give <item>  - Any item by name, e.g. give power shield');
+    Console.Print('  powerarmor   - Switch the power screen / shield on or off');
     Console.Print('  noclip       - Toggle fly mode');
     Console.Print('  notarget     - Monsters ignore you');
     Console.Print('  fps          - Toggle FPS counter');
