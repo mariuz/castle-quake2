@@ -3,6 +3,7 @@
 ## Unreleased
 
 - The level editor's export also writes the lava texture a level with lava needs (`textures/castle/lava.wal`, made in memory here), so another Quake 2 engine shows the lava too.
+- Documentation reorganised: a shorter README (why this port, getting started, controls), with the details moved to new pages: [FEATURES.md](FEATURES.md), [LEVELS.md](LEVELS.md) (random levels, the editor and its commands, exporting), [MODDING.md](MODDING.md) and [TESTING.md](TESTING.md) (unit tests, demo script actions, recording, screenshot comparison).
 
 ## v0.23.0 — 2026-11-09
 

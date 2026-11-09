@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Working notes for developers and AI agents on Castle Quake 2: a Quake 2 port to Castle Game Engine (CGE) in Object Pascal (FPC). Sibling of `castle-quake1`. Read `docs/ARCHITECTURE.md` for full architectural details.
+Working notes for developers and AI agents on Castle Quake 2: a Quake 2 port to Castle Game Engine (CGE) in Object Pascal (FPC). Sibling of `castle-quake1`. Read `docs/ARCHITECTURE.md` for full architectural details; user-facing docs are `README.md` and `docs/FEATURES.md`, `LEVELS.md`, `MODDING.md`, `TESTING.md` (keep them in step when a feature changes).
 
 ## What this is
 
