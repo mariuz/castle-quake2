@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Quake II Remastered's (and Rogue's) teleporters: `trigger_teleport` brushes send the player to a random `info_teleport_destination` of their target, like `misc_teleporter`; with a targetname they wait to be used (unless START_ON) and switch on / off each time. Call of the Void's hubs and levels use them.
 - Call of the Void: its Quake 1 monsters (ogre, knight, enforcer, grunt, zombie, scrag, fiend, rottweiler, hell knight, shambler, vore, rotfish, spawn, in their plain, `_prototype` and `_strogg` variants whose models keep Quake 1's frames) walk, run and attack on Quake 1's animation frames with Quake 1's damage, instead of the generic one-attack AI; models that only number their frames are animated by index. Variants keep their own weapon (the strogg ogre's pellets). `castle-quake2-tests --retail <pak> <mod pak>` checks the models' frame counts.
 - The map report (`--map-report`) quits when it's done; it used to stay open after writing the report.
 - `-game` takes an absolute folder too.

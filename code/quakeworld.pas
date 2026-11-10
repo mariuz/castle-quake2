@@ -765,6 +765,11 @@ begin
   if (Copy(CName, 1, 8) = 'trigger_') and EntityBox(Ent, Box) then
   begin
     Trig := TQuakeTrigger.Create(Ent, Box);
+    if CName = 'trigger_teleport' then
+      { SP_trigger_teleport (remaster / Rogue): with a targetname it waits
+        to be used, unless START_ON (8) }
+      Trig.Enabled := (Ent.TargetName = '') or ((SpawnFlags and 8) <> 0)
+    else
     if ((SpawnFlags and TRIGGER_TRIGGERED) <> 0) and (Ent.TargetName <> '') then
       Trig.Enabled := False;
     FTriggers.Add(Trig);
@@ -1469,6 +1474,13 @@ begin
           M.Alert;
       end;
   end else
+  if CName = 'trigger_teleport' then
+  begin
+    { trigger_teleport_use: on / off each time }
+    for Trig in FTriggers do
+      if Trig.Entity = Ent then
+        Trig.Enabled := not Trig.Enabled;
+  end else
   if Copy(CName, 1, 8) = 'trigger_' then
   begin
     { Using a TRIGGERED trigger enables it }
@@ -2044,6 +2056,7 @@ var
   CName, Msg: String;
   PBox: TBox3D;
   Dests: TQuakeEntityList;
+  Dest: TQuakeEntity;
   D: TDelayedTarget;
 begin
   PBox := PlayerBox;
@@ -2065,15 +2078,21 @@ begin
       Continue;
     end;
 
-    if CName = 'misc_teleporter' then
+    if (CName = 'misc_teleporter') or (CName = 'trigger_teleport') then
     begin
+      { teleporter_touch / trigger_teleport_touch (G_PickTarget: one of the
+        destinations at random) to misc_teleporter_dest or
+        info_teleport_destination, 10 above it, facing its angle }
       Dests := FBsp.FindByTargetName(Trig.Entity.Target);
       try
         if Dests.Count > 0 then
         begin
+          Dest := Dests[Random(Dests.Count)];
+          if CName = 'misc_teleporter' then
+            Dest := Dests[0];
           FTeleportPending := True;
-          FTeleportPos := QuakeToCge(Dests[0].Origin) + Vector3(0, PlayerEyeHeight - 24 + 10, 0);
-          FTeleportAngle := Dests[0].Angle;
+          FTeleportPos := QuakeToCge(Dest.Origin) + Vector3(0, PlayerEyeHeight - 24 + 10, 0);
+          FTeleportAngle := Dest.Angle;
           Particles.SpawnTeleport(FTeleportPos);
           Sounds.Play('sound/misc/tele1.wav');
           Trig.Cooldown := 1.0;

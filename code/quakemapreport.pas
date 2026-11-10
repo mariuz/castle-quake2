@@ -66,11 +66,11 @@ uses
 
 const
   { Spawned, used by targets, drawn or used as markers by the game code }
-  SupportedClasses: array[0..77] of String = (
+  SupportedClasses: array[0..79] of String = (
     { func_group: brushes the map compiler merged into the world }
     'func_group', 'worldspawn', 'info_player_start', 'info_player_deathmatch', 'info_player_coop',
     'info_player_intermission', 'info_null', 'info_notnull', 'misc_teleporter',
-    'misc_teleporter_dest', 'path_corner', 'point_combat', 'light',
+    'misc_teleporter_dest', 'trigger_teleport', 'info_teleport_destination', 'path_corner', 'point_combat', 'light',
     'target_changelevel', 'target_crosslevel_target', 'target_crosslevel_trigger',
     'target_earthquake', 'target_explosion', 'target_goal', 'target_help', 'target_laser',
     'target_lightramp', 'target_secret', 'target_speaker', 'target_splash',
