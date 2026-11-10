@@ -396,6 +396,12 @@ const
   SECRET_ALWAYS_SHOOT = 1;
   SECRET_1ST_LEFT     = 2;
   SECRET_1ST_DOWN     = 4;
+  { func_door_secret2 (the mission pack's, in the remaster) spawnflags }
+  SECRET2_OPEN_ONCE    = 1;
+  SECRET2_1ST_DOWN     = 4;  { first forward / back, then sideways }
+  SECRET2_YES_SHOOT    = 16;
+  SECRET2_MOVE_RIGHT   = 32; { sideways to the right of its angle }
+  SECRET2_MOVE_FORWARD = 64; { along its angle instead of back }
   TRAIN_BLOCK_STOPS = 4;
   DOOR_X_AXIS     = 64;
   DOOR_Y_AXIS     = 128;
@@ -889,7 +895,7 @@ var
   Lip, Dist, H: Single;
   SpawnFlags: Integer;
   SecretYaw, SecretWidth, SecretLength: Single;
-  SecretFwd, SecretRight, SecretSize, SecretP1: TVector3;
+  SecretFwd, SecretRight, SecretSize, SecretP1, SecretSide, SecretBack: TVector3;
 begin
   inherited Create(nil);
   { SP_target_character: blank until its target_string writes it }
@@ -966,6 +972,49 @@ begin
     SecretShootable := (TargetName = '') or ((SpawnFlags and SECRET_ALWAYS_SHOOT) <> 0);
     if SecretShootable then
       Health := 1; { any damage opens it (Quake 2: health 0 with takedamage) }
+    StartSound := 'sound/doors/dr1_strt.wav';
+    EndSound := 'sound/doors/dr1_end.wav';
+    MoveSound := 'sound/doors/dr1_mid.wav';
+  end else
+  if CName = 'func_door_secret2' then
+  begin
+    { SP_func_door_secret2: sideways by its width (left, or right with
+      MOVE_RIGHT), then back along its angle by its depth (forward with
+      MOVE_FORWARD), or those two the other way round with 1ST_DOWN; the
+      same pauses as func_door_secret (UpdateSecretDoor), speed 50, wait 5
+      (OPEN_ONCE: stays open), shootable without a targetname or with
+      YES_SHOOT }
+    Kind := mkSecretDoor;
+    SecretYaw := DegToRad(AEntity.Angle);
+    SecretFwd := Vector3(Cos(SecretYaw), Sin(SecretYaw), 0);
+    SecretRight := Vector3(Sin(SecretYaw), -Cos(SecretYaw), 0);
+    SecretSize := Mdl.Maxs - Mdl.Mins;
+    SecretWidth := Abs(TVector3.DotProduct(SecretRight, SecretSize));
+    SecretLength := Abs(TVector3.DotProduct(SecretFwd, SecretSize));
+    if (SpawnFlags and SECRET2_MOVE_RIGHT) <> 0 then
+      SecretSide := SecretRight * SecretWidth
+    else
+      SecretSide := SecretRight * -SecretWidth;
+    if (SpawnFlags and SECRET2_MOVE_FORWARD) <> 0 then
+      SecretBack := SecretFwd * SecretLength
+    else
+      SecretBack := SecretFwd * -SecretLength;
+    if (SpawnFlags and SECRET2_1ST_DOWN) <> 0 then
+      SecretP1 := SecretBack
+    else
+      SecretP1 := SecretSide;
+    Pos1 := QuakeToCge(SecretP1) - QuakeToCge(TVector3.Zero);
+    Pos2 := QuakeToCge(SecretSide + SecretBack) - QuakeToCge(TVector3.Zero);
+    Speed := 50;
+    WaitTime := AEntity.GetFloat('wait', 0);
+    if WaitTime = 0 then
+      WaitTime := 5;
+    if (SpawnFlags and SECRET2_OPEN_ONCE) <> 0 then
+      WaitTime := -1;
+    AutoOpen := False;
+    SecretShootable := (TargetName = '') or ((SpawnFlags and SECRET2_YES_SHOOT) <> 0);
+    if SecretShootable then
+      Health := 1;
     StartSound := 'sound/doors/dr1_strt.wav';
     EndSound := 'sound/doors/dr1_end.wav';
     MoveSound := 'sound/doors/dr1_mid.wav';

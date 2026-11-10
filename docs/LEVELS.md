@@ -76,7 +76,8 @@ A level's exit leads to the next random level (`rand<seed+1>`), which only this 
 
 Exported random levels have been checked in **Yamagi Quake II** with its software and OpenGL renderers:
 - they load, and every wall, floor, water surface and ladder is drawn;
-- `rand8`'s key hunt plays through: the red and blue key doors say "You need the Red Key" / "You need the Blue Key" until you carry the key, then open; the secret area counts; the exit restarts the map.
+- `rand8`'s key hunt plays through: the red and blue key doors say "You need the Red Key" / "You need the Blue Key" until you carry the key, then open; the secret area counts; the exit restarts the map;
+- `rand7`'s lift and switch work: the lift waits at the bottom and carries you up to the upper floor, and its switch opens the doors it is wired to (they block the way until it is pressed).
 
 Other engines have not been tried yet.
 

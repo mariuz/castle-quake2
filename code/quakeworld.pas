@@ -697,7 +697,7 @@ begin
 
   { Doors spawned from the console with mins / maxs (no *N model): a box
     mover, like the turrets below }
-  if ((CName = 'func_door') or (CName = 'func_door_secret')) and (Ent.Model = '') and
+  if ((CName = 'func_door') or (CName = 'func_door_secret') or (CName = 'func_door_secret2')) and (Ent.Model = '') and
      Ent.HasField('mins') and Ent.HasField('maxs') and (FGeometry <> nil) then
   begin
     FGeometry.AddBoxMover(Ent, Ent.GetVector('mins', TVector3.Zero),

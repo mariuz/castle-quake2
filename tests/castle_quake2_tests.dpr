@@ -620,6 +620,7 @@ begin
   Check(ClassSupport('func_conveyor', NoteText) = csSupported, 'func_conveyor moves the player by its contents');
   Check(ClassSupport('misc_viper', NoteText) = csSupported, 'misc_viper flies its path');
   Check(ClassSupport('trigger_elevator', NoteText) = csSupported, 'trigger_elevator sends its train to the pathtarget of its user');
+  Check(ClassSupport('func_door_secret2', NoteText) = csSupported, 'func_door_secret2 (mission pack / remaster) is a secret door');
   Check(ClassSupport('dynamic_light', NoteText) = csSupported, 'the remaster''s dynamic_light is a run-time light');
   Check(ClassSupport('target_poi', NoteText) = csPartial, 'target_poi: no compass');
   Check(ClassSupport('info_landmark', NoteText) = csPartial, 'info_landmark: no offset kept across maps');
