@@ -19,7 +19,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 | Level flow | Units, cross-level triggers, help computer, intermission, savegames | All of these (JSON savegames, including projectiles in flight and pending delayed events) | — |
 | Audio | 3D sounds, entity channels, merged loop sounds, CD music | Quake 2 attenuation (incl. `ATTN_STATIC`), `CHAN_*` channels, point sounds that outlive entities, loop mixer (one voice per sound, PVS-checked, `SOUND_LOOPATTENUATE`), 32 sources, OGG tracks, named sounds editable in the editor | Stereo panning curve (OpenAL's, not Quake 2's), `s_volume` style master limiter. |
 | Input / options | Key bindings, mouse sensitivity, joystick, skill | Options menu (sensitivity, invert, FOV, volumes), key rebinding, skill selection, saved in `UserConfig`, gamepad (sticks, triggers, menus), touch controls (stick, drag look, buttons, tap menus) | Gamepad button rebinding; gamepad and touch not yet tried on real hardware. |
-| Multiplayer | Deathmatch / coop over UDP | Single player only | Out of scope for now (see below). |
+| Multiplayer | Deathmatch / coop over UDP | Single player only | Planned in steps: see *Networking and bots* below. |
 | Tooling | Console, `+map`, demos | Console, autotest scripts (keys, gamepad, touch), `record` to turn play into a script, screenshot comparison in CI, 371 unit checks, map compatibility report, CGE editor components and designs, F8 inspector, Windows / Linux / Android / WebAssembly builds | Editor property editors. |
 | Level making | qbsp / qrad / qvis on brush maps from an editor | Random levels and an in-game grid editor (doors, key doors, lifts, ladders, ramps, diagonal walls, windows, switches, water, slime, lava, teleporters, sky, hills, themes, entities), compiled at runtime into IBSP v38 maps (BSP, brushes, lightmaps, grid PVS / PHS); `.bsp` export; levels in the CGE editor | Free-form brushes (any angle); height-aware vis. |
 
@@ -46,7 +46,50 @@ Phases 1–6 are done as far as the demo data and a headless machine allow; Phas
 5. **Call of the Void** (Quake II Remastered mod, `-game q1q2`): the loader is done (mod folders, `rerelease/` layout, loose files, `.pkz`, PNG / TGA textures, QBSP maps; the mod's monsters spawn with a generic AI from `GenericMonsterFacts`). Done with the mod's files: the map report (all its maps load) and attack / move tables for the Quake 1 monsters (`QuakeQ1Monsters`, facts from id's Quake re-release QuakeC; variants with Quake 1's frame counts). Teleporters (`trigger_teleport` / `info_teleport_destination`) done. Next: the zombies' getting up and the spawn's explosion, the hybrids (`shamjorg`, `chtjor`, `ironvore`, `rotflyer` ...) and Chthon, items and weapons (its keys are done: the Quake 1 keys and runes and the remaster's six new keys), `func_plat2` and the remaster's other new classes (`func_door_secret2` is done).
 6. **Exported levels in more engines**: they load, render and play through in Yamagi Quake II (key doors, secrets, lifts, switches, the exit); try the remaster, vkQuake2 and q2pro (not reachable from the cloud container used so far).
 
-Out of scope for now: multiplayer (deathmatch / coop), which needs a client-server split of `TQuakeWorld` and networking.
+Multiplayer (deathmatch / coop) needs a client-server split of `TQuakeWorld` and networking: see section E below for a path in steps, starting with bots and two instances on one web page.
+
+## Proposed: performance, graphics, code, web and networking
+
+Suggestions from a review of the code and the web build (November 2026). Each one says how it would be checked, since CI only has Mesa's software renderer and FPS numbers there only compare runs with each other.
+
+### A. Performance (measure first)
+1. **A benchmark that CI keeps**: `--benchmark <map>` plays a fixed demo script and logs frame-time percentiles (median, 95th, 99th), draw calls, visible shapes and the time spent in game logic, traces, particles and model animation. CI stores the numbers as an artifact, so a change that doubles the frame time shows up even on Mesa. Everything below is measured with it.
+2. **Model animation on the GPU**: `TQuakeMd2Instance.Update` blends two frames on the CPU and calls `SetPoint` every frame for every monster, item and the view weapon (a new vertex buffer upload each time). Instead, upload all frames once and blend the current two in a vertex shader (frame indices and lerp as uniforms). Check: same screenshots (within ~1), benchmark on demo1's busy rooms.
+3. **A fixed game tick**: run the simulation at a fixed rate (Quake 2's server runs at 10 Hz and interpolates; 40 Hz would keep today's feel) and interpolate transforms for drawing. Monster sight checks, `CullEntities`, light re-sampling and trigger checks then run per tick instead of per frame, results stop depending on the frame rate, and A.1's numbers become comparable. It is also the base of networking (E.1). Check: the existing autotests (their timings are in seconds already), recordings replaying within 8 units.
+4. **Fewer draw calls for the world**: today each 1024-unit region gets a shape per texture, plus a shape per mover and per model. Try a texture array (or atlas) per region so a region is one or two shapes, and compare `RegionSize` 512 / 1024 / 2048 with A.1 (culling against draw calls).
+5. **Cheaper traces**: cache line-of-sight results between monsters and the player per tick, and give `WorldTrace` a broad phase over entity boxes (a uniform grid) instead of testing every monster, corpse and barrel.
+6. **Particles**: `RebuildBatch` rebuilds the whole particle mesh every frame. Billboard in a vertex shader from a fixed buffer of quads instead (only positions, sizes and colours change).
+
+### B. Graphics
+1. **Quality settings** (*Options → Video*): render scale (draw at 50–100 % and upscale, the biggest win on phones and in the browser), texture filtering (Quake 2's nearest-pixel look, or linear with mipmaps and anisotropy), dynamic light count (now 4 nearest per surface), particle density, brightness / gamma.
+2. **More dynamic lights**, and lit models: monsters and the gun now take a single `SampleLight` colour; give them the nearest dynamic lights too (muzzle flashes, rockets passing, `dynamic_light`).
+3. **The remaster's fog**: worldspawn `fog_*` keys and `trigger_fog` mapped to CGE's `TFogNode` (its maps use them; the original game has none).
+4. **Water and sky**: refraction-like warp of what is seen through water (the underwater warp is done), and the remaster's sky keys.
+5. **Check exported levels' lighting**: in Yamagi the key door alcoves look much darker than the rooms; the compiler's lights are per room, so give doorways and corridors a light of their own.
+
+### C. Code simplification
+1. **Split `QuakeWorld`** (4,900 lines, the biggest unit): weapons and projectiles, items and pickups, targets and triggers, movers' game rules, save / load and monster glue into their own units, `TQuakeWorld` keeping the frame loop and the lists.
+2. **One class table**: `SpawnEntity` and `UseEntity` pick behaviour with long chains of `if CName = '...'` (about 60 in `QuakeWorld`), and the map report keeps a separate hand-written `SupportedClasses` list that can drift. A registry (classname → spawn / use / touch handlers, like Quake 2's `spawns[]`) would serve all three, and the report would list exactly what is registered.
+3. **Explicit entity state**: `FCounters` now holds trigger counts, used `trigger_key`s and `dynamic_light` on / off. Give such entities a small state record, saved by its own code, and save movers, monsters and props through their own `SaveState` / `LoadState` instead of one big function.
+4. **Structured test logs**: the `V` action writes free text that CI greps with brittle patterns. Add a JSON-lines state dump (`VJ`) and check it with `jq` in CI.
+5. **Fixes noticed while doing that**: box movers spawned from the console can't be shot (`MoverTraceAt` skips model 0), so shootable doors can only be tested on compiled maps; the GitHub Pages deploy sometimes times out (retry it once in `web.yml`); an autotest sometimes doesn't exit after `Sound backend closed` (v0.26.0's CI waited 10 minutes for the `inspect` script, which had finished): find what blocks at shutdown, and make `Q` end the process after a short grace time.
+
+### D. Web (wasm) performance and configuration
+1. **Smaller download**: the browser build ships the whole 50 MB demo PAK before the first frame. Load the PAK in the background behind a progress bar, start on the menu, or ship a trimmed PAK per map (only the files demo1 uses first, the rest on demand), and keep it in the browser's cache (IndexedDB / Cache API) so the second visit starts at once. Check: time to first frame in a Playwright run (Chromium is in the cloud container), and download size in CI.
+2. **Settings from the address**: `?map=demo2&skill=2&touch=1&scale=0.75&fps=1` (and the console's `+set`), so a link opens a map with the right options and tests can use the same page.
+3. **Browser-friendly defaults**: cap the drawing resolution on high-DPI phones (`devicePixelRatio` 3 means 9× the pixels), pause when the tab is hidden, and pick a lower render scale (B.1) when the first seconds run slow.
+4. **Check the build regularly**: a Playwright job in CI that loads the page, waits for the first frame, runs a short demo script through the address (D.2), and fails on `GLSL: Fragment shader not compiled` or a wasm exception in the console. The web build is the one players reach first and is not tested today.
+5. **Compiler settings**: try FPC's `-O3` / `-CfWASM` options for wasm32 and compare the benchmark (A.1) in the browser.
+
+### E. Networking and bots (two instances on the same page first)
+Multiplayer was out of scope because `TQuakeWorld` is one object for one player. This is a path in small steps; each one is useful and tested on its own:
+1. **Client / server split in one process** (needs A.3): the server owns the simulation and sends snapshots of what players can see (Quake 2's `entity_state_t`: origin, angles, model, frame, skin, effects, sound) each tick; the client draws them, predicts its own player with the same pmove, and sends its inputs (`usercmd`: angles, move, buttons). Single player uses a loopback channel and plays as today. Check: every autotest and recording still passes over loopback.
+2. **More than one player**: players as a list (stats, inventory, position, view) instead of `FStats` / `FPlayerPos`; deathmatch rules (`info_player_deathmatch` spawns, item respawn, frags, `dmflags`).
+3. **Bots**: a `TQuakeBot` that drives a player's `usercmd` with the monster AI's pieces (sight, `PlayerTrail`, item goals, aiming with reaction time and spread). Bots make deathmatch testable without people, on the desktop too.
+4. **Two instances on one page**: a test page (`pages/duel.html`) with two game canvases (two iframes, each its own wasm instance); one hosts, the other joins through `BroadcastChannel` / `postMessage` (no network, no server). Each runs a bot. Check: a Playwright run for 60 s, reading both consoles: both see the other player, frags happen, snapshot rate and prediction errors stay in range.
+5. **Real connections**: the same messages over WebRTC data channels between browsers (needs a small signalling server or a copy-paste offer for the host) and UDP between desktop builds; later a dedicated server. Check: two desktop processes with bots under xvfb in CI.
+
+Order of value for effort: A.1, D.4, B.1 (render scale), D.1, A.2, C.2, then A.3 → E.1 → E.3 → E.4.
 
 ## Earlier suggestions (history, most done)
 
