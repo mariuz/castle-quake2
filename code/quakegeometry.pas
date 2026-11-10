@@ -168,6 +168,9 @@ type
     TrainCorner: TQuakeEntity;
     TrainFrom, TrainTo: TVector3;
     TrainRunning: Boolean;
+    { Stopped at a path_corner with wait -1 (Quake 2 train_wait without
+      TRAIN_TOGGLE): only TrainResume (trigger_elevator) moves it on }
+    TrainWaiting: Boolean;
     { Time of the last Blocked call (damage once a frame of 0.1 s) }
     BlockedTime: Single;
     { A button that has been pressed (cycles its textures from then on) }
@@ -195,6 +198,8 @@ type
     { Activate (open door, raise plat, press button, toggle rotating/train).
       Returns True if something started moving. }
     function Use: Boolean;
+    { Quake 2 train_resume: move from here to Corner, then on along its path }
+    procedure TrainResume(const Corner: TQuakeEntity);
     { For plats: player stepped on it. }
     procedure PlayerOnTop;
     { Something (the player) is in the way and can't be pushed: returns the
@@ -251,7 +256,7 @@ type
   TQuakeAnimTexList = specialize TObjectList<TQuakeAnimTex>;
 
   { Event to fire entity targets (implemented by the world simulation). }
-  TQuakeFireTargetsEvent = procedure(const ATarget: String) of object;
+  TQuakeFireTargetsEvent = procedure(const ATarget: String; const Source: TQuakeEntity) of object;
 
   { World geometry builder and manager }
   TQuakeGeometry = class
@@ -339,7 +344,7 @@ type
     function DynamicFaceCount: Integer;
 
     { Fire OnFireTargets (used by movers) }
-    procedure FireTargets(const ATarget: String);
+    procedure FireTargets(const ATarget: String; const Source: TQuakeEntity = nil);
 
     { Find mover by model string like "*1" }
     function FindMoverByModel(const AModel: String): TQuakeMover;
@@ -399,6 +404,7 @@ const
   ROTATING_X_AXIS   = 4;
   ROTATING_Y_AXIS   = 8;
   TRAIN_START_ON  = 1;
+  TRAIN_TOGGLE    = 2;
 
 function IsVisibleBrushClass(const CName: String): Boolean;
 begin
@@ -1196,7 +1202,7 @@ begin
           PlayMoverSound(StartSound);
         { Buttons fire their targets when pressed }
         if Result and (Kind = mkButton) and (State = msToEnd) then
-          Geometry.FireTargets(Target);
+          Geometry.FireTargets(Target, Entity);
       end;
     mkRotating:
       begin
@@ -1204,11 +1210,33 @@ begin
         Result := True;
       end;
     mkTrain:
+      { Quake 2 train_use: a running train only stops with TRAIN_TOGGLE }
+      if not TrainRunning then
       begin
-        TrainRunning := not TrainRunning;
+        TrainRunning := True;
+        Result := True;
+      end else
+      if (Entity.SpawnFlags and TRAIN_TOGGLE) <> 0 then
+      begin
+        TrainRunning := False;
+        TrainWaiting := False;
         Result := True;
       end;
   end;
+end;
+
+procedure TQuakeMover.TrainResume(const Corner: TQuakeEntity);
+begin
+  if (Kind <> mkTrain) or (Corner = nil) then
+    Exit;
+  TrainCorner := Corner;
+  TrainFrom := Transform.Translation;
+  TrainTo := QuakeToCge(Corner.Origin - Geometry.Bsp.Models[ModelIndex].Mins);
+  Progress := 0;
+  MoveLength := PointsDistance(TrainFrom, TrainTo);
+  StateTimer := 0;
+  TrainWaiting := False;
+  TrainRunning := True;
 end;
 
 function TQuakeMover.Blocked: Integer;
@@ -1408,7 +1436,7 @@ begin
       end;
     mkTrain:
       begin
-        if not TrainRunning then
+        if (not TrainRunning) or TrainWaiting then
           Exit;
         if StateTimer > 0 then
         begin
@@ -1428,7 +1456,20 @@ begin
           begin
             StateTimer := TrainCorner.GetFloat('wait', 0);
             { path_corner can fire targets via "pathtarget" }
-            Geometry.FireTargets(TrainCorner.GetField('pathtarget'));
+            Geometry.FireTargets(TrainCorner.GetField('pathtarget'), TrainCorner);
+            { wait -1 (train_wait): stop here; with TRAIN_TOGGLE the next
+              leg is set up and a use starts it }
+            if StateTimer < 0 then
+            begin
+              StateTimer := 0;
+              if (Entity.SpawnFlags and TRAIN_TOGGLE) <> 0 then
+              begin
+                TrainNextCorner;
+                TrainRunning := False;
+              end else
+                TrainWaiting := True;
+              Exit;
+            end;
           end;
           TrainNextCorner;
         end;
@@ -2252,10 +2293,10 @@ begin
   end;
 end;
 
-procedure TQuakeGeometry.FireTargets(const ATarget: String);
+procedure TQuakeGeometry.FireTargets(const ATarget: String; const Source: TQuakeEntity);
 begin
   if (ATarget <> '') and Assigned(FOnFireTargets) then
-    FOnFireTargets(ATarget);
+    FOnFireTargets(ATarget, Source);
 end;
 
 procedure TQuakeGeometry.Update(const SecondsPassed: Single);

@@ -753,7 +753,7 @@ var
   Cmd, Action, Param: String;
   P, J: Integer;
   Val: Single;
-  Dir, Target: TVector3;
+  Dir, Target, TrainAt: TVector3;
   Ignore: TCastleTransform;
   Key, K: TKey;
   SolidCount: Integer;
@@ -1072,6 +1072,17 @@ begin
         FWorld.Geometry.Movers[J].Entity.ClassName, FWorld.Geometry.Movers[J].Entity.Model,
         FWorld.Geometry.ModelTexFrame(FWorld.Geometry.Movers[J].ModelIndex), Ord(FWorld.Geometry.Movers[J].State),
         FWorld.Geometry.Movers[J].Progress, BoolToStr(FWorld.Geometry.Movers[J].Transform.Exists, True)]);
+    { Trains: where their mins corner is (on a path_corner when there) }
+    for J := 0 to FWorld.Geometry.Movers.Count - 1 do
+      if FWorld.Geometry.Movers[J].Kind = mkTrain then
+      begin
+        TrainAt := CgeToQuake(FWorld.Geometry.Movers[J].Transform.Translation) +
+          FWorld.Geometry.Bsp.Models[FWorld.Geometry.Movers[J].ModelIndex].Mins;
+        WritelnLog('Demo', 'Train %d %s at %.0f %.0f %.0f running %s waiting %s', [J,
+          FWorld.Geometry.Movers[J].Entity.Model, TrainAt.X, TrainAt.Y, TrainAt.Z,
+          BoolToStr(FWorld.Geometry.Movers[J].TrainRunning, True),
+          BoolToStr(FWorld.Geometry.Movers[J].TrainWaiting, True)]);
+      end;
     WritelnLog('Demo', 'Sound mixer: %d playing, load %.2f, limiter %.2f', [Sounds.ActiveSoundCount,
       Sounds.MixLoad, Sounds.LimiterGain]);
     for J := 0 to FWorld.Turrets.Count - 1 do

@@ -619,6 +619,10 @@ begin
   Check(ClassSupport('func_object', NoteText) = csPartial, 'unknown func_ brushes are drawn (partial)');
   Check(ClassSupport('func_conveyor', NoteText) = csSupported, 'func_conveyor moves the player by its contents');
   Check(ClassSupport('misc_viper', NoteText) = csSupported, 'misc_viper flies its path');
+  Check(ClassSupport('trigger_elevator', NoteText) = csSupported, 'trigger_elevator sends its train to the pathtarget of its user');
+  Check(ClassSupport('dynamic_light', NoteText) = csSupported, 'the remaster''s dynamic_light is a run-time light');
+  Check(ClassSupport('target_poi', NoteText) = csPartial, 'target_poi: no compass');
+  Check(ClassSupport('info_landmark', NoteText) = csPartial, 'info_landmark: no offset kept across maps');
   Check(ClassSupport('turret_breach', NoteText) = csSupported, 'turret_breach turns and fires');
   Check(ClassSupport('turret_driver', NoteText) = csSupported, 'turret_driver aims its breach');
   Check(ClassSupport('misc_actor', NoteText) = csUnsupported, 'misc_actor is unsupported');

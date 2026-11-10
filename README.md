@@ -20,7 +20,7 @@ What it offers instead:
 - **Play anywhere from one codebase**: in the browser, on Android (touch controls, gamepads), on Windows and Linux.
 - **Mods**: Quake 2 mods and Quake II Remastered data load over the base game (`-game`). Call of the Void, the Quake 1 / 2 crossover, is in progress.
 - **A readable Quake 2 to learn from.** Object Pascal on a general-purpose game engine, with [documentation](docs/ARCHITECTURE.md) that maps each Quake 2 system to the engine parts it uses. Quake 2 maps open in the Castle Game Engine's visual editor.
-- **Tested by machine**: about 370 unit checks and dozens of scripted play sessions run on every change, with screenshot comparisons.
+- **Tested by machine**: about 400 unit checks and dozens of scripted play sessions run on every change, with screenshot comparisons.
 
 What it doesn't do (yet): multiplayer, the full retail game checked from start to finish, and measured performance on real graphics cards. The [roadmap](docs/ROADMAP.md) has the details.
 

@@ -68,6 +68,9 @@ type
     FTimers: specialize TDictionary<TQuakeEntity, Single>; { func_timer -> next fire time (<0: off) }
     FDelayed: specialize TList<TDelayedTarget>;
     FCounters: specialize TDictionary<TQuakeEntity, Integer>;
+    { Quake II Remastered dynamic_light entities (not owned; on / off in
+      FCounters: 1 / 0) }
+    FDynamicLights: TQuakeEntityList;
     FStats: TQuakePlayerStats;
     FHud: TQuakeHud;
     FPlayerPos: TVector3;
@@ -112,6 +115,9 @@ type
     FHurtTimer: Single;
     FKeyIcons: TStringList;
     FUseDepth: Integer;
+    { The entity whose targets are being used (Quake 2's "other" in use
+      functions: trigger_elevator reads its pathtarget); nil if unknown }
+    FUseSource: TQuakeEntity;
     FHelpPrimary, FHelpSecondary: String;
     FPlayer: TQuakePlayerMovement;
     { Quake 2 game.serverflags: cross-level trigger bits, kept across maps of a unit }
@@ -279,7 +285,9 @@ type
     function LoadMap(const AMapName: String): Boolean;
 
     { Fire all entities with the given targetname (Quake 2 G_UseTargets) }
-    procedure UseTargets(const ATarget: String);
+    procedure UseTargets(const ATarget: String; const Source: TQuakeEntity = nil);
+    procedure ElevatorUse(const Ent, Source: TQuakeEntity);
+    procedure UpdateDynamicLights;
 
     { Advance world simulation. PlayerPos is the camera (eye) position. }
     procedure Update(const SecondsPassed: Single; const PlayerPos, PlayerDir: TVector3);
@@ -488,6 +496,7 @@ begin
   FTimers := specialize TDictionary<TQuakeEntity, Single>.Create;
   FDelayed := specialize TList<TDelayedTarget>.Create;
   FCounters := specialize TDictionary<TQuakeEntity, Integer>.Create;
+  FDynamicLights := TQuakeEntityList.Create(False);
   FKeyIcons := TStringList.Create;
   FLevelStates := TJSONObject.Create;
   FWeaponTransform := TCastleTransform.Create(nil);
@@ -522,6 +531,7 @@ begin
   FTimers.Free;
   FDelayed.Free;
   FCounters.Free;
+  FDynamicLights.Free;
   FKeyIcons.Free;
   FLevelStates.Free;
   inherited Destroy;
@@ -560,6 +570,7 @@ begin
   FTimers.Clear;
   FDelayed.Clear;
   FCounters.Clear;
+  FDynamicLights.Clear;
   Particles.Clear;
   { Map data is owned by the TQuakeMap component }
   FGeometry := nil;
@@ -789,6 +800,19 @@ begin
   if CName = 'target_speaker' then
   begin
     FSpeakers.Add(TQuakeSpeaker.CreateSpeaker(FMap, Ent));
+    Exit;
+  end;
+
+  { Quake II Remastered: a light drawn at run time (a "shadow light"), not
+    in the lightmaps; only with a radius. START_OFF = 1 }
+  if CName = 'dynamic_light' then
+  begin
+    if Ent.GetFloat('shadowlightradius', 0) > 0 then
+    begin
+      FDynamicLights.Add(Ent);
+      if not FCounters.ContainsKey(Ent) then
+        FCounters.AddOrSetValue(Ent, Ord((Ent.SpawnFlags and 1) = 0));
+    end;
     Exit;
   end;
 
@@ -1198,7 +1222,7 @@ begin
       if FHud <> nil then
         FHud.ShowPickup(P.Def^.Icon, P.Def^.Name);
       { Picked items can fire targets too }
-      UseTargets(P.Entity.Target);
+      UseTargets(P.Entity.Target, P.Entity);
     end;
   end;
 end;
@@ -1215,7 +1239,7 @@ begin
     D.Entity := nil;
     FDelayed.Add(D);
   end else
-    UseTargets(Ent.Target);
+    UseTargets(Ent.Target, Ent);
 end;
 
 procedure TQuakeWorld.UseEntity(const Ent: TQuakeEntity);
@@ -1265,7 +1289,7 @@ begin
       FStats.Keys := FStats.Keys and not Cardinal(ItemDef^.Amount);
     FCounters.AddOrSetValue(Ent, -1);
     WritelnLog('QuakeWorld', 'trigger_key "%s" unlocks "%s"', [Ent.TargetName, Ent.Target]);
-    UseTargets(Ent.Target);
+    UseTargets(Ent.Target, Ent);
     Exit;
   end;
 
@@ -1283,7 +1307,7 @@ begin
     end;
     if ((Ent.SpawnFlags and 1) = 0) and (FHud <> nil) then
       FHud.ShowMessage('Sequence completed!');
-    UseTargets(Ent.Target);
+    UseTargets(Ent.Target, Ent);
     Exit;
   end;
 
@@ -1460,6 +1484,21 @@ begin
     KillBox(Box3D(QuakeToCge(NewEnt.Origin) - Vector3(16, 24, 16), QuakeToCge(NewEnt.Origin) + Vector3(16, 32, 16)));
     WritelnLog('QuakeWorld', 'target_spawner made a %s', [Ent.Target]);
   end else
+  if CName = 'trigger_elevator' then
+    ElevatorUse(Ent, FUseSource)
+  else
+  if CName = 'dynamic_light' then
+  begin
+    { dynamic_light_use: on / off }
+    if FCounters.TryGetValue(Ent, Count) then
+    begin
+      FCounters[Ent] := 1 - Count;
+      if Count = 0 then
+        WritelnLog('QuakeWorld', 'dynamic_light "%s" on', [Ent.TargetName])
+      else
+        WritelnLog('QuakeWorld', 'dynamic_light "%s" off', [Ent.TargetName]);
+    end;
+  end else
   if CName = 'trigger_relay' then
     UseTargetsOf(Ent)
   else
@@ -1519,7 +1558,7 @@ begin
       D.Entity := nil;
       FDelayed.Add(D);
     end else
-      UseTargets(Ent.Target);
+      UseTargets(Ent.Target, Ent);
   end;
 end;
 
@@ -1550,14 +1589,14 @@ begin
   if Mover.Entity.ClassName = 'func_explosive' then
   begin
     BreakExplosive(Mover);
-    UseTargets(Mover.Target);
+    UseTargets(Mover.Target, Mover.Entity);
   end else
   begin
     { Shot-activated doors and buttons reset their health, like Quake 2 }
     Mover.Health := Mover.Entity.GetInt('health', 0);
     Mover.Use;
     if Mover.Kind <> mkButton then
-      UseTargets(Mover.Target);
+      UseTargets(Mover.Target, Mover.Entity);
   end;
 end;
 
@@ -1867,7 +1906,7 @@ begin
         Prop.Transform.Exists := False;
         Dmg := Prop.Entity.GetInt('dmg', 1000);
         Explode(QuakeToCge(T.EndPos), Dmg, Dmg + 40, False);
-        UseTargets(Prop.Entity.Target);
+        UseTargets(Prop.Entity.Target, Prop.Entity);
       end else
         Prop.Transform.Translation := NewPos;
     end;
@@ -1939,7 +1978,7 @@ begin
   Particles.SpawnDebris(Prop.Transform.Translation + Vector3(0, 16, 0));
   Dmg := Prop.Entity.GetInt('dmg', 150);
   Explode(Prop.Transform.Translation + Vector3(0, 16, 0), Dmg, Dmg + 40, False);
-  UseTargets(Prop.Entity.Target);
+  UseTargets(Prop.Entity.Target, Prop.Entity);
 end;
 
 procedure TQuakeWorld.UpdateTimersAndLasers(const SecondsPassed: Single);
@@ -1962,7 +2001,7 @@ begin
     for Ent in Fire do
     begin
       FTimers[Ent] := FTime + TimerInterval(Ent);
-      UseTargets(Ent.Target);
+      UseTargets(Ent.Target, Ent);
     end;
   finally
     Fire.Free;
@@ -2032,22 +2071,145 @@ begin
   end;
 end;
 
-procedure TQuakeWorld.UseTargets(const ATarget: String);
+procedure TQuakeWorld.UseTargets(const ATarget: String; const Source: TQuakeEntity);
 var
   List: TQuakeEntityList;
-  Ent: TQuakeEntity;
+  Ent, OldSource: TQuakeEntity;
 begin
   if (ATarget = '') or (FBsp = nil) or (FUseDepth > 16) then
     Exit;
   Inc(FUseDepth);
+  OldSource := FUseSource;
   List := FBsp.FindByTargetName(ATarget);
   try
     for Ent in List do
+    begin
+      FUseSource := Source;
       UseEntity(Ent);
+    end;
   finally
     List.Free;
+    FUseSource := OldSource;
     Dec(FUseDepth);
   end;
+end;
+
+{ The colour of a remaster light: "_color" / "rgba" as "r g b [a]" (0..1,
+  or 0..255 when a value is above 1) or a packed $RRGGBBAA integer
+  (ED_LoadColor); white when missing }
+function RemasterLightColor(const Ent: TQuakeEntity): TVector3;
+var
+  S: String;
+  Parts: TStringArray;
+  V: array[0..2] of Single;
+  I, PackedRgba: Integer;
+  Bytes: Boolean;
+begin
+  Result := Vector3(1, 1, 1);
+  S := Trim(Ent.GetField('rgba', Ent.GetField('_color')));
+  if S = '' then
+    Exit;
+  if Pos(' ', S) > 0 then
+  begin
+    Parts := S.Split([' '], TStringSplitOptions.ExcludeEmpty);
+    Bytes := False;
+    for I := 0 to 2 do
+    begin
+      V[I] := 0;
+      if I < Length(Parts) then
+        V[I] := StrToFloatDef(Parts[I], 0, DefaultFormatSettings);
+      if V[I] > 1 then
+        Bytes := True;
+    end;
+    if Bytes then
+      for I := 0 to 2 do
+        V[I] := V[I] / 255;
+    Result := Vector3(V[0], V[1], V[2]);
+  end else
+  if TryStrToInt(S, PackedRgba) and (PackedRgba <> 0) then
+    Result := Vector3((PackedRgba shr 24) and $FF, (PackedRgba shr 16) and $FF, (PackedRgba shr 8) and $FF) / 255;
+end;
+
+{ dynamic_light: a light each frame while on, at its "shadowlightradius",
+  coloured, times "shadowlightintensity" and its light style
+  ("shadowlightstyle", or the style of the "shadowlightstyletarget" light) }
+procedure TQuakeWorld.UpdateDynamicLights;
+var
+  Ent, StyleEnt: TQuakeEntity;
+  OnOff, Style: Integer;
+  Brightness: Single;
+  List: TQuakeEntityList;
+begin
+  for Ent in FDynamicLights do
+  begin
+    if (not FCounters.TryGetValue(Ent, OnOff)) or (OnOff = 0) then
+      Continue;
+    Style := Ent.GetInt('shadowlightstyle', -1);
+    if Ent.GetField('shadowlightstyletarget') <> '' then
+    begin
+      List := FBsp.FindByTargetName(Ent.GetField('shadowlightstyletarget'));
+      try
+        if List.Count > 0 then
+        begin
+          StyleEnt := List[0];
+          Style := StyleEnt.GetInt('style', Style);
+        end;
+      finally
+        List.Free;
+      end;
+    end;
+    Brightness := Ent.GetFloat('shadowlightintensity', 1);
+    if Style >= 0 then
+      Brightness := Brightness * Lighting.StyleValue(Style);
+    if Brightness <= 0 then
+      Continue;
+    Lighting.AddLight(QuakeToCge(Ent.Origin), Ent.GetFloat('shadowlightradius', 0),
+      RemasterLightColor(Ent) * Brightness);
+  end;
+end;
+
+{ Quake 2 trigger_elevator_use: sends its func_train to a path_corner named
+  by the pathtarget of whatever used it (a button for each floor), unless
+  the train is moving }
+procedure TQuakeWorld.ElevatorUse(const Ent, Source: TQuakeEntity);
+var
+  Mover, Train: TQuakeMover;
+  Corners: TQuakeEntityList;
+  Corner: TQuakeEntity;
+begin
+  Train := nil;
+  for Mover in FGeometry.Movers do
+    if (Mover.Kind = mkTrain) and (Mover.TargetName <> '') and (Mover.TargetName = Ent.Target) then
+    begin
+      Train := Mover;
+      Break;
+    end;
+  if Train = nil then
+  begin
+    WritelnLog('QuakeWorld', 'trigger_elevator "%s": target "%s" is not a func_train', [Ent.TargetName, Ent.Target]);
+    Exit;
+  end;
+  if Train.TrainRunning and not Train.TrainWaiting then
+    Exit;
+  if (Source = nil) or (Source.GetField('pathtarget') = '') then
+  begin
+    WritelnLog('QuakeWorld', 'trigger_elevator "%s" used with no pathtarget', [Ent.TargetName]);
+    Exit;
+  end;
+  Corners := FBsp.FindByTargetName(Source.GetField('pathtarget'));
+  try
+    if Corners.Count = 0 then
+    begin
+      WritelnLog('QuakeWorld', 'trigger_elevator "%s": bad pathtarget "%s"', [Ent.TargetName, Source.GetField('pathtarget')]);
+      Exit;
+    end;
+    { G_PickTarget: one of them at random }
+    Corner := Corners[Random(Corners.Count)];
+  finally
+    Corners.Free;
+  end;
+  Train.TrainResume(Corner);
+  WritelnLog('QuakeWorld', 'trigger_elevator "%s" sends %s to "%s"', [Ent.TargetName, Train.Entity.Model, Corner.TargetName]);
 end;
 
 procedure TQuakeWorld.CheckTriggers(const SecondsPassed: Single);
@@ -2118,7 +2280,7 @@ begin
         D.Entity := nil;
         FDelayed.Add(D);
       end else
-        UseTargets(Trig.Entity.Target);
+        UseTargets(Trig.Entity.Target, Trig.Entity);
       if CName = 'trigger_once' then
         Trig.Enabled := False
       else
@@ -3378,6 +3540,7 @@ begin
   FPainSoundTimer := FPainSoundTimer - SecondsPassed;
   { Projectile lights of the previous frame }
   Lighting.EndFrame;
+  UpdateDynamicLights;
 
   if FDead then
   begin
@@ -3699,6 +3862,7 @@ begin
     O.Add('turretPitch', FGeometry.Movers[I].TurretPitch);
     O.Add('turretYaw', FGeometry.Movers[I].TurretYaw);
     O.Add('trainRunning', FGeometry.Movers[I].TrainRunning);
+    O.Add('trainWaiting', FGeometry.Movers[I].TrainWaiting);
     O.Add('pos', VecToJson(FGeometry.Movers[I].Transform.Translation));
     O.Add('trainFrom', VecToJson(FGeometry.Movers[I].TrainFrom));
     O.Add('trainTo', VecToJson(FGeometry.Movers[I].TrainTo));
@@ -3899,6 +4063,7 @@ begin
       Mover.TurretPitch := O.Get('turretPitch', Mover.TurretPitch);
       Mover.TurretYaw := O.Get('turretYaw', Mover.TurretYaw);
       Mover.TrainRunning := O.Get('trainRunning', Mover.TrainRunning);
+      Mover.TrainWaiting := O.Get('trainWaiting', False);
       Mover.MoveLength := O.Get('moveLength', Mover.MoveLength);
       Mover.TrainFrom := JsonToVec(O.Find('trainFrom'));
       Mover.TrainTo := JsonToVec(O.Find('trainTo'));

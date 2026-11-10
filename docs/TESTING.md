@@ -4,7 +4,7 @@ The port is checked by machine on every push: unit tests, scripted play sessions
 
 ## Unit tests
 
-`tests/` is a separate console project (it uses the game's units from `../code/`). It runs about 370 checks against the bundled demo PAK. They cover:
+`tests/` is a separate console project (it uses the game's units from `../code/`). It runs about 400 checks against the bundled demo PAK. They cover:
 - the file formats: PAK, PCX, WAL, BSP and QBSP, MD2, SP2;
 - the map queries: contents, PVS, PHS, areas, light, traces;
 - the game tables: monster attacks and moves, gun timing, gibs, settings, gamepad mapping;
@@ -35,7 +35,7 @@ On Linux without a display, run under `xvfb-run -a -s "-screen 0 1600x900x24"`, 
 | --- | --- |
 | `W:sec` | Wait |
 | `S` | Screenshot (logs the FPS and the camera too) |
-| `V` | Log the state: movers, props, lasers, monsters, the gun, the player (health, position, `player stuck`) |
+| `V` | Log the state: movers (trains: position, running / waiting), props, lasers, monsters, the gun, the player (health, position, `player stuck`) |
 | `Q` | Quit |
 | `X`, `H` | Fire once; toggle holding fire |
 | `U`, `F`, `J` | Use; toggle the help computer; jump |

@@ -66,7 +66,7 @@ uses
 
 const
   { Spawned, used by targets, drawn or used as markers by the game code }
-  SupportedClasses: array[0..79] of String = (
+  SupportedClasses: array[0..81] of String = (
     { func_group: brushes the map compiler merged into the world }
     'func_group', 'worldspawn', 'info_player_start', 'info_player_deathmatch', 'info_player_coop',
     'info_player_intermission', 'info_null', 'info_notnull', 'misc_teleporter',
@@ -82,7 +82,7 @@ const
     'misc_satellite_dish', 'misc_strogg_ship',
     'misc_viper', 'misc_bigviper', 'misc_viper_bomb', 'misc_blackhole', 'misc_eastertank',
     'misc_easterchick', 'misc_easterchick2', 'target_blaster', 'target_spawner',
-    'func_killbox', 'trigger_gravity',
+    'func_killbox', 'trigger_gravity', 'trigger_elevator', 'dynamic_light',
     { a brush whose CURRENT contents move the player (PM_AddCurrents) }
     'func_conveyor',
     { clocks and displays (target_character frames) }
@@ -135,6 +135,17 @@ begin
   if IsVisibleBrushClass(CName) then
   begin
     Note := 'drawn and solid as a static brush, no behaviour';
+    Exit(csPartial);
+  end;
+  { Quake II Remastered helpers }
+  if CName = 'target_poi' then
+  begin
+    Note := 'the remaster''s compass target: there is no compass, so it does nothing';
+    Exit(csPartial);
+  end;
+  if CName = 'info_landmark' then
+  begin
+    Note := 'the remaster''s level transition landmark: the player''s offset from it is not kept across maps';
     Exit(csPartial);
   end;
   if Copy(CName, 1, 6) = 'light_' then

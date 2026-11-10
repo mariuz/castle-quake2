@@ -119,7 +119,7 @@ type
   end;
   { Pick an entity by targetname (random one if several, like G_PickTarget) }
   TPickTargetEvent = function(const ATargetName: String): TQuakeEntity of object;
-  TUseTargetsEvent = procedure(const ATarget: String) of object;
+  TUseTargetsEvent = procedure(const ATarget: String; const Source: TQuakeEntity) of object;
 
   { Active 3D monster in the world.
     A TCastleBehavior of its Transform, inspectable in the CGE inspector. }
@@ -1659,7 +1659,7 @@ begin
   { Reached the corner (path_corner_touch) }
   Corner := MoveTarget;
   if Assigned(OnUseTargets) then
-    OnUseTargets(Corner.GetField('pathtarget'));
+    OnUseTargets(Corner.GetField('pathtarget'), Corner);
   Wait := Corner.GetFloat('wait', 0);
   if (Corner.Target <> '') and (Wait >= 0) then
     MoveTarget := OnPickTarget(Corner.Target)
@@ -1686,7 +1686,7 @@ begin
   { Reached it (point_combat_touch): next point, or hold / resume the fight }
   Point := GoalEntity;
   if Assigned(OnUseTargets) then
-    OnUseTargets(Point.GetField('pathtarget'));
+    OnUseTargets(Point.GetField('pathtarget'), Point);
   if Point.Target <> '' then
     GoalEntity := OnPickTarget(Point.Target)
   else
