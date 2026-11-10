@@ -6,6 +6,9 @@
   data/sounds.castle-component (from DesignSoundPaths), overwriting edits:
     ./castle-quake2-tests --generate-designs ../data
 
+  With the full game's PAK, checks its monsters' tables against its models:
+    ./castle-quake2-tests --retail <path to baseq2/pak0.pak>
+
   Also compares autotest screenshots with reference images (used by CI):
     ./castle-quake2-tests --compare reference.png screenshot.png diff.png [max-mean-diff]
   Both images are averaged into 64x36 blocks (robust to tiny camera shifts
@@ -611,7 +614,8 @@ begin
   Check(ClassSupport('monster_soldier', NoteText) = csSupported, 'soldiers are fully supported');
   Check(ClassSupport('weapon_railgun', NoteText) = csSupported, 'items are supported');
   Check(ClassSupport('func_group', NoteText) = csSupported, 'func_group is merged into the world');
-  Check((ClassSupport('monster_medic', NoteText) = csPartial) and (NoteText <> ''), 'medic is partial (no revive)');
+  Check(ClassSupport('monster_medic', NoteText) = csSupported, 'the medic is supported (revive, attack and move tables)');
+  Check(ClassSupport('monster_jorg', NoteText) = csSupported, 'Jorg is supported');
   Check(ClassSupport('func_object', NoteText) = csPartial, 'unknown func_ brushes are drawn (partial)');
   Check(ClassSupport('func_conveyor', NoteText) = csSupported, 'func_conveyor moves the player by its contents');
   Check(ClassSupport('misc_viper', NoteText) = csSupported, 'misc_viper flies its path');
@@ -878,7 +882,15 @@ begin
     end;
   end;
   Check(AllMatch, 'monster attack sequences match the demo models frame names');
-  CheckEquals(0, Length(MonsterAttackSeqs('monster_supertank')), 'monsters without a table use the generic attack');
+  CheckEquals(0, Length(MonsterAttackSeqs('monster_gekk')), 'monsters without a table use the generic attack');
+  CheckEquals(3, Length(MonsterAttackSeqs('monster_tank_commander')), 'the tank commander uses the tank''s attacks');
+  { Weighted choice: makron_attack 30 % BFG, 30 % hyperblaster, 40 % railgun }
+  Seqs := MonsterAttackSeqs('monster_makron');
+  CheckEquals(0, ChooseAttackSeq(Seqs, 500, 0.29), 'Makron: BFG below 0.3');
+  CheckEquals(1, ChooseAttackSeq(Seqs, 500, 0.59), 'Makron: hyperblaster below 0.6');
+  CheckEquals(2, ChooseAttackSeq(Seqs, 500, 0.61), 'Makron: railgun above 0.6');
+  CheckEquals(0, ChooseAttackSeq(MonsterAttackSeqs('monster_supertank'), 100, 0.99), 'supertank: chaingun within 160');
+  Check(Abs(SweepYaw(4) - 80) < 0.01, 'Makron hyperblaster sweep starts 80 degrees off');
 
   { Range choice like the Quake 2 attack functions }
   Seqs := MonsterAttackSeqs('monster_infantry');
@@ -1127,6 +1139,61 @@ begin
   Check((CharacterFrame(' 1:05', 1) = 12) and (CharacterFrame(' 1:05', 9) = 12), 'blank for spaces and past the end');
 end;
 
+{ --retail <pak>: the full game's monsters' attack and walk / run tables
+  against the retail models' frame names (CI has no retail data) }
+procedure TestRetailMonsters;
+const
+  RetailClasses: array[0..13] of String = ('monster_gladiator', 'monster_chick', 'monster_mutant',
+    'monster_brain', 'monster_floater', 'monster_hover', 'monster_flipper', 'monster_medic',
+    'monster_supertank', 'monster_boss2', 'monster_jorg', 'monster_makron', 'monster_tank',
+    'monster_tank_commander');
+
+  procedure CheckRun(const C, What, FirstFrame: String; const Count: Integer; const Mdl: TQuakeMd2);
+  var
+    First, I: Integer;
+    Ok: Boolean;
+  begin
+    First := Mdl.FrameNames.IndexOf(FirstFrame);
+    Ok := (First >= 0) and (First + Count <= Mdl.FrameCount);
+    if Ok then
+      for I := First to First + Count - 1 do
+        if FrameBase(Mdl.FrameNames[I]) <> FrameBase(FirstFrame) then
+        begin
+          Ok := False;
+          Writeln('  ', C, ' ', What, ': ', FirstFrame, ' + ', Count, ' runs into ', Mdl.FrameNames[I]);
+          Break;
+        end;
+    Check(Ok, Format('%s %s %s + %d on the retail model', [C, What, FirstFrame, Count]));
+  end;
+
+var
+  C: String;
+  Mdl: TQuakeMd2;
+  Seq: TMonsterAttackSeq;
+  Move: TMonsterMoveSeq;
+  Run: Boolean;
+begin
+  for C in RetailClasses do
+  begin
+    Mdl := Md2Manager.GetModel(FindMonsterDef(C)^.Model);
+    Check(Mdl <> nil, C + ' model in the retail PAK');
+    if Mdl = nil then
+      Continue;
+    Check(Length(MonsterAttackSeqs(C)) > 0, C + ' has attack sequences');
+    for Seq in MonsterAttackSeqs(C) do
+      CheckRun(C, 'attack', Seq.FirstFrame, Seq.Count, Mdl);
+    for Run in Boolean do
+    begin
+      Move := MonsterMoveSeq(C, Run);
+      Check(Length(Move.Dists) > 0, C + ' has a walk / run table');
+      CheckRun(C, 'move', Move.FirstFrame, Length(Move.Dists), Mdl);
+    end;
+  end;
+  { Jorg's legs follow the rider's frames: the same names for its 188 }
+  Mdl := Md2Manager.GetModel('models/monsters/boss3/jorg/tris.md2');
+  Check((Mdl <> nil) and (Mdl.FrameCount = 188), 'Jorg legs model, 188 frames');
+end;
+
 procedure TestMonsterMoves;
 const
   MonsterClasses: array[0..8] of String = ('monster_soldier_light', 'monster_soldier', 'monster_soldier_ss',
@@ -1168,7 +1235,7 @@ begin
     end;
   end;
   Check(AllMatch, 'monster walk / run loops match the demo models frame names');
-  CheckEquals(0, Length(MonsterMoveSeq('monster_supertank', True).Dists), 'monsters without a move table keep their speed');
+  CheckEquals(0, Length(MonsterMoveSeq('monster_gekk', True).Dists), 'monsters without a move table keep their speed');
   { Quake 2 paces: 10 frames a second of ai_run distances }
   Check(SameValue(MoveSeqSpeed(MonsterMoveSeq('monster_soldier', True)), 121.67, 0.01) and
     SameValue(MoveSeqSpeed(MonsterMoveSeq('monster_tank', True)), 46.875, 0.01) and
@@ -3014,6 +3081,20 @@ begin
   end;
   Palette.RegisterProtocol;
   Palette.LoadFromPak;
+
+  if (ParamCount >= 2) and (ParamStr(1) = '--retail') then
+  begin
+    if not Pak.AddFile(ParamStr(2)) then
+    begin
+      Writeln('Cannot load ', ParamStr(2));
+      Halt(2);
+    end;
+    TestRetailMonsters;
+    Writeln(Format('%d passed, %d failed', [Passed, Failed]));
+    if Failed > 0 then
+      Halt(1);
+    Exit;
+  end;
 
   TestPak;
   TestImages;

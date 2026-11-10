@@ -1,6 +1,9 @@
 { Monster walking and running on Quake 2's animation frames: the looping
   walk / run mframe_t tables of m_soldier.c, m_infantry.c, m_gunner.c,
-  m_berserk.c, m_flyer.c, m_parasite.c and m_tank.c, each frame with the
+  m_berserk.c, m_flyer.c, m_parasite.c, m_tank.c and the full game's
+  m_gladiator.c, m_chick.c, m_mutant.c, m_brain.c, m_float.c, m_hover.c,
+  m_flipper.c, m_medic.c, m_supertank.c, m_boss2.c, m_boss31.c and
+  m_boss32.c, each frame with the
   distance ai_walk / ai_run moves the monster on it. TMonsterMoveAnim plays
   one at 10 frames a second; its Speed is the current frame's distance
   per second, so the feet move with the ground and each monster type keeps
@@ -123,7 +126,83 @@ begin
   else
   if Copy(MonsterClass, 1, 12) = 'monster_tank' then
     { tank_move_run / tank_move_walk: the same frames and distances }
-    Result := MakeMove('walk05', [4, 5, 3, 2, 5, 5, 4, 4, 3, 5, 4, 5, 7, 7, 6, 6]);
+    Result := MakeMove('walk05', [4, 5, 3, 2, 5, 5, 4, 4, 3, 5, 4, 5, 7, 7, 6, 6])
+  else
+  if MonsterClass = 'monster_gladiator' then
+  begin
+    if Run then
+      Result := MakeMove('run1', [23, 14, 14, 21, 12, 13])
+    else
+      Result := MakeMove('walk1', [15, 7, 6, 5, 2, 0, 2, 8, 12, 8, 5, 5, 2, 2, 1, 8]);
+  end else
+  if MonsterClass = 'monster_chick' then
+    { chick_move_run / chick_move_walk: the same frames and distances }
+    Result := MakeMove('walk11', [6, 8, 13, 5, 7, 4, 11, 5, 9, 7])
+  else
+  if MonsterClass = 'monster_mutant' then
+  begin
+    if Run then
+      Result := MakeMove('run03', [40, 40, 24, 5, 17, 10])
+    else
+      Result := MakeMove('walk05', [3, 1, 5, 10, 13, 10, 0, 5, 6, 16, 15, 6]);
+  end else
+  if MonsterClass = 'monster_brain' then
+  begin
+    { brain_move_run / brain_move_walk1 (the brain shuffles back a little) }
+    if Run then
+      Result := MakeMove('walk101', [9, 2, 3, 3, 1, 0, 0, 10, -4, -1, 2])
+    else
+      Result := MakeMove('walk101', [7, 2, 3, 3, 1, 0, 0, 9, -4, -1, 2]);
+  end else
+  if MonsterClass = 'monster_floater' then
+  begin
+    { The floater flies on its stand1 frames: 13 a frame running, 5 walking }
+    if Run then
+      Result := Even('stand101', 52, 13)
+    else
+      Result := Even('stand101', 52, 5);
+  end else
+  if MonsterClass = 'monster_hover' then
+  begin
+    if Run then
+      Result := Even('forwrd01', 35, 10)
+    else
+      Result := Even('forwrd01', 35, 4);
+  end else
+  if MonsterClass = 'monster_flipper' then
+  begin
+    { flipper_move_run_loop (FLIPPER_RUN_SPEED 24) / flipper_move_walk }
+    if Run then
+      Result := Even('flpver06', 24, 24)
+    else
+      Result := Even('flphor01', 24, 4);
+  end else
+  if MonsterClass = 'monster_medic' then
+  begin
+    if Run then
+      Result := MakeMove('run1', [18, 22.5, 25.4, 23.4, 24, 35.6])
+    else
+      Result := MakeMove('walk1', [6.2, 18.1, 1, 9, 10, 9, 11, 11.6, 2, 9.9, 14, 9.3]);
+  end else
+  if MonsterClass = 'monster_supertank' then
+  begin
+    { supertank_move_run / supertank_move_forward on the forwrd frames }
+    if Run then
+      Result := Even('forwrd1', 18, 12)
+    else
+      Result := Even('forwrd1', 18, 4);
+  end else
+  if MonsterClass = 'monster_boss2' then
+    { boss2_move_run / boss2_move_walk: 8 a frame }
+    Result := Even('walk1', 20, 8)
+  else
+  if MonsterClass = 'monster_jorg' then
+    { jorg_move_run / jorg_move_walk: the same frames and distances }
+    Result := MakeMove('walk06', [17, 0, 0, 0, 12, 8, 10, 33, 0, 0, 0, 9, 9, 9])
+  else
+  if MonsterClass = 'monster_makron' then
+    { makron_move_run / makron_move_walk: the same }
+    Result := MakeMove('walk204', [3, 12, 8, 8, 8, 6, 12, 9, 6, 12]);
 end;
 
 function MoveSeqSpeed(const Seq: TMonsterMoveSeq): Single;

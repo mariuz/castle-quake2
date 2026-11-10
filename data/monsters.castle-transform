@@ -493,6 +493,82 @@
         "$$ClassName" : "TCastleVector3Persistent",
         "X" : 1.7280000000000000E+003
       }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akRocket",
+      "AttackCooldown" : 1.2000000476837158E+000,
+      "AttackRange" : 1.5000000000000000E+003,
+      "Damage" : 50,
+      "DeathSound" : "bhvdeth1",
+      "Flying" : true,
+      "Health" : 2000,
+      "Model" : "models/monsters/boss2/tris.md2",
+      "MonsterClass" : "monster_boss2",
+      "Name" : "boss2",
+      "PainSound" : "bhvpain1",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SoundDir" : "bosshovr",
+      "Speed" : 8.0000000000000000E+001,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 1.8240000000000000E+003
+      }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akHitscan",
+      "AttackCooldown" : 1.2000000476837158E+000,
+      "AttackRange" : 1.5000000000000000E+003,
+      "AttackSound" : "bs3atck1",
+      "Damage" : 6,
+      "DeathSound" : "bs3deth1",
+      "Health" : 3000,
+      "Model" : "models/monsters/boss3/rider/tris.md2",
+      "MonsterClass" : "monster_jorg",
+      "Name" : "jorg",
+      "PainSound" : "bs3pain1",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SoundDir" : "boss3",
+      "Speed" : 1.0000000000000000E+002,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 1.9200000000000000E+003
+      }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akRail",
+      "AttackCooldown" : 1.2000000476837158E+000,
+      "AttackRange" : 1.5000000000000000E+003,
+      "AttackSound" : "rail_up",
+      "Damage" : 50,
+      "DeathSound" : "death",
+      "Health" : 3000,
+      "Model" : "models/monsters/boss3/rider/tris.md2",
+      "MonsterClass" : "monster_makron",
+      "Name" : "makron",
+      "PainSound" : "pain1",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SightSound" : "voice4",
+      "SoundDir" : "makron",
+      "Speed" : 9.0000000000000000E+001,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 2.0160000000000000E+003
+      }
     }
   ]
 }

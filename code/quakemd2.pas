@@ -79,6 +79,7 @@ type
     FShellMaterial: TUnlitMaterialNode;
     FShellColor: TVector3;
     FShellTemp: TVector3List;
+    FFollower: TQuakeMd2Instance;
     procedure CreateShell;
     procedure UpdateShell;
   public
@@ -105,6 +106,10 @@ type
       normals. Black = no shell. }
     procedure SetShell(const Color: TVector3);
     property ShellColor: TVector3 read FShellColor;
+    { A second model drawn on the same frame numbers (Quake 2 modelindex2:
+      Jorg's legs under the Makron); it gets this one's tint and shell too.
+      Not owned. }
+    property Follower: TQuakeMd2Instance read FFollower write FFollower;
     property Model: TQuakeMd2 read FModel;
     { True when a non-looping animation reached its last frame }
     property AnimDone: Boolean read FAnimDone;
@@ -542,6 +547,8 @@ begin
   FCoord.SetPoint(FTemp);
   if not FShellColor.IsPerfectlyZero then
     UpdateShell;
+  if FFollower <> nil then
+    FFollower.ShowFrames(A, B, T);
 end;
 
 procedure TQuakeMd2Instance.CreateShell;
@@ -583,6 +590,8 @@ end;
 
 procedure TQuakeMd2Instance.SetShell(const Color: TVector3);
 begin
+  if FFollower <> nil then
+    FFollower.SetShell(Color);
   if TVector3.PerfectlyEquals(Color, FShellColor) then
     Exit;
   FShellColor := Color;
@@ -631,6 +640,8 @@ begin
   FCoord.SetPoint(FTemp);
   if not FShellColor.IsPerfectlyZero then
     UpdateShell;
+  if FFollower <> nil then
+    FFollower.ShowFrames(FA, FB, T);
 end;
 
 procedure TQuakeMd2Instance.SetSkin(const SkinIndex: Integer);
@@ -656,6 +667,8 @@ procedure TQuakeMd2Instance.SetTint(const Color: TVector3);
 begin
   if not TVector3.Equals(FMaterial.EmissiveColor, Color, 0.02) then
     FMaterial.EmissiveColor := Color;
+  if FFollower <> nil then
+    FFollower.SetTint(Color);
 end;
 
 { TQuakeMd2Manager }

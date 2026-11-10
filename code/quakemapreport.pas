@@ -62,7 +62,7 @@ implementation
 
 uses
   Math, StrUtils,
-  QuakeEntities, QuakeGeometry, QuakeSettings, QuakeMonsterAttacks;
+  QuakeEntities, QuakeGeometry, QuakeSettings, QuakeMonsterAttacks, QuakeMonsterMoves;
 
 const
   { Spawned, used by targets, drawn or used as markers by the game code }
@@ -106,15 +106,12 @@ begin
     Exit(csSupported);
   if FindMonsterDef(CName) <> nil then
   begin
+    { Quake 2 attack and walk / run frame tables: handled like the original }
+    if (not IsGenericMonsterDef(FindMonsterDef(CName))) and (Length(MonsterAttackSeqs(CName)) > 0) and
+       (Length(MonsterMoveSeq(CName, True).Dists) > 0) then
+      Exit(csSupported);
     if IsGenericMonsterDef(FindMonsterDef(CName)) then
       Note := 'a mod''s monster (model and health known): generic monster AI, one attack'
-    else
-    if CName = 'monster_medic' then
-      Note := 'revives dead monsters; generic attack (no attack frames table)'
-    else
-    if (CName = 'monster_supertank') or (CName = 'monster_boss2') or (CName = 'monster_jorg') or
-       (CName = 'monster_makron') then
-      Note := 'boss with the generic monster AI'
     else
     if Length(MonsterAttackSeqs(CName)) > 0 then
       Note := 'Quake 2 attack frames, generic movement (no special moves)'

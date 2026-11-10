@@ -15,6 +15,7 @@ The port is checked by machine on every push: unit tests, scripted play sessions
 cd tests
 castle-engine compile
 .\castle-quake2-tests.exe     # run from tests/: it loads ../data/paks/quake2_demo.pak
+.\castle-quake2-tests.exe --retail <path>aseq2\pak0.pak   # the full game's monster tables against its models (not in CI)
 ```
 
 It prints `N passed, M failed` and exits with an error when something fails.

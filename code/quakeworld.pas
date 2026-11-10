@@ -121,6 +121,14 @@ type
     FLastWaterLevel: Integer;
     FAirFinished: Single;
     FLiquidDamageTimer: Single;
+    { Makrons to launch from dead Jorgs (MakronToss): level time, place, yaw,
+      the Jorg's target }
+    FMakronTosses: array of record
+      Time: Single;
+      Pos: TVector3;
+      Yaw: Single;
+      Target: String;
+    end;
     { Rebreather / environment suit breathing sounds (u_breath1 / 2) }
     FBreathTimer: Single;
     FBreathSound: Boolean;
@@ -202,6 +210,12 @@ type
       const Speed: Single; const Damage: Integer; const FromPlayer: Boolean;
       const Owner: TQuakeMonster = nil);
     procedure UpdateProjectiles(const SecondsPassed: Single);
+    { The mutant's jump hurting the player on touch, and the Makrons that
+      Jorgs launch when they die }
+    procedure UpdateBossesAndLeaps;
+    { A railgun shot from a monster at Target (CGE): a trace through
+      monsters like fire_rail; True if it hit the player }
+    function MonsterRail(const Monster: TQuakeMonster; const Eye, Target: TVector3): Boolean;
     { Damage the player's power armor absorbs (and the cells it uses) }
     function AbsorbPlayerPowerArmor(const Damage: Integer; const FromPos: TVector3): Integer;
     { Rebreather, environment suit and power armor timers and sounds }
@@ -2982,6 +2996,96 @@ begin
   end;
 end;
 
+function TQuakeWorld.MonsterRail(const Monster: TQuakeMonster; const Eye, Target: TVector3): Boolean;
+var
+  Start, Stop: TVector3;
+  Ignore: TObject;
+  T: TQuakeTrace;
+  I: Integer;
+begin
+  { fire_rail: on through monsters to the first wall }
+  Result := False;
+  Start := CgeToQuake(Eye);
+  Stop := Start + (CgeToQuake(Target) - Start).Normalize * 8192;
+  Ignore := Monster;
+  Sounds.PlayAt('sound/weapons/railgf1a.wav', Monster.Transform, 1, 1, chWeapon);
+  for I := 0 to 8 do
+  begin
+    T := WorldTrace(Start, Stop, TVector3.Zero, TVector3.Zero, MASK_SHOT, Ignore);
+    if not T.Hit then
+      Break;
+    if T.Ent is TQuakePlayerMovement then
+    begin
+      DamagePlayer(Monster.AttackDamage, Eye);
+      Result := True;
+    end else
+    if T.Ent is TQuakeMonster then
+      TQuakeMonster(T.Ent).TakeDamage(Monster.AttackDamage)
+    else
+      Break;
+    Ignore := T.Ent;
+    Start := T.EndPos;
+  end;
+  Particles.SpawnRailTrail(Eye, QuakeToCge(T.EndPos));
+end;
+
+procedure TQuakeWorld.UpdateBossesAndLeaps;
+var
+  M: TQuakeMonster;
+  I: Integer;
+  Ent: TQuakeEntity;
+  Org: TVector3;
+  Makron: TQuakeMonster;
+  ToPlayer: TVector3;
+begin
+  { mutant_jump_touch: 40 .. 49 when it hits the player faster than 400 }
+  for M in FMonsters do
+    if M.LeapDamage > 0 then
+    begin
+      if not M.Jumping then
+        M.LeapDamage := 0
+      else
+      if (M.JumpSpeed > 400) and not FDead and
+         (Abs(M.Transform.Translation.X - FPlayerPos.X) < 16 + M.BoxMaxs.X + 4) and
+         (Abs(M.Transform.Translation.Z - FPlayerPos.Z) < 16 + M.BoxMaxs.Y + 4) and
+         (Abs(M.Transform.Translation.Y - (FPlayerPos.Y - 22)) < 64) then
+      begin
+        DamagePlayer(M.LeapDamage, M.Transform.Translation);
+        M.LeapDamage := 0;
+      end;
+    end;
+
+  { MakronSpawn: a monster_makron where Jorg died, jumping at the player
+    (400 toward him, 200 up) }
+  for I := High(FMakronTosses) downto 0 do
+    if FTime >= FMakronTosses[I].Time then
+    begin
+      Org := CgeToQuake(FMakronTosses[I].Pos);
+      Ent := TQuakeEntity.Create;
+      Ent.SetField('classname', 'monster_makron');
+      Ent.SetField('origin', Format('%d %d %d', [Round(Org.X), Round(Org.Y), Round(Org.Z)]));
+      Ent.SetField('angle', IntToStr(Round(FMakronTosses[I].Yaw)));
+      if FMakronTosses[I].Target <> '' then
+        Ent.SetField('target', FMakronTosses[I].Target);
+      Delete(FMakronTosses, I, 1);
+      FBsp.Entities.Add(Ent);
+      Makron := nil;
+      if FMonsters.Count > 0 then
+        Makron := FMonsters.Last;
+      SpawnEntity(Ent);
+      if (FMonsters.Count > 0) and (FMonsters.Last <> Makron) then
+      begin
+        Makron := FMonsters.Last;
+        ToPlayer := FPlayerPos - Makron.Transform.Translation;
+        ToPlayer.Y := 0;
+        if not ToPlayer.IsZero then
+          Makron.MonsterJump(ToPlayer.Normalize * 400, 200);
+        Makron.Alert;
+        WritelnLog('QuakeWorld', 'The Makron comes out: %s', [Makron.Transform.Name]);
+      end;
+    end;
+end;
+
 procedure TQuakeWorld.MonsterAttack(const Monster: TQuakeMonster);
 var
   Eye, Target, Dir: TVector3;
@@ -2995,15 +3099,40 @@ begin
   Target := FPlayerPos - Vector3(0, 12, 0);
   Dir := (Target - Eye).Normalize;
   Dist := PointsDistance(Eye, Target);
-  if Monster.AttackKind <> akMelee then
+  if not (Monster.AttackKind in [akMelee, akLeap]) then
     Lighting.TriggerMuzzleFlash(Eye);
 
   { Monster.AttackKind / AttackDamage / AttackBullets: the shot of its
     attack sequence (or of the generic attack) }
+  { MakronHyperblaster sweeps across: the shot turned by AttackYaw }
+  if Monster.AttackYaw <> 0 then
+    Dir := RotatePointAroundAxisRad(DegToRad(Monster.AttackYaw), Dir, Vector3(0, 1, 0));
+  { Shots aimed at a saved position (gladiator / Makron railgun) }
+  if Monster.AimSaved and (Monster.AttackKind = akRail) then
+  begin
+    MonsterRail(Monster, Eye, Monster.SavedAim);
+    Exit;
+  end;
+
   case Monster.AttackKind of
     akMelee:
       if Dist < Monster.AttackReach then
+      begin
         DamagePlayer(Monster.AttackDamage, Eye);
+        { fire_hit's kick: push (or pull) the player }
+        if (Monster.AttackKick <> 0) and (FPlayer <> nil) then
+          FPlayer.AddVelocity(Dir * Monster.AttackKick);
+      end;
+    akLeap:
+      Monster.Leap;
+    akBfg:
+      begin
+        { monster_fire_bfg: speed 300, its own damage and radius for the
+          BFG effect; the core hit stays bfg_touch's 200 }
+        SpawnProjectile(pkBfg, Eye + Dir * 24, Dir, 300, 200, False, Monster);
+        FProjectiles.Last.SplashDamage := Monster.AttackDamage;
+        FProjectiles.Last.SplashRadius := Monster.AttackRadius;
+      end;
     akHitscan, akPellets, akRail:
       if Monster.CanSeePlayer then
       begin
@@ -3034,9 +3163,16 @@ begin
         end;
       end;
     akBlaster:
-      SpawnProjectile(pkBlasterBolt, Eye + Dir * 20, Dir, 600, Monster.AttackDamage, False, Monster);
+      if Monster.AttackSpeed > 0 then
+        SpawnProjectile(pkBlasterBolt, Eye + Dir * 20, Dir, Monster.AttackSpeed, Monster.AttackDamage, False, Monster)
+      else
+        SpawnProjectile(pkBlasterBolt, Eye + Dir * 20, Dir, 600, Monster.AttackDamage, False, Monster);
     akRocket:
-      SpawnProjectile(pkRocket, Eye + Dir * 24, Dir, 500, Monster.AttackDamage, False, Monster);
+      { Volleys (the hornet's four rockets) leave from side by side muzzles }
+      for I := 0 to Max(1, Monster.AttackBullets) - 1 do
+        SpawnProjectile(pkRocket, Eye + Dir * 24 +
+          TVector3.CrossProduct(Dir, Vector3(0, 1, 0)).Normalize * (16 * (I - (Monster.AttackBullets - 1) / 2)),
+          Dir, 500, Monster.AttackDamage, False, Monster);
     akGrenade:
       SpawnProjectile(pkGrenade, Eye + Dir * 24, (Dir + Vector3(0, 0.35, 0)).Normalize,
         Min(600, Dist * 1.1), Monster.AttackDamage, False, Monster);
@@ -3266,9 +3402,21 @@ begin
       Inc(FStats.Kills);
       { Dead monsters fire their targets (Quake 2 monster_death_use) }
       UseTargets(M.DeathTarget);
+      { jorg_die: MakronToss on death frame 49, MakronSpawn 0.8 s later,
+        with Jorg's target }
+      if M.Def^.ClassName = 'monster_jorg' then
+      begin
+        SetLength(FMakronTosses, Length(FMakronTosses) + 1);
+        FMakronTosses[High(FMakronTosses)].Time := FTime + 4.8 + 0.8;
+        FMakronTosses[High(FMakronTosses)].Pos := M.Transform.Translation;
+        FMakronTosses[High(FMakronTosses)].Yaw := M.FacingAngle;
+        FMakronTosses[High(FMakronTosses)].Target := M.Entity.Target;
+        WritelnLog('QuakeWorld', '%s died: the Makron comes out in 5.6 s', [M.Transform.Name]);
+      end;
     end;
   end;
   ProcessSightEntities;
+  UpdateBossesAndLeaps;
   UpdateTurrets(SecondsPassed);
   FGeometry.ScenePlayerClip.Collides := True;
 

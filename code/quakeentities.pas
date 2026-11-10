@@ -146,6 +146,10 @@ type
     { trigger_monsterjump: flying through the air with this velocity (CGE) }
     FJumping: Boolean;
     FJumpVel: TVector3;
+    { Where the player was on the last UpdateAI (eye, CGE) }
+    FLastPlayerPos: TVector3;
+    { Jorg's legs (models/monsters/boss3/jorg), following Model's frames }
+    FModel2: TQuakeMd2Instance;
     { Placed on the floor with traces (Quake 2 M_droptofloor) }
     FDropped: Boolean;
     FIdleTimer: Single;
@@ -250,6 +254,17 @@ type
     AttackDamage: Integer;
     AttackBullets: Integer;
     AttackReach: Single;
+    { fire_hit kick of the melee shot (negative pulls), BFG effect radius,
+      blaster speed (0: the default), Makron's sweep yaw offset (degrees) }
+    AttackKick: Single;
+    AttackRadius: Single;
+    AttackSpeed: Single;
+    AttackYaw: Single;
+    { The target's position saved for this shot (gladiator / Makron railgun) }
+    AimSaved: Boolean;
+    SavedAim: TVector3;
+    { Damage the mutant's jump deals when it lands on the player (0: none) }
+    LeapDamage: Integer;
     { Quake 2 bounding box around the origin (Quake coordinates) }
     BoxMins, BoxMaxs: TVector3;
     { Called when the monster finds the player (Quake 2 FoundTarget, which
@@ -312,6 +327,15 @@ type
       upward speed when on the ground (Quake 2 trigger_monsterjump_touch) }
     procedure MonsterJump(const HorizVel: TVector3; const UpSpeed: Single);
     property Jumping: Boolean read FJumping;
+    { mutant_jump_takeoff: fly forward at 600, up at 250, keeping the attack
+      animation; LeapDamage hurts the player on touch while faster than 400 }
+    procedure Leap;
+    { Animation names for PlayAnim: the Makron's own frames on its rider
+      model (stand201.., walk201.., pain401.., death201..), not the ones
+      riding Jorg }
+    function AnimNames(const Names: String): String;
+    { Speed of the jump (CGE units a second) }
+    function JumpSpeed: Single;
     { Has a dodge (duck) reaction }
     function CanDodge: Boolean;
     { Owns the scene: used to map ray hits back to monsters }
@@ -605,7 +629,7 @@ const
   { Built-in monster definitions. At startup data/monsters.castle-transform
     (TQuakeMonsterType components, editable in the CGE editor) overrides
     and extends them in MonsterDefs. }
-  DefaultMonsterDefs: array[0..18] of TQuakeMonsterDef = (
+  DefaultMonsterDefs: array[0..21] of TQuakeMonsterDef = (
     (ClassName: 'monster_soldier_light'; Model: 'models/monsters/soldier/tris.md2'; Skin: 0; Health: 20; Speed: 120; Attack: akBlaster; Damage: 5; AttackRange: 900; AttackCooldown: 1.6; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain2'; DeathSound: 'soldeth1'; AttackSound: 'solatck2'),
     (ClassName: 'monster_soldier'; Model: 'models/monsters/soldier/tris.md2'; Skin: 2; Health: 30; Speed: 120; Attack: akPellets; Damage: 2; AttackRange: 700; AttackCooldown: 1.6; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain1'; DeathSound: 'soldeth1'; AttackSound: 'solatck1'),
     (ClassName: 'monster_soldier_ss'; Model: 'models/monsters/soldier/tris.md2'; Skin: 4; Health: 40; Speed: 120; Attack: akHitscan; Damage: 2; AttackRange: 900; AttackCooldown: 0.9; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain3'; DeathSound: 'soldeth3'; AttackSound: 'solatck3'),
@@ -624,7 +648,10 @@ const
     (ClassName: 'monster_floater'; Model: 'models/monsters/float/tris.md2'; Skin: 0; Health: 200; Speed: 100; Attack: akBlaster; Damage: 1; AttackRange: 800; AttackCooldown: 0.6; Flying: True; SoundDir: 'floater'; SightSound: 'fltsght1'; PainSound: 'fltpain1'; DeathSound: 'fltdeth1'; AttackSound: 'fltatck1'),
     (ClassName: 'monster_hover'; Model: 'models/monsters/hover/tris.md2'; Skin: 0; Health: 240; Speed: 120; Attack: akBlaster; Damage: 1; AttackRange: 900; AttackCooldown: 0.8; Flying: True; SoundDir: 'hover'; SightSound: 'hovsght1'; PainSound: 'hovpain1'; DeathSound: 'hovdeth1'; AttackSound: 'hovatck1'),
     (ClassName: 'monster_flipper'; Model: 'models/monsters/flipper/tris.md2'; Skin: 0; Health: 50; Speed: 150; Attack: akMelee; Damage: 5; AttackRange: 70; AttackCooldown: 0.6; Flying: True; SoundDir: 'flipper'; SightSound: 'flpsght1'; PainSound: 'flppain1'; DeathSound: 'flpdeth1'; AttackSound: 'flpatck1'),
-    (ClassName: 'monster_supertank'; Model: 'models/monsters/boss1/tris.md2'; Skin: 0; Health: 1500; Speed: 80; Attack: akRocket; Damage: 50; AttackRange: 1500; AttackCooldown: 1.2; Flying: False; SoundDir: 'bosstank'; SightSound: 'btkunqv1'; PainSound: 'btkpain1'; DeathSound: 'btkdeth1'; AttackSound: 'btkunqv2')
+    (ClassName: 'monster_supertank'; Model: 'models/monsters/boss1/tris.md2'; Skin: 0; Health: 1500; Speed: 80; Attack: akRocket; Damage: 50; AttackRange: 1500; AttackCooldown: 1.2; Flying: False; SoundDir: 'bosstank'; SightSound: 'btkunqv1'; PainSound: 'btkpain1'; DeathSound: 'btkdeth1'; AttackSound: 'btkunqv2'),
+    (ClassName: 'monster_boss2'; Model: 'models/monsters/boss2/tris.md2'; Skin: 0; Health: 2000; Speed: 80; Attack: akRocket; Damage: 50; AttackRange: 1500; AttackCooldown: 1.2; Flying: True; SoundDir: 'bosshovr'; SightSound: ''; PainSound: 'bhvpain1'; DeathSound: 'bhvdeth1'; AttackSound: ''),
+    (ClassName: 'monster_jorg'; Model: 'models/monsters/boss3/rider/tris.md2'; Skin: 0; Health: 3000; Speed: 100; Attack: akHitscan; Damage: 6; AttackRange: 1500; AttackCooldown: 1.2; Flying: False; SoundDir: 'boss3'; SightSound: ''; PainSound: 'bs3pain1'; DeathSound: 'bs3deth1'; AttackSound: 'bs3atck1'),
+    (ClassName: 'monster_makron'; Model: 'models/monsters/boss3/rider/tris.md2'; Skin: 0; Health: 3000; Speed: 90; Attack: akRail; Damage: 50; AttackRange: 1500; AttackCooldown: 1.2; Flying: False; SoundDir: 'makron'; SightSound: 'voice4'; PainSound: 'pain1'; DeathSound: 'death'; AttackSound: 'rail_up')
   );
 
 var
@@ -817,13 +844,46 @@ begin
     Add('chest', 1);
     Add('gear', 1, True);
   end else
-  if MonsterClass = 'monster_flyer' then
+  if (MonsterClass = 'monster_flyer') or (MonsterClass = 'monster_floater') then
   begin
-    { flyer_die: BecomeExplosion1, always }
+    { flyer_die / floater_die: BecomeExplosion1, always }
     Result.GibHealth := -50;
     Result.Explodes := True;
   end else
+  if (MonsterClass = 'monster_supertank') or (MonsterClass = 'monster_jorg') then
   begin
+    { supertank_die / jorg_die never gib (their death ends in BossExplode) }
+    Result.GibHealth := -100000;
+    Add('sm_metal', 4, True);
+  end else
+  begin
+    { gib_health of the full game's monsters (m_*.c SP_monster_*) }
+    if MonsterClass = 'monster_gladiator' then
+      Result.GibHealth := -175
+    else
+    if MonsterClass = 'monster_chick' then
+      Result.GibHealth := -70
+    else
+    if MonsterClass = 'monster_mutant' then
+      Result.GibHealth := -120
+    else
+    if MonsterClass = 'monster_brain' then
+      Result.GibHealth := -150
+    else
+    if MonsterClass = 'monster_hover' then
+      Result.GibHealth := -100
+    else
+    if MonsterClass = 'monster_flipper' then
+      Result.GibHealth := -30
+    else
+    if MonsterClass = 'monster_medic' then
+      Result.GibHealth := -130
+    else
+    if MonsterClass = 'monster_boss2' then
+      Result.GibHealth := -200
+    else
+    if MonsterClass = 'monster_makron' then
+      Result.GibHealth := -2000;
     Add('bone', 2);
     Add('sm_meat', 4);
     Add('head2', 1);
@@ -868,6 +928,18 @@ begin
   if MonsterClass = 'monster_supertank' then
   begin
     Mins := Vector3(-64, -64, 0); Maxs := Vector3(64, 64, 112);
+  end else
+  if MonsterClass = 'monster_boss2' then
+  begin
+    Mins := Vector3(-56, -56, 0); Maxs := Vector3(56, 56, 80);
+  end else
+  if MonsterClass = 'monster_jorg' then
+  begin
+    Mins := Vector3(-80, -80, 0); Maxs := Vector3(80, 80, 140);
+  end else
+  if MonsterClass = 'monster_makron' then
+  begin
+    Mins := Vector3(-30, -30, 0); Maxs := Vector3(30, 30, 90);
   end;
   { Our monster origins are 24 above the feet }
   Height := Maxs.Z - Mins.Z;
@@ -1142,12 +1214,25 @@ begin
   Transform.CollisionSphereRadius := 16;
 
   Model := Md2Manager.CreateInstance(Def^.Model, Def^.Skin);
+  { Jorg: the Makron riding (modelindex) on Jorg's legs (modelindex2) }
+  if (Model <> nil) and (Def^.ClassName = 'monster_jorg') then
+  begin
+    FModel2 := Md2Manager.CreateInstance('models/monsters/boss3/jorg/tris.md2');
+    if FModel2 <> nil then
+    begin
+      FModel2.Scene.Collides := False;
+      FModel2.Scene.Pickable := False;
+      Model.Follower := FModel2;
+    end;
+  end;
   if Model <> nil then
   begin
     Model.Scene.Name := Transform.Name + '_Model';
     { Monsters block the player, and are found by ray casts (see OwnsTransform) }
     Model.Scene.Collides := True;
     Model.Scene.PreciseCollisions := False;
+    if FModel2 <> nil then
+      Transform.Add(FModel2.Scene);
     Transform.Add(Model.Scene);
   end;
   SetState(msIdle);
@@ -1207,7 +1292,7 @@ begin
   end;
   { Down until the shot passed (pausetime = eta + 0.3), within reason }
   FDuckTime := EnsureRange(Eta + 0.3, 0.4, 1.5);
-  if not Model.PlayAnim('duck', False, 5 / FDuckTime) then
+  if not Model.PlayAnim(AnimNames('duck'), False, 5 / FDuckTime) then
     Exit;
   State := msDuck;
   StateTimer := 0;
@@ -1376,6 +1461,9 @@ destructor TQuakeMonster.Destroy;
 begin
   { BeforeDestruction already detached this behavior from Transform }
   FreeAndNil(FScreenModel);
+  if Model <> nil then
+    Model.Follower := nil;
+  FreeAndNil(FModel2);
   FreeAndNil(Model);
   FreeAndNil(Transform);
   FreeAndNil(FAttack);
@@ -1399,7 +1487,7 @@ begin
     begin
       Model.Scene.Collides := False;
       { Jump to the last frame of the death animation }
-      Model.PlayAnim('death,die,dead', False, 10);
+      Model.PlayAnim(AnimNames('death,die,dead'), False, 10);
       Model.Update(30);
     end;
     State := msDead;
@@ -1445,18 +1533,18 @@ begin
   { The turret driver stands (infantry_stand) until it dies }
   if TurretDriver and (NewState in [msIdle, msChase, msAttack]) then
   begin
-    Model.PlayAnim('stand', True, 10);
+    Model.PlayAnim(AnimNames('stand'), True, 10);
     Exit;
   end;
   case NewState of
-    msIdle: Model.PlayAnim('stand,idle,fidget', True, 10);
+    msIdle: Model.PlayAnim(AnimNames('stand,idle,fidget'), True, 10);
     msChase:
-      if not Model.PlayAnim('run', True, 10) then
-        Model.PlayAnim('walk,stand', True, 10);
-    msAttack: Model.PlayAnim('attak,attack,atk,fire,shoot,melee,swing,stand', False, 12);
-    msPain: Model.PlayAnim('pain', False, 12);
+      if not Model.PlayAnim(AnimNames('run'), True, 10) then
+        Model.PlayAnim(AnimNames('walk,stand'), True, 10);
+    msAttack: Model.PlayAnim(AnimNames('attak,attack,atk,fire,shoot,melee,swing,stand'), False, 12);
+    msPain: Model.PlayAnim(AnimNames('pain'), False, 12);
     msDuck: ; { started by Dodge, which picks the speed }
-    msDying: Model.PlayAnim('death,die,dead', False, 10);
+    msDying: Model.PlayAnim(AnimNames('death,die,dead'), False, 10);
     msDead: ;
   end;
 end;
@@ -1510,9 +1598,9 @@ begin
   if Model = nil then
     Exit;
   if Value then
-    Model.PlayAnim('walk,run', True, 10)
+    Model.PlayAnim(AnimNames('walk,run'), True, 10)
   else
-    Model.PlayAnim('stand,idle,fidget', True, 10);
+    Model.PlayAnim(AnimNames('stand,idle,fidget'), True, 10);
 end;
 
 procedure TQuakeMonster.FaceTowards(const Delta: TVector3; const SecondsPassed: Single);
@@ -1806,6 +1894,7 @@ var
   Delta, MoveVec, Goal: TVector3;
   Dist, TargetYaw, Diff: Single;
 begin
+  FLastPlayerPos := PlayerPos;
   if Dormant then
     Exit;
   if Model <> nil then
@@ -1971,6 +2060,12 @@ begin
     begin
       FAttack.Melee := Dist < MeleeDistance;
       FAttack.Nightmare := GameSkill >= 3;
+      { MakronSaveloc: remember where the target is for the coming shot }
+      if (FAttack.Seq.AimFrame > 0) and not AimSaved and (FAttack.Frame >= FAttack.Seq.AimFrame - 1) then
+      begin
+        AimSaved := True;
+        SavedAim := PlayerPos;
+      end;
       FAttack.Update(SecondsPassed, CanSeePlayer);
       if Model <> nil then
         Model.ShowFrames(FAttackFirst + FAttack.OldFrame, FAttackFirst + FAttack.Frame, FAttack.FrameLerp);
@@ -2050,6 +2145,37 @@ begin
   CanSeePlayer := (not NoTarget) and (Delta.Length < 2000) and SightClear(EyePos, PlayerPos);
   if (not Alerted) and CanSeePlayer and WouldNotice(Delta) then
     Alert;
+end;
+
+function TQuakeMonster.AnimNames(const Names: String): String;
+begin
+  Result := Names;
+  if Def^.ClassName = 'monster_makron' then
+  begin
+    Result := StringReplace(Result, 'stand', 'stand2', [rfReplaceAll]);
+    Result := StringReplace(Result, 'walk', 'walk2', [rfReplaceAll]);
+    Result := StringReplace(Result, 'run', 'walk2', [rfReplaceAll]);
+    Result := StringReplace(Result, 'pain', 'pain4', [rfReplaceAll]);
+    Result := StringReplace(Result, 'death', 'death2', [rfReplaceAll]);
+  end;
+end;
+
+procedure TQuakeMonster.Leap;
+begin
+  if Def^.Flying or not IsAlive then
+    Exit;
+  FJumpVel := YawToCgeDir(FacingAngle) * 600;
+  FJumpVel.Y := 250;
+  FJumping := True;
+  LeapDamage := AttackDamage;
+end;
+
+function TQuakeMonster.JumpSpeed: Single;
+begin
+  if FJumping then
+    Result := FJumpVel.Length
+  else
+    Result := 0;
 end;
 
 procedure TQuakeMonster.MonsterJump(const HorizVel: TVector3; const UpSpeed: Single);
@@ -2175,6 +2301,9 @@ begin
   if (First < 0) or (First + FAttackSeqs[I].Count > Model.Model.FrameCount) then
     Exit;
   FAttackFirst := First;
+  { gladiator_attack saves the target's position when it starts }
+  AimSaved := FAttackSeqs[I].AimFrame = 0;
+  SavedAim := FLastPlayerPos;
   FAttack.Start(FAttackSeqs[I], CanSeePlayer);
   Model.ShowFrames(First, First, 0);
   WritelnLog('QuakeEntities', '%s attacks: %s', [Transform.Name, FAttackSeqs[I].FirstFrame]);
@@ -2190,7 +2319,20 @@ begin
     Sounds.PlayAt(MonsterSound(Def, Seq.Sound), Transform, 1, 1, chWeapon);
   AttackKind := Seq.Kind;
   AttackDamage := FAttack.ShotDamage(ShotIndex);
-  AttackBullets := 1;
+  AttackBullets := Seq.Volley;
+  AttackKick := Seq.Kick;
+  AttackRadius := Seq.Radius;
+  if Seq.Sweep then
+    AttackYaw := SweepYaw(FAttack.Frame)
+  else
+    AttackYaw := 0;
+  AttackSpeed := 0;
+  { monster_fire_blaster at 1000 (the soldiers' and flyers' bolts keep the
+    default) }
+  if (Seq.Kind = akBlaster) and ((Def^.ClassName = 'monster_floater') or
+     (Def^.ClassName = 'monster_hover') or (Def^.ClassName = 'monster_medic') or
+     (Def^.ClassName = 'monster_makron')) then
+    AttackSpeed := 1000;
   { fire_hit reaches MELEE_DISTANCE; melee monsters (berserk, parasite)
     keep their own reach, ranged ones swinging up close don't get theirs }
   if (Seq.Kind = akMelee) and (Def^.Attack <> akMelee) then
