@@ -17,7 +17,7 @@
   author="castle-quake2"
   screen_orientation="landscape"
 >
-  <version value="0.25.0" code="26" />
+  <version value="0.26.0" code="27" />
   <!-- Launcher / window icon (art/, original artwork; not id Software's) -->
   <icons>
     <icon path="art/icon.png" />

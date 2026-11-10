@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.26.0 — 2026-11-10
+
+Multi-floor elevators (`trigger_elevator`) and Quake II Remastered's `dynamic_light`. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - `trigger_elevator` (the full game's multi-floor lifts): each floor's button names a `path_corner` in its `pathtarget`, and the elevator sends its `func_train` there, unless the train is moving. Trains now stop at a `wait -1` corner, and only stop when used again if they have the TOGGLE flag, like Quake 2's `train_wait` / `train_use`. The demo maps have neither, so they play as before.
 - Quake II Remastered's `dynamic_light`: a light drawn at run time with its `shadowlightradius`, colour (`rgba` or `_color`), `shadowlightintensity` and light style (`shadowlightstyle`, or the style of the light named by `shadowlightstyletarget`); a targetname switches it on and off, and START_OFF starts it off. Kept in savegames.
