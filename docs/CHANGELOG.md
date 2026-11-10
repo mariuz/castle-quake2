@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.25.0 — 2026-11-10
+
+The full game's monsters and Call of the Void's Quake 1 monsters fight on their own frames, the BFG10K and the power-ups work like Quake 2's, the view ripples underwater, and the remaster's teleporters work. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - Quake II Remastered's (and Rogue's) teleporters: `trigger_teleport` brushes send the player to a random `info_teleport_destination` of their target, like `misc_teleporter`; with a targetname they wait to be used (unless START_ON) and switch on / off each time. Call of the Void's hubs and levels use them.
 - Call of the Void: its Quake 1 monsters (ogre, knight, enforcer, grunt, zombie, scrag, fiend, rottweiler, hell knight, shambler, vore, rotfish, spawn, in their plain, `_prototype` and `_strogg` variants whose models keep Quake 1's frames) walk, run and attack on Quake 1's animation frames with Quake 1's damage, instead of the generic one-attack AI; models that only number their frames are animated by index. Variants keep their own weapon (the strogg ogre's pellets). `castle-quake2-tests --retail <pak> <mod pak>` checks the models' frame counts.
