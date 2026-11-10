@@ -55,7 +55,7 @@ function MoveSeqSpeed(const Seq: TMonsterMoveSeq): Single;
 implementation
 
 uses
-  Math, QuakeMonsterAttacks;
+  Math, QuakeMonsterAttacks, QuakeQ1Monsters;
 
 function MakeMove(const First: String; const Dists: array of Single): TMonsterMoveSeq;
 var
@@ -80,6 +80,10 @@ end;
 function MonsterMoveSeq(const MonsterClass: String; const Run: Boolean): TMonsterMoveSeq;
 begin
   Result := Default(TMonsterMoveSeq);
+  { Call of the Void's Quake 1 monsters first (monster_soldier_grunt is no
+    Quake 2 soldier) }
+  if Q1Archetype(MonsterClass) <> qaNone then
+    Exit(Q1MonsterMoveSeq(MonsterClass, Run));
   if Copy(MonsterClass, 1, 15) = 'monster_soldier' then
   begin
     { soldier_move_run (after start_run); walking: soldier_move_walk2
@@ -202,7 +206,10 @@ begin
   else
   if MonsterClass = 'monster_makron' then
     { makron_move_run / makron_move_walk: the same }
-    Result := MakeMove('walk204', [3, 12, 8, 8, 8, 6, 12, 9, 6, 12]);
+    Result := MakeMove('walk204', [3, 12, 8, 8, 8, 6, 12, 9, 6, 12])
+  else
+    { Call of the Void's Quake 1 monsters }
+    Result := Q1MonsterMoveSeq(MonsterClass, Run);
 end;
 
 function MoveSeqSpeed(const Seq: TMonsterMoveSeq): Single;

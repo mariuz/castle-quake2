@@ -49,6 +49,8 @@ type
     FWaterWarp: TScreenEffectNode;
     FWaterWarpTime: TSFFloat;
     FWaterWarpClock: Single;
+    { Quit on the next Update (the map report) }
+    FQuitPending: Boolean;
     FCameraMode: TCameraMode;
     FMapName: String;
     FAutoTestMap: String;
@@ -505,7 +507,9 @@ begin
   if FMapReportFile <> '' then
   begin
     RunMapReport;
-    QuitNow;
+    { Quit on the first Update: Application.Terminate during Start (before
+      the main loop runs) was lost and the report never exited }
+    FQuitPending := True;
   end else
   if FAutoTestMap <> '' then
   begin
@@ -1652,6 +1656,12 @@ var
   Firing: Boolean;
 begin
   inherited Update(SecondsPassed, HandleInput);
+  if FQuitPending then
+  begin
+    FQuitPending := False;
+    QuitNow;
+    Exit;
+  end;
 
   if FDemoCommands.Count > 0 then
   begin

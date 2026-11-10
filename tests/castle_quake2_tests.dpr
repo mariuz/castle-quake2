@@ -7,7 +7,7 @@
     ./castle-quake2-tests --generate-designs ../data
 
   With the full game's PAK, checks its monsters' tables against its models:
-    ./castle-quake2-tests --retail <path to baseq2/pak0.pak>
+    ./castle-quake2-tests --retail <path to baseq2/pak0.pak> [<mod pak0.pak>]
 
   Also compares autotest screenshots with reference images (used by CI):
     ./castle-quake2-tests --compare reference.png screenshot.png diff.png [max-mean-diff]
@@ -27,7 +27,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, Zipper;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, Zipper;
 
 var
   Passed, Failed: Integer;
@@ -1141,6 +1141,35 @@ end;
 
 { --retail <pak>: the full game's monsters' attack and walk / run tables
   against the retail models' frame names (CI has no retail data) }
+{ Every Quake 1 variant's model has its archetype's frame count }
+procedure TestModQ1Models;
+const
+  Classes: array[0..33] of String = ('monster_ogre', 'monster_ogre_prototype', 'monster_ogre2_strogg',
+    'monster_knight', 'monster_knight_prototype', 'monster_knight_strogg', 'monster_enforcer',
+    'monster_enforcer_prototype', 'monster_enforcer_strogg', 'monster_soldier_grunt',
+    'monster_soldier_grunt_double', 'monster_soldier_grunt_prototype', 'monster_soldier_strogg',
+    'monster_zombie', 'monster_zombie_prototype', 'monster_zombie_strogg', 'monster_wizard',
+    'monster_wizard_prototype', 'monster_wizard_strogg', 'monster_wizarcuda_strogg', 'monster_fiend',
+    'monster_fiend_prototype', 'monster_fiend_strogg', 'monster_dog', 'monster_dog_prototype',
+    'monster_hellknight', 'monster_hknight_prototype', 'monster_hknight_hyper', 'monster_hknight_bsk_strogg',
+    'monster_shambler', 'monster_shambler_prototype', 'monster_shambler_strogg', 'monster_shamacudda',
+    'monster_shalrath');
+var
+  C: String;
+  Def: PQuakeMonsterDef;
+  Mdl: TQuakeMd2;
+begin
+  for C in Classes do
+  begin
+    Def := FindMonsterDef(C);
+    Mdl := nil;
+    if Def <> nil then
+      Mdl := Md2Manager.GetModel(Def^.Model);
+    Check((Mdl <> nil) and (Mdl.FrameCount = Q1FrameCount(Q1Archetype(C))),
+      Format('%s model has the Quake 1 frame count %d', [C, Q1FrameCount(Q1Archetype(C))]));
+  end;
+end;
+
 procedure TestRetailMonsters;
 const
   RetailClasses: array[0..13] of String = ('monster_gladiator', 'monster_chick', 'monster_mutant',
@@ -1192,6 +1221,54 @@ begin
   { Jorg's legs follow the rider's frames: the same names for its 188 }
   Mdl := Md2Manager.GetModel('models/monsters/boss3/jorg/tris.md2');
   Check((Mdl <> nil) and (Mdl.FrameCount = 188), 'Jorg legs model, 188 frames');
+end;
+
+{ Call of the Void's Quake 1 monsters: tables inside one $frame group each }
+procedure TestQ1Monsters;
+const
+  Classes: array[0..12] of String = ('monster_ogre', 'monster_knight', 'monster_enforcer',
+    'monster_soldier_grunt', 'monster_zombie', 'monster_wizard', 'monster_fiend', 'monster_dog',
+    'monster_hellknight', 'monster_shambler', 'monster_shalrath', 'monster_fish', 'monster_spawn');
+var
+  C: String;
+  A: TQ1Archetype;
+  Seq: TMonsterAttackSeq;
+  Move: TMonsterMoveSeq;
+  Run, AllInside: Boolean;
+
+  function Inside(const FirstFrame: String; const Count: Integer): Boolean;
+  var
+    Idx, GFirst, GCount: Integer;
+  begin
+    Idx := StrToIntDef(Copy(FirstFrame, 2, MaxInt), -1);
+    Result := (FirstFrame <> '') and (FirstFrame[1] = '#') and Q1GroupAt(A, Idx, GFirst, GCount) and
+      (Idx + Count <= GFirst + GCount);
+    if not Result then
+      Writeln('  ', C, ': ', FirstFrame, ' + ', Count, ' leaves its frame group');
+  end;
+
+begin
+  CheckEquals(147, Q1FrameCount(qaOgre), 'Quake 1 ogre: 147 frames');
+  CheckEquals(61, Q1FrameIndex(qaOgre, 'shoot', 1), 'ogre shoot1 is frame 61');
+  CheckEquals(114, Q1FrameCount(qaGrunt), 'Quake 1 grunt: 114 frames');
+  CheckEquals(54, Q1FrameCount(qaScrag), 'Quake 1 scrag: 54 frames');
+  Check(Q1Archetype('monster_ogre_strogg') = qaNone, 'the 90-frame strogg ogre keeps the generic AI');
+  Check(Q1Archetype('monster_knight_strogg') = qaKnight, 'the strogg knight is a Quake 1 knight');
+  Check(Q1AnimRange(qaOgre, 'walk') = '#9:16', 'ogre walk animation range');
+  AllInside := True;
+  for C in Classes do
+  begin
+    A := Q1Archetype(C);
+    Check(Length(MonsterAttackSeqs(C)) > 0, C + ' has Quake 1 attacks');
+    for Seq in MonsterAttackSeqs(C) do
+      AllInside := Inside(Seq.FirstFrame, Seq.Count) and AllInside;
+    for Run in Boolean do
+    begin
+      Move := MonsterMoveSeq(C, Run);
+      AllInside := (Length(Move.Dists) > 0) and Inside(Move.FirstFrame, Length(Move.Dists)) and AllInside;
+    end;
+  end;
+  Check(AllInside, 'Quake 1 monster tables stay inside their $frame groups');
 end;
 
 procedure TestMonsterMoves;
@@ -3090,6 +3167,9 @@ begin
       Halt(2);
     end;
     TestRetailMonsters;
+    { A mod PAK too (Call of the Void): its Quake 1 monsters' models }
+    if (ParamCount >= 3) and Pak.AddFile(ParamStr(3)) then
+      TestModQ1Models;
     Writeln(Format('%d passed, %d failed', [Passed, Failed]));
     if Failed > 0 then
       Halt(1);
@@ -3134,6 +3214,7 @@ begin
   TestGun;
   TestMonsterAttacks;
   TestMonsterMoves;
+  TestQ1Monsters;
   TestTrace;
   TestMonsterJump;
   { Last: they add files to the PAKs }

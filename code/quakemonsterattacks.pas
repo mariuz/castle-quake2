@@ -86,6 +86,17 @@ type
     Sweep: Boolean;
     { Relative chance among the sequences that fit (default 1) }
     Weight: Single;
+    { Times the refire loop may go back (0: no limit) - Quake 1's enforcer
+      plays its shot frames twice }
+    MaxLoops: Integer;
+    { Projectile speed (0: the default of the kind) }
+    Speed: Single;
+    { Shots fanned out: yaw offset (YawStep degrees per frame) from
+      YawCenter - Quake 1's hell knight magic }
+    YawStep: Single;
+    YawCenter: Integer;
+    { akLeap: forward and upward speed (0: the mutant's 600 / 250) }
+    LeapForward, LeapUp: Single;
   end;
   PMonsterAttackSeq = ^TMonsterAttackSeq;
 
@@ -101,6 +112,7 @@ type
     FClock: Single;
     FHoldLeft: Integer;
     FShots: Integer;
+    FLoops: Integer;
     FActive: Boolean;
     procedure EnterFrame(const CanSee: Boolean);
     procedure Fire;
@@ -129,6 +141,17 @@ type
     function ShotDamage(const ShotIndex: Integer): Integer;
   end;
 
+{ Building tables (also used by QuakeQ1Monsters) }
+function MakeSeq(const First: String; const Count: Integer; const Fire: array of Integer;
+  const Kind: TAttackKind; const Damage: Integer; const Sound: String;
+  const Use: TAttackUse = auRanged): TMonsterAttackSeq;
+function Weighted(const S: TMonsterAttackSeq; const Weight: Single): TMonsterAttackSeq;
+function Looping(const S: TMonsterAttackSeq; const LoopStart, LoopEnd: Integer;
+  const Chance: Single; const Condition: TLoopCondition = lcSeen): TMonsterAttackSeq;
+function MeleeSeq(const First: String; const Count: Integer; const Fire: array of Integer;
+  const Damage, Spread: Integer; const Kick: Single; const Sound: String): TMonsterAttackSeq;
+procedure AddSeq(var Seqs: TMonsterAttackSeqs; const S: TMonsterAttackSeq);
+
 { Attack sequences of a monster class (empty: no table, generic attack) }
 function MonsterAttackSeqs(const MonsterClass: String): TMonsterAttackSeqs;
 
@@ -142,11 +165,11 @@ function ChooseAttackSeq(const Seqs: TMonsterAttackSeqs; const Dist, R: Single):
 implementation
 
 uses
-  Math;
+  Math, QuakeQ1Monsters;
 
 function MakeSeq(const First: String; const Count: Integer; const Fire: array of Integer;
   const Kind: TAttackKind; const Damage: Integer; const Sound: String;
-  const Use: TAttackUse = auRanged): TMonsterAttackSeq;
+  const Use: TAttackUse): TMonsterAttackSeq;
 var
   I: Integer;
 begin
@@ -180,7 +203,7 @@ end;
 
 { Refire: after LoopEnd go back to LoopStart with Chance while visible }
 function Looping(const S: TMonsterAttackSeq; const LoopStart, LoopEnd: Integer;
-  const Chance: Single; const Condition: TLoopCondition = lcSeen): TMonsterAttackSeq;
+  const Chance: Single; const Condition: TLoopCondition): TMonsterAttackSeq;
 begin
   Result := S;
   Result.LoopStart := LoopStart;
@@ -242,6 +265,8 @@ var
   Sound: String;
 begin
   Result := nil;
+  if Q1Archetype(MonsterClass) <> qaNone then
+    Exit(Q1MonsterAttackSeqs(MonsterClass));
   if (MonsterClass = 'monster_soldier_light') or (MonsterClass = 'monster_soldier') or
      (MonsterClass = 'monster_soldier_ss') then
   begin
@@ -502,7 +527,9 @@ begin
     S := MakeSeq('attak501', 16, [8], akRail, 50, 'rail_up', auAny);
     S.AimFrame := 7;
     AddSeq(Result, Weighted(S, 0.4));
-  end;
+  end else
+    { Call of the Void's Quake 1 monsters }
+    Result := Q1MonsterAttackSeqs(MonsterClass);
 end;
 
 function ChooseAttackSeq(const Seqs: TMonsterAttackSeqs; const Dist, R: Single): Integer;
@@ -584,6 +611,7 @@ begin
   FClock := 0;
   FHoldLeft := 0;
   FShots := 0;
+  FLoops := 0;
   FActive := Seq.Count > 0;
   if FActive then
     EnterFrame(CanSee);
@@ -666,8 +694,11 @@ begin
     FHoldLeft := 0;
     if FFrame = FSeq.LoopEnd then
     begin
-      if LoopsBack(CanSee) then
-        FFrame := FSeq.LoopStart
+      if ((FSeq.MaxLoops = 0) or (FLoops < FSeq.MaxLoops)) and LoopsBack(CanSee) then
+      begin
+        Inc(FLoops);
+        FFrame := FSeq.LoopStart;
+      end
       else
       if FSeq.SkipFrame >= 0 then
         FFrame := FSeq.SkipFrame

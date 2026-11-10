@@ -365,6 +365,15 @@ begin
   Parts := LowerCase(Names).Split([',']);
   for N in Parts do
   begin
+    { '#first:count': frames by index (models whose frames have no names) }
+    if (Length(Trim(N)) > 1) and (Trim(N)[1] = '#') and (Pos(':', N) > 0) then
+    begin
+      Anim.First := StrToIntDef(Copy(Trim(N), 2, Pos(':', Trim(N)) - 2), -1);
+      Anim.Count := StrToIntDef(Copy(Trim(N), Pos(':', Trim(N)) + 1, MaxInt), 0);
+      if (Anim.First >= 0) and (Anim.Count > 0) and (Anim.First + Anim.Count <= FFrames.Count) then
+        Exit(True);
+      Continue;
+    end;
     if FAnims.TryGetValue(Trim(N), Anim) then
       Exit(True);
     { Prefix match, e.g. "death" matches "death1" sequences }

@@ -3141,7 +3141,9 @@ begin
         if Monster.AttackKind = akPellets then
         begin
           Hits := 0;
-          for I := 1 to 9 do
+          { 9 pellets (Quake 2 shotgun soldiers) or the shot's own count
+            (Quake 1's grunt: 4) }
+          for I := 1 to Max(Monster.AttackBullets, 9 * Ord(Monster.AttackBullets <= 1)) do
             if Random < Accuracy * 0.8 then
               Inc(Hits);
           if Hits > 0 then

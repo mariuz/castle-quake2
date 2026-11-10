@@ -62,7 +62,7 @@ implementation
 
 uses
   Math, StrUtils,
-  QuakeEntities, QuakeGeometry, QuakeSettings, QuakeMonsterAttacks, QuakeMonsterMoves;
+  QuakeEntities, QuakeGeometry, QuakeSettings, QuakeMonsterAttacks, QuakeMonsterMoves, QuakeQ1Monsters;
 
 const
   { Spawned, used by targets, drawn or used as markers by the game code }
@@ -110,6 +110,9 @@ begin
     if (not IsGenericMonsterDef(FindMonsterDef(CName))) and (Length(MonsterAttackSeqs(CName)) > 0) and
        (Length(MonsterMoveSeq(CName, True).Dists) > 0) then
       Exit(csSupported);
+    if IsGenericMonsterDef(FindMonsterDef(CName)) and (Q1Archetype(CName) <> qaNone) then
+      Note := 'Quake 1 monster: Quake 1''s attack and walk / run frames (QuakeQ1Monsters); no special deaths (zombies getting up, the spawn exploding)'
+    else
     if IsGenericMonsterDef(FindMonsterDef(CName)) then
       Note := 'a mod''s monster (model and health known): generic monster AI, one attack'
     else

@@ -258,6 +258,8 @@ type
       blaster speed (0: the default), Makron's sweep yaw offset (degrees) }
     AttackKick: Single;
     AttackRadius: Single;
+    { akLeap speeds of the shot's sequence (0: the mutant's) }
+    AttackLeapForward, AttackLeapUp: Single;
     AttackSpeed: Single;
     AttackYaw: Single;
     { The target's position saved for this shot (gladiator / Makron railgun) }
@@ -334,6 +336,9 @@ type
       model (stand201.., walk201.., pain401.., death201..), not the ones
       riding Jorg }
     function AnimNames(const Names: String): String;
+    function Q1AnimNames(const Names: String): String;
+    { Model frame of a table's FirstFrame (a name or '#<index>'), -1 if none }
+    function FrameOf(const AName: String): Integer;
     { Speed of the jump (CGE units a second) }
     function JumpSpeed: Single;
     { Has a dodge (duck) reaction }
@@ -790,6 +795,11 @@ function MonsterGibs(const MonsterClass: String): TMonsterGibs;
 
 implementation
 
+uses
+  QuakeQ1Monsters;
+
+procedure AdaptVariantAttacks(var Seqs: TMonsterAttackSeqs; const Def: PQuakeMonsterDef); forward;
+
 function MonsterGibs(const MonsterClass: String): TMonsterGibs;
 
   procedure Add(const Model: String; const Count: Integer; const Metallic: Boolean = False);
@@ -1196,6 +1206,10 @@ begin
   FAttack := TMonsterAttack.Create;
   FAttack.OnFire := @AttackSeqFire;
   FAttackSeqs := MonsterAttackSeqs(Def^.ClassName);
+  { Call of the Void's variants keep their own weapon (the strogg ogre's
+    pellets, the berserker hell knight's melee only) }
+  if IsGenericMonsterDef(Def) then
+    AdaptVariantAttacks(FAttackSeqs, Def);
   FMove := TMonsterMoveAnim.Create;
   FWalkSeq := MonsterMoveSeq(Def^.ClassName, False);
   FRunSeq := MonsterMoveSeq(Def^.ClassName, True);
@@ -2147,9 +2161,79 @@ begin
     Alert;
 end;
 
+{ A Call of the Void variant whose definition gives another weapon than its
+  Quake 1 archetype's: its ranged sequences use that kind and damage, or
+  are dropped for a melee-only one }
+procedure AdaptVariantAttacks(var Seqs: TMonsterAttackSeqs; const Def: PQuakeMonsterDef);
+var
+  I: Integer;
+  Kept: TMonsterAttackSeqs;
+begin
+  if Q1Archetype(Def^.ClassName) = qaNone then
+    Exit;
+  Kept := nil;
+  for I := 0 to High(Seqs) do
+  begin
+    if (Seqs[I].Kind in [akMelee, akLeap]) or (Seqs[I].Kind = Def^.Attack) then
+    begin
+      AddSeq(Kept, Seqs[I]);
+      Continue;
+    end;
+    if Def^.Attack in [akMelee, akLeap] then
+      Continue;
+    Seqs[I].Kind := Def^.Attack;
+    Seqs[I].Damage := Def^.Damage;
+    Seqs[I].DamageRandom := 0;
+    if Def^.Attack = akPellets then
+      Seqs[I].Volley := 4;
+    AddSeq(Kept, Seqs[I]);
+  end;
+  if Length(Kept) > 0 then
+    Seqs := Kept;
+end;
+
+function TQuakeMonster.Q1AnimNames(const Names: String): String;
+var
+  Part, R: String;
+begin
+  { 'stand,idle,fidget' -> the archetype's stand range, keeping the names
+    it has no range for as fallbacks }
+  Result := '';
+  for Part in Names.Split([',']) do
+  begin
+    R := Q1AnimRange(Q1Archetype(Def^.ClassName), Trim(Part));
+    if R = '' then
+      R := Trim(Part);
+    if Result <> '' then
+      Result := Result + ',';
+    Result := Result + R;
+  end;
+end;
+
+function TQuakeMonster.FrameOf(const AName: String): Integer;
+begin
+  { '#<index>' (QuakeQ1Monsters) or a frame name }
+  if (AName <> '') and (AName[1] = '#') then
+  begin
+    Result := StrToIntDef(Copy(AName, 2, MaxInt), -1);
+    if (Model = nil) or (Result >= Model.Model.FrameCount) then
+      Result := -1;
+  end else
+  if Model <> nil then
+    Result := Model.Model.FrameNames.IndexOf(AName)
+  else
+    Result := -1;
+end;
+
 function TQuakeMonster.AnimNames(const Names: String): String;
 begin
   Result := Names;
+  { Call of the Void's Quake 1 monsters: frame ranges by index }
+  if Q1Archetype(Def^.ClassName) <> qaNone then
+  begin
+    Result := Q1AnimNames(Names);
+    Exit;
+  end;
   if Def^.ClassName = 'monster_makron' then
   begin
     Result := StringReplace(Result, 'stand', 'stand2', [rfReplaceAll]);
@@ -2164,8 +2248,14 @@ procedure TQuakeMonster.Leap;
 begin
   if Def^.Flying or not IsAlive then
     Exit;
-  FJumpVel := YawToCgeDir(FacingAngle) * 600;
-  FJumpVel.Y := 250;
+  if AttackLeapForward > 0 then
+    FJumpVel := YawToCgeDir(FacingAngle) * AttackLeapForward
+  else
+    FJumpVel := YawToCgeDir(FacingAngle) * 600;
+  if AttackLeapUp > 0 then
+    FJumpVel.Y := AttackLeapUp
+  else
+    FJumpVel.Y := 250;
   FJumping := True;
   LeapDamage := AttackDamage;
 end;
@@ -2246,7 +2336,7 @@ begin
   for I := 0 to High(FAttackSeqs) do
     if FAttackSeqs[I].Use = auDodge then
     begin
-      First := Model.Model.FrameNames.IndexOf(FAttackSeqs[I].FirstFrame);
+      First := FrameOf(FAttackSeqs[I].FirstFrame);
       if (First < 0) or (First + FAttackSeqs[I].Count > Model.Model.FrameCount) then
         Exit;
       SetState(msAttack);
@@ -2273,7 +2363,7 @@ begin
       Seq := FRunSeq
     else
       Seq := FWalkSeq;
-    First := Model.Model.FrameNames.IndexOf(Seq.FirstFrame);
+    First := FrameOf(Seq.FirstFrame);
     if (Length(Seq.Dists) = 0) or (First < 0) or (First + Length(Seq.Dists) > Model.Model.FrameCount) then
     begin
       FMove.Stop;
@@ -2297,7 +2387,7 @@ begin
   I := ChooseAttackSeq(FAttackSeqs, Dist, Random);
   if I < 0 then
     Exit;
-  First := Model.Model.FrameNames.IndexOf(FAttackSeqs[I].FirstFrame);
+  First := FrameOf(FAttackSeqs[I].FirstFrame);
   if (First < 0) or (First + FAttackSeqs[I].Count > Model.Model.FrameCount) then
     Exit;
   FAttackFirst := First;
@@ -2326,7 +2416,11 @@ begin
     AttackYaw := SweepYaw(FAttack.Frame)
   else
     AttackYaw := 0;
-  AttackSpeed := 0;
+  AttackSpeed := Seq.Speed;
+  if Seq.YawStep <> 0 then
+    AttackYaw := (FAttack.Frame - Seq.YawCenter) * Seq.YawStep;
+  AttackLeapForward := Seq.LeapForward;
+  AttackLeapUp := Seq.LeapUp;
   { monster_fire_blaster at 1000 (the soldiers' and flyers' bolts keep the
     default) }
   if (Seq.Kind = akBlaster) and ((Def^.ClassName = 'monster_floater') or
