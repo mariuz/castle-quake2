@@ -35,6 +35,8 @@ Demo script actions: `W:sec` wait, `S` screenshot (logs FPS + camera), `X` fire,
 
 Benchmark: `castle-quake2 --benchmark <map> <prefix>` runs `BenchmarkScript` (unit `QuakeBenchmark`) and logs `Benchmark: N frames ..., frame ms p50 / p95 / p99 / max / mean, logic ms, shapes` (demo actions `BS` / `BE` time any script part; `TViewPlay.Update` adds each frame's wall time, the time from `UpdateMovementInput` to `UpdateLoopSounds` and `MainViewport.Statistics.ShapesRendered`). CI's step *Benchmark the demo maps* writes the table to the run summary; Mesa numbers only compare CI runs. Scripted runs that ask to quit start `QuakeExitWatchdog` (process ended 20 s later if shutdown hangs; CI warns when a log has `ExitWatchdog`).
 
+Browser build: `node tests/web/smoke.js <dist folder or URL> [png] [timeout s]` (Playwright, Chromium with SwiftShader) serves the folder, waits for `WebAssembly library finished initialization`, clicks a canvas corner (a click on a menu row selects it) and presses Enter twice (Single Player, skill), waits for `Loaded map "maps/`, measures `requestAnimationFrame`s for 5 s, fails on GLSL errors / exceptions / page errors. The `web` workflow runs it before deploying (step summary) and retries the Pages deploy once.
+
 Map compatibility report: `castle-quake2 --map-report report.md` (under xvfb on Linux) loads every map and lists unsupported / partial entity classes (`QuakeMapReport.EntitySupport`; add new classnames there when you implement them). `docs/map-report-demo.md` is the demo's; CI fails if the demo maps get an unsupported class.
 
 ## Unit tests

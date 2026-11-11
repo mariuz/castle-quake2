@@ -93,6 +93,23 @@ Benchmark: 477 frames in 17.4 s, frame ms p50 35.9 p95 50.5 p99 58.7 max 65.1 me
 
 The demo script actions `BS` and `BE` measure any part of a script the same way. CI benchmarks the three demo maps after the autotests and shows the table in the run's summary (and `benchmark.md` in the artifact). CI draws in software, so compare its numbers only with other CI runs; on a real GPU the frame times are far lower.
 
+## The browser build
+
+`tests/web/smoke.js` opens the web build in headless Chromium (software WebGL), starts a game from the menu like a player (Enter on *Single Player*, Enter on the skill), waits for the map, counts the browser's frames for 5 s and saves a screenshot. It fails on a shader that doesn't compile, a WebAssembly or JavaScript exception, or no map within the time limit. The `web` workflow runs it on every build before deploying, and shows the result in the run's summary:
+
+```
+OK: map loaded at 4.9 s, 7.1 frames per second in the browser, screenshot web-smoke.png
+```
+
+Run it on a build folder (served on a local port) or on the published page:
+
+```sh
+node tests/web/smoke.js castle-engine-output/web/dist shot.png
+node tests/web/smoke.js https://mariuz.github.io/castle-quake2/play/ shot.png
+```
+
+It needs Playwright (`npm install playwright`; the cloud container has it). Its frame rate is software rendering, only comparable between runs.
+
 ## Screenshot comparison
 
 ```powershell

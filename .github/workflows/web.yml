@@ -119,6 +119,32 @@ jobs:
           castle-engine compile --target=web --mode=release --verbose
           ls -l castle-engine-output/web/dist/
 
+      - name: Smoke test in headless Chromium
+        # Start a game from the menu in the built page (software WebGL) and
+        # fail on shader errors, wasm exceptions or no map within 5 minutes;
+        # the frame rate is only comparable between runs
+        timeout-minutes: 20
+        run: |
+          set -eux
+          mkdir -p /tmp/pw && cd /tmp/pw
+          npm init -y > /dev/null
+          npm install playwright@1.48.2
+          npx playwright install --with-deps chromium
+          cd "$GITHUB_WORKSPACE"
+          NODE_PATH=/tmp/pw/node_modules node tests/web/smoke.js castle-engine-output/web/dist web-smoke.png 300 | tee web-smoke.log
+          echo "### Browser build" >> "$GITHUB_STEP_SUMMARY"
+          grep "^OK:" web-smoke.log >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload smoke test screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-smoke
+          path: |
+            web-smoke.png
+            web-smoke.log
+          if-no-files-found: ignore
+
       - name: Assemble site
         run: |
           set -eux
@@ -148,4 +174,10 @@ jobs:
           enablement: true
       - name: Deploy
         id: deployment
+        # GitHub Pages sometimes never reports a status and this times out;
+        # one retry below
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+      - name: Deploy (retry)
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4

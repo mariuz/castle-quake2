@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The browser build is tested before it is published: the `web` workflow opens it in headless Chromium, starts a game from the menu, and fails on shader errors, WebAssembly exceptions or no map; the load time and frame rate (software WebGL) go to the run's summary. `tests/web/smoke.js` does the same on any build folder or on the published page. See [TESTING.md](TESTING.md#the-browser-build).
+- The GitHub Pages deploy is retried once when GitHub doesn't answer (it timed out twice for v0.24.0).
+
 ## v0.28.0 — 2026-11-11
 
 A benchmark that CI runs on every change, and scripted runs that can't hang at shutdown any more. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
