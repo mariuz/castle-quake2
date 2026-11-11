@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.28.0 — 2026-11-11
+
+A benchmark that CI runs on every change, and scripted runs that can't hang at shutdown any more. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - A benchmark: `--benchmark <map> <prefix>` plays a fixed tour of the map and logs frame time percentiles (p50, p95, p99, max), the game logic's share and the shapes drawn; the demo script actions `BS` / `BE` time any part of a script. CI benchmarks the three demo maps and shows the table in each run's summary. See [TESTING.md](TESTING.md#benchmark).
 - Scripted runs (autotests, `--map-report`, benchmarks) end even if shutdown hangs: 20 s after quitting a watchdog ends the process and says so. CI waited 10 minutes for such a run during v0.26.0's release; it now passes with a warning instead.
