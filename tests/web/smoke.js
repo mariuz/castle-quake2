@@ -4,7 +4,10 @@
 // view is drawing, and fail on shader compile errors, wasm / JS exceptions or a
 // timeout.
 //
-//   node tests/web/smoke.js <dist folder or URL> [screenshot.png] [timeout s]
+//   node tests/web/smoke.js <dist folder or URL> [screenshot.png] [timeout s] [?query]
+//
+// With a query ("?map=demo2&fps=1"), the page is opened with it and the game
+// should go straight to that map (settings from the address, no menu).
 //
 // A folder is served on a local port (the PAK is downloaded from it).
 const { chromium } = require('playwright');
@@ -15,6 +18,8 @@ const path = require('path');
 const target = process.argv[2] || 'castle-engine-output/web/dist';
 const shot = process.argv[3] || 'web-smoke.png';
 const timeoutS = Number(process.argv[4] || 240);
+const query = process.argv[5] || '';
+const queryMap = (new URLSearchParams(query).get('map')) || '';
 
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm',
   '.json': 'application/json', '.png': 'image/png', '.css': 'text/css' };
@@ -56,7 +61,8 @@ function serve(dir) {
       ready = true;
       console.log(`[${((Date.now() - started) / 1000).toFixed(1)} s] game initialized`);
     }
-    if (/Initialized map|Loaded map "maps\//.test(text) && !loaded) {
+    const wanted = queryMap ? new RegExp('Loaded map "maps/' + queryMap + '\\.bsp"') : /Loaded map "maps\//;
+    if (wanted.test(text) && !loaded) {
       loaded = true;
       loadedAt = ((Date.now() - started) / 1000).toFixed(1);
       console.log(`[${((Date.now() - started) / 1000).toFixed(1)} s] ${text}`);
@@ -65,12 +71,13 @@ function serve(dir) {
       errors.push(text);
   });
   page.on('pageerror', (err) => errors.push('page error: ' + err.message));
+  url = url + query;
   console.log('Opening ' + url);
   await page.goto(url, { waitUntil: 'load' });
   const deadline = started + timeoutS * 1000;
   while (!ready && errors.length === 0 && Date.now() < deadline)
     await page.waitForTimeout(500);
-  if (ready) {
+  if (ready && !queryMap) {
     // The menu: focus the canvas (in a corner: a click on a menu row selects
     // that row), Enter on "Single Player", Enter on the skill (Medium)
     await page.waitForTimeout(1000);

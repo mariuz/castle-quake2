@@ -8,10 +8,11 @@ unit GameInitialize;
 interface
 
 uses
-  SysUtils, Classes,
+  SysUtils, Classes, Math,
   CastleWindow, CastleLog, CastleUIControls, CastleApplicationProperties, CastleParameters,
   CastleUtils, CastleFilesUtils, CastleUriUtils,
-  QuakePak, QuakePalette, QuakeSound, QuakeGeometry, QuakeMonsterTypes, QuakeSettings, QuakeGamepad, QuakeTouch, QuakeBenchmark, CastleConfig
+  QuakePak, QuakePalette, QuakeSound, QuakeGeometry, QuakeMonsterTypes, QuakeSettings, QuakeGamepad, QuakeTouch, QuakeBenchmark, QuakeWebParams, CastleConfig
+  {$ifdef WASI}, CastleInternalJobWeb{$endif}
   {$region 'Castle Initialization Uses'}
   // The content here may be automatically updated by CGE editor.
   , GameViewMenu
@@ -25,6 +26,10 @@ var
   AutoTestPrefix: String;
   AutoTestDemo: String;
   CmdWarp: String;
+  { +set skill <0-3> (or ?skill= on the web): the skill for this run }
+  CmdSkill: Integer = -1;
+  { --fps (or ?fps=1): show the frame rate from the start }
+  CmdShowFps: Boolean;
   CmdBaseDir: String;
   CmdPaks: TStringList;
   { -game <dir> / +set game <dir>: a mod folder loaded over baseq2 (e.g.
@@ -98,12 +103,43 @@ begin
   end;
 end;
 
+{ On the web: the page address's settings ("?map=demo2&skill=2") as more
+  command-line arguments }
+procedure AddWebAddressParameters;
+{$ifdef WASI}
+var
+  Query, S, Added: String;
+  Ignored: TStringList;
+begin
+  Query := JSWindow.location.search;
+  if Query = '' then
+    Exit;
+  Ignored := TStringList.Create;
+  try
+    Added := '';
+    for S in QueryToParameters(Query, Ignored) do
+    begin
+      Parameters.Add(S);
+      Added := Added + ' ' + S;
+    end;
+    WritelnLog('GameInitialize', 'Web address "%s": arguments "%s", ignored keys "%s"',
+      [Query, Trim(Added), Ignored.CommaText]);
+  finally
+    Ignored.Free;
+  end;
+end;
+{$else}
+begin
+end;
+{$endif}
+
 procedure ApplicationInitialize;
 var
   I: Integer;
   LoadedAny, ModFound: Boolean;
   Roots: TStringList;
 begin
+  AddWebAddressParameters;
   I := 1;
   while I <= Parameters.High do
   begin
@@ -130,6 +166,8 @@ begin
     end;
     if Parameters[I] = '--touch' then
       TouchControlsForced := True;
+    if Parameters[I] = '--fps' then
+      CmdShowFps := True;
     if (Parameters[I] = '--demo') and (I + 1 <= Parameters.High) then
     begin
       AutoTestDemo := Parameters[I + 1];
@@ -158,6 +196,11 @@ begin
     begin
       CmdGame := Parameters[I + 1];
       Inc(I);
+    end else
+    if (Parameters[I] = '+set') and (I + 2 <= Parameters.High) and SameText(Parameters[I + 1], 'skill') then
+    begin
+      CmdSkill := EnsureRange(StrToIntDef(Parameters[I + 2], 1), 0, 3);
+      Inc(I, 2);
     end else
     if (Parameters[I] = '+set') and (I + 2 <= Parameters.High) and SameText(Parameters[I + 1], 'game') then
     begin
@@ -234,6 +277,8 @@ begin
   end else
     Settings.Persistent := False;
   GameSkill := Settings.Skill;
+  if CmdSkill >= 0 then
+    GameSkill := CmdSkill;
   { Game controllers; not in autotests (results must not depend on devices) }
   if AutoTestMap = '' then
     InitializeGamepads;
@@ -250,6 +295,7 @@ begin
   ViewMenu := TViewMenu.Create(Application);
   ViewPlay := TViewPlay.Create(Application);
   {$endregion 'Castle View Creation'}
+  ViewPlay.ShowFpsAtStart := CmdShowFps;
 
   if AutoTestMap <> '' then
   begin

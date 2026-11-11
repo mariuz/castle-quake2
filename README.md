@@ -47,7 +47,7 @@ The full feature list, with the engine parts each feature uses, is in [FEATURES.
 
 ## Getting started
 
-- **In the browser**: open <https://mariuz.github.io/castle-quake2/>.
+- **In the browser**: open <https://mariuz.github.io/castle-quake2/>. Settings can go in the address of the game page, e.g. <https://mariuz.github.io/castle-quake2/play/?map=demo2&skill=2&fps=1> (`map`, `skill` 0–3, `touch=1`, `fps=1`, `gamma`).
 - **On your computer**: download the Windows or Linux package from the [releases](https://github.com/mariuz/castle-quake2/releases), unpack it and run `castle-quake2`. The shareware demo is included.
 - **On Android**: install the APK from the releases (`adb install castle-quake2-*.apk`, or open it on the phone). It is debug-signed and not yet tried on a real device.
 - **With the full game**: point it at your Quake 2 folder: `castle-quake2 -basedir "C:\Games\Quake2"` (also finds Quake II Remastered's `rerelease` folder), then pick a map in *Map Warp* or start with `+map base1`.

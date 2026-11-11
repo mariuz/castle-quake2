@@ -4,6 +4,7 @@
 
 - The browser build is tested before it is published: the `web` workflow opens it in headless Chromium, starts a game from the menu, and fails on shader errors, WebAssembly exceptions or no map; the load time and frame rate (software WebGL) go to the run's summary. `tests/web/smoke.js` does the same on any build folder or on the published page. See [TESTING.md](TESTING.md#the-browser-build).
 - The web build is sturdier: the GitHub Pages deploy is retried once when GitHub doesn't answer (it timed out twice for v0.24.0), and its toolchain install skips 100 MB of recommended packages and retries (a mirror answered 404 during v0.28.0).
+- Settings in the web page's address: `?map=demo2&skill=2&fps=1` (also `touch=1`, `gamma`, and `demo=<script>` to run a test script) opens that map at that skill with the frame rate shown, without the menu. On the desktop `+set skill <0-3>` and `--fps` do the same. CI opens the built page with such an address too.
 
 ## v0.28.0 — 2026-11-11
 

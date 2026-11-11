@@ -27,7 +27,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, Zipper;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeWebParams, Zipper;
 
 var
   Passed, Failed: Integer;
@@ -3084,6 +3084,38 @@ begin
     (Pos('I:21,', BenchmarkScript) > 0), 'benchmark script tours items 0..21 between BS and BE');
 end;
 
+procedure TestWebParams;
+var
+  Ignored: TStringList;
+
+  function Joined(const A: TStringArray): String;
+  var
+    S: String;
+  begin
+    Result := '';
+    for S in A do
+      Result := Result + '|' + S;
+  end;
+
+begin
+  Check(UrlDecodeComponent('W%3A1%2CS+Q') = 'W:1,S Q', 'address components are URL-decoded');
+  Check(Joined(QueryToParameters('')) = '', 'no address parameters, no arguments');
+  Check(Joined(QueryToParameters('?map=demo2&skill=2&touch=1&fps=1')) = '|+set|skill|2|--touch|--fps|+map|demo2',
+    'map, skill, touch and fps from the address');
+  Check(Joined(QueryToParameters('touch=0&fps=0')) = '', 'touch=0 / fps=0 add nothing');
+  Check(Joined(QueryToParameters('?demo=W:1,S,Q')) = '|--autotest|demo1|web|--demo|W:1,S,Q',
+    'a demo script runs as an autotest on demo1');
+  Check(Joined(QueryToParameters('?map=demo3&demo=W%3A1%2CQ')) = '|--autotest|demo3|web|--demo|W:1,Q',
+    'a demo script on the chosen map, URL-decoded');
+  Ignored := TStringList.Create;
+  try
+    QueryToParameters('?foo=1&map=demo1&bar', Ignored);
+    Check(Ignored.CommaText = 'foo,bar', 'unknown address keys are reported');
+  finally
+    Ignored.Free;
+  end;
+end;
+
 procedure TestModSupport;
 var
   Dir: String;
@@ -3258,6 +3290,7 @@ begin
   TestLevelThemes;
   TestModSupport;
   TestBenchmark;
+  TestWebParams;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then

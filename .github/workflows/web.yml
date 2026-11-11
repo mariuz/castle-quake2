@@ -139,6 +139,8 @@ jobs:
           npx playwright install --with-deps chromium
           cd "$GITHUB_WORKSPACE"
           NODE_PATH=/tmp/pw/node_modules node tests/web/smoke.js castle-engine-output/web/dist web-smoke.png 300 | tee web-smoke.log
+          # Settings from the address: straight to demo2, easy, FPS counter
+          NODE_PATH=/tmp/pw/node_modules node tests/web/smoke.js castle-engine-output/web/dist web-smoke-address.png 300 '?map=demo2&skill=0&fps=1' | tee -a web-smoke.log
           echo "### Browser build" >> "$GITHUB_STEP_SUMMARY"
           grep "^OK:" web-smoke.log >> "$GITHUB_STEP_SUMMARY"
 
@@ -148,7 +150,7 @@ jobs:
         with:
           name: web-smoke
           path: |
-            web-smoke.png
+            web-smoke*.png
             web-smoke.log
           if-no-files-found: ignore
 

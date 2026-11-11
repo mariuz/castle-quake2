@@ -145,6 +145,8 @@ type
     procedure QuitNow;
     procedure RunMapReport;
   public
+    { --fps / ?fps=1: show the frame rate counter from the start }
+    ShowFpsAtStart: Boolean;
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
 
@@ -467,6 +469,8 @@ end;
 procedure TViewPlay.Start;
 begin
   inherited Start;
+  if ShowFpsAtStart then
+    LabelFps.Exists := True;
 
   { Touch screens get on-screen controls in front of everything but the
     menu and console }
