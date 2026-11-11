@@ -5,7 +5,7 @@ A port of **Quake 2** to the **Castle Game Engine** (Object Pascal / Free Pascal
 ![demo1 start](docs/screenshot-demo1.png)
 
 - 🌐 **[Play in the browser](https://mariuz.github.io/castle-quake2/)**: nothing to install
-- 📦 **[Download for Windows, Linux and Android](https://github.com/mariuz/castle-quake2/releases)** (latest: v0.28.0, see the [changelog](docs/CHANGELOG.md))
+- 📦 **[Download for Windows, Linux and Android](https://github.com/mariuz/castle-quake2/releases)** (latest: v0.29.0, see the [changelog](docs/CHANGELOG.md))
 - 📚 **[Documentation](#documentation)**
 
 ---
