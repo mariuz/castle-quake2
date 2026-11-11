@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.27.0 — 2026-11-11
+
+The mission pack's secret door (`func_door_secret2`), exported lifts and switches checked in Yamagi Quake II, and a roadmap for performance, graphics, the web build and networking. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - `func_door_secret2`, the mission pack's secret door (in Quake II Remastered and used by Call of the Void): it slides sideways, pauses, then back (or forward with its flag, or those two the other way round with 1ST_DOWN), waits 5 s or its `wait` and comes back, or stays open with OPEN_ONCE; it opens when shot unless it has a targetname (then with ALWAYS_SHOOT).
 - Checked in Yamagi Quake II: an exported level's lift (`func_plat`) carries you up and its switch (`func_button`) opens the doors it is wired to, like in this port.
