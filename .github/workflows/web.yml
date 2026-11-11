@@ -40,8 +40,15 @@ jobs:
       - name: Install bootstrap FPC and helpers
         timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y fpc binaryen make git unzip
+          # Without the recommended packages (VLC, SDL ...: 100 MB more), and
+          # retried: a mirror once answered 404 and failed v0.28.0's build
+          for attempt in 1 2 3; do
+            if sudo apt-get update && sudo apt-get install -y --no-install-recommends --fix-missing fpc binaryen make git unzip; then
+              break
+            fi
+            [ "$attempt" = 3 ] && exit 1
+            sleep 30
+          done
           fpc -iV
 
       - name: Restore cached FPC (trunk + wasm32) and Pas2js
