@@ -14,7 +14,7 @@ uses
   CastleViewport, CastleCameras, CastleTransform, CastleColors, CastleLog,
   CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound,
-  QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad, QuakeTouch,
+  QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad, QuakeTouch, QuakeExitWatchdog, QuakeBenchmark, CastleTimeUtils,
   X3DNodes, X3DFields, CastleRenderOptions,
   QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevel, QuakeLevelGen, QuakeLevelEditor, QuakeBspBuilder, QuakeTrace, fpjson, jsonparser, CastleDownload, CastleUriUtils;
 
@@ -84,6 +84,10 @@ type
     FDeathYawDir: TVector3;
     { Script clock for IN commands: seconds since the script (or its last L) started }
     FDemoClock: Single;
+    { Demo actions BS / BE: frame times between them }
+    FBenchmark: TQuakeBenchmark;
+    FBenchLast: TTimerResult;
+    FBenchSkip: Boolean;
     { Held by the last IN command }
     FDemoInFire, FDemoInJump, FDemoInCrouch: Boolean;
     { IN positions: correct the drift (SY:0 turns it off); largest drift seen }
@@ -179,12 +183,14 @@ begin
   FWatchedMonster := -1;
   FDeathTime := -1;
   FDemoCommands := TStringList.Create;
+  FBenchmark := TQuakeBenchmark.Create;
 end;
 
 destructor TViewPlay.Destroy;
 begin
   FreeAndNil(FRecorder);
   FDemoCommands.Free;
+  FBenchmark.Free;
   inherited Destroy;
 end;
 
@@ -731,6 +737,8 @@ begin
     freed in order (Halt / ExitProcess skipped or broke unit finalization) }
   FDemoCommands.Clear;
   FAutoTestActive := False;
+  { If shutdown gets stuck (seen on CI's virtual display), end anyway }
+  StartExitWatchdog;
   Application.Terminate;
 end;
 
@@ -856,6 +864,15 @@ begin
     Exit;
   end;
 
+  if Action = 'BS' then { Benchmark start: measure frames until BE }
+  begin
+    FBenchmark.Start;
+    FBenchLast := Timer;
+    FBenchSkip := True;
+  end else
+  if Action = 'BE' then { Benchmark end: log the frame time percentiles }
+    WritelnLog('Demo', BenchmarkText(FBenchmark.Stop))
+  else
   if Action = 'S' then
     CaptureScreenshot(FAutoTestPrefix)
   else
@@ -1665,8 +1682,18 @@ end;
 procedure TViewPlay.Update(const SecondsPassed: Single; var HandleInput: Boolean);
 var
   Firing: Boolean;
+  FrameStart: TTimerResult;
+  FrameSeconds: Double;
 begin
   inherited Update(SecondsPassed, HandleInput);
+  { Benchmark: wall time since the previous frame (rendering included) }
+  FrameStart := Timer;
+  FrameSeconds := 0;
+  if FBenchmark.Running then
+  begin
+    FrameSeconds := TimerSeconds(FrameStart, FBenchLast);
+    FBenchLast := FrameStart;
+  end;
   if FQuitPending then
   begin
     FQuitPending := False;
@@ -1708,6 +1735,14 @@ begin
   FWorld.CullEntities;
   Sounds.ListenerRight := TVector3.CrossProduct(MainViewport.Camera.Direction, MainViewport.Camera.Up).Normalize;
   FWorld.UpdateLoopSounds(MainViewport.Camera.Translation);
+  if FBenchmark.Running then
+  begin
+    { The first frame after BS also holds the time before it }
+    if not FBenchSkip then
+      FBenchmark.AddFrame(FrameSeconds, TimerSeconds(Timer, FrameStart),
+        MainViewport.Statistics.ShapesRendered);
+    FBenchSkip := False;
+  end;
   Sounds.UpdateMixer(SecondsPassed, Settings.SoundVolume / 100);
   WalkNavigation.Exists := not FWorld.Dead;
   UpdateDeathView(SecondsPassed);

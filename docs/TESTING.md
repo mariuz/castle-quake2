@@ -4,7 +4,7 @@ The port is checked by machine on every push: unit tests, scripted play sessions
 
 ## Unit tests
 
-`tests/` is a separate console project (it uses the game's units from `../code/`). It runs about 400 checks against the bundled demo PAK. They cover:
+`tests/` is a separate console project (it uses the game's units from `../code/`). It runs about 410 checks against the bundled demo PAK. They cover:
 - the file formats: PAK, PCX, WAL, BSP and QBSP, MD2, SP2;
 - the map queries: contents, PVS, PHS, areas, light, traces;
 - the game tables: monster attacks and moves, gun timing, gibs, settings, gamepad mapping;
@@ -37,6 +37,7 @@ On Linux without a display, run under `xvfb-run -a -s "-screen 0 1600x900x24"`, 
 | `S` | Screenshot (logs the FPS and the camera too) |
 | `V` | Log the state: movers (trains: position, running / waiting), props, lasers, monsters, the gun, the player (health, position, `player stuck`) |
 | `Q` | Quit |
+| `BS`, `BE` | Start / end a benchmark: logs frame time percentiles, game logic time and shapes drawn |
 | `X`, `H` | Fire once; toggle holding fire |
 | `U`, `F`, `J` | Use; toggle the help computer; jump |
 | `C:slot` | Select a weapon (1 Blaster .. 10 BFG, 11 hand grenades); wait about 1 s before firing it |
@@ -73,6 +74,24 @@ What the script holds:
 Each `IN` line also stores the player's position. On replay, the drift is logged (`Replay drift` in the `V` log), and the player is put back when more than 2 units off, so frame-rate differences don't add up. `SY:0` turns that correction off, to reproduce a movement bug exactly. Monsters can still act differently, since their random choices depend on the frames.
 
 Add `S` (screenshot) or `V` (state log) lines anywhere to turn the recording into a regression test.
+
+## Benchmark
+
+```powershell
+.\castle-quake2.exe --benchmark demo1 bench
+```
+
+plays a fixed tour of the map (stands near items 0, 3, 6 … 21 and turns around at each, about 15 s) and logs one line:
+
+```
+Benchmark: 477 frames in 17.4 s, frame ms p50 35.9 p95 50.5 p99 58.7 max 65.1 mean 36.5, logic ms 3.86, shapes 29
+```
+
+- `frame ms`: wall time per frame (rendering included), as percentiles: p50 is the typical frame, p95 / p99 the slow ones you feel as stutter.
+- `logic ms`: the game's own update per frame (movement, monsters, triggers, culling, sounds).
+- `shapes`: shapes drawn per frame (about the number of draw calls).
+
+The demo script actions `BS` and `BE` measure any part of a script the same way. CI benchmarks the three demo maps after the autotests and shows the table in the run's summary (and `benchmark.md` in the artifact). CI draws in software, so compare its numbers only with other CI runs; on a real GPU the frame times are far lower.
 
 ## Screenshot comparison
 

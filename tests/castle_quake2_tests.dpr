@@ -27,7 +27,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, Zipper;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, Zipper;
 
 var
   Passed, Failed: Integer;
@@ -3052,6 +3052,38 @@ begin
   Result.Position := 0;
 end;
 
+procedure TestBenchmark;
+var
+  B: TQuakeBenchmark;
+  R: TBenchmarkResult;
+  I: Integer;
+begin
+  Check(Percentile([], 50) = 0, 'percentile of nothing is 0');
+  Check(Percentile([5, 1, 3, 2, 4], 50) = 3, 'median of 1..5 is 3');
+  Check(Percentile([5, 1, 3, 2, 4], 100) = 5, 'the 100th percentile is the maximum');
+  B := TQuakeBenchmark.Create;
+  try
+    B.AddFrame(1, 1, 1);
+    Check(B.Stop.Frames = 0, 'frames before BS are not counted');
+    B.Start;
+    { 99 frames of 10 ms and one of 100 ms }
+    for I := 1 to 99 do
+      B.AddFrame(0.010, 0.002, 30);
+    B.AddFrame(0.100, 0.002, 50);
+    R := B.Stop;
+    Check(R.Frames = 100, 'benchmark counts the frames');
+    Check(SameValue(R.P50, 10, 0.001) and SameValue(R.P99, 10, 0.001) and SameValue(R.MaxMs, 100, 0.001),
+      'benchmark percentiles: one slow frame is the max, not the 99th percentile of 100');
+    Check(SameValue(R.MeanMs, 10.9, 0.001) and SameValue(R.LogicMs, 2, 0.001) and SameValue(R.Shapes, 30.2, 0.001),
+      'benchmark means');
+    Check(Pos('Benchmark: 100 frames', BenchmarkText(R)) = 1, 'benchmark log line');
+  finally
+    B.Free;
+  end;
+  Check((Pos(',BS,', BenchmarkScript) > 0) and (Pos(',BE,S,Q', BenchmarkScript) > 0) and
+    (Pos('I:21,', BenchmarkScript) > 0), 'benchmark script tours items 0..21 between BS and BE');
+end;
+
 procedure TestModSupport;
 var
   Dir: String;
@@ -3225,6 +3257,7 @@ begin
   { Last: they add files to the PAKs }
   TestLevelThemes;
   TestModSupport;
+  TestBenchmark;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then

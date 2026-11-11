@@ -369,6 +369,31 @@ jobs:
           fi
           exit $status
 
+      - name: Benchmark the demo maps
+        # Frame time percentiles on CI's software renderer: only for comparing
+        # runs with each other (see docs/TESTING.md); fails only if no result
+        run: |
+          set -eu
+          echo "| Map | Result |" > test_output/benchmark.md
+          echo "| --- | --- |" >> test_output/benchmark.md
+          for map in demo1 demo2 demo3; do
+            timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --benchmark $map test_output/bench_$map > test_output/bench_$map.log 2>&1
+            line=$(grep -o "Benchmark: .*" test_output/bench_$map.log || true)
+            if [ -z "$line" ] || grep -q Exception test_output/bench_$map.log; then
+              echo "::error::No benchmark result for $map (see bench_$map.log)"; exit 1
+            fi
+            echo "$map: $line"
+            echo "| $map | ${line#Benchmark: } |" >> test_output/benchmark.md
+          done
+          cat test_output/benchmark.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Report stuck shutdowns
+        if: always()
+        # QuakeExitWatchdog ends a scripted run that is still alive 20 s after
+        # quitting; the run passes, but it should not happen
+        run: |
+          if grep -l "ExitWatchdog" test_output/*.log test_output/*/*.log 2>/dev/null; then
+            echo "::warning::A test process did not exit by itself after quitting (see the logs above)"
+          fi
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4

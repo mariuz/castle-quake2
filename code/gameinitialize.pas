@@ -11,7 +11,7 @@ uses
   SysUtils, Classes,
   CastleWindow, CastleLog, CastleUIControls, CastleApplicationProperties, CastleParameters,
   CastleUtils, CastleFilesUtils, CastleUriUtils,
-  QuakePak, QuakePalette, QuakeSound, QuakeGeometry, QuakeMonsterTypes, QuakeSettings, QuakeGamepad, QuakeTouch, CastleConfig
+  QuakePak, QuakePalette, QuakeSound, QuakeGeometry, QuakeMonsterTypes, QuakeSettings, QuakeGamepad, QuakeTouch, QuakeBenchmark, CastleConfig
   {$region 'Castle Initialization Uses'}
   // The content here may be automatically updated by CGE editor.
   , GameViewMenu
@@ -111,6 +111,15 @@ begin
     begin
       AutoTestMap := Parameters[I + 1];
       AutoTestPrefix := Parameters[I + 2];
+      Inc(I, 2);
+    end else
+    if (Parameters[I] = '--benchmark') and (I + 2 <= Parameters.High) then
+    begin
+      { A fixed tour (stand near items 0, 3, 6 ... and turn around), timed
+        between BS and BE; the result is one "Benchmark:" log line }
+      AutoTestMap := Parameters[I + 1];
+      AutoTestPrefix := Parameters[I + 2];
+      AutoTestDemo := BenchmarkScript;
       Inc(I, 2);
     end else
     if (Parameters[I] = '--map-report') and (I + 1 <= Parameters.High) then
