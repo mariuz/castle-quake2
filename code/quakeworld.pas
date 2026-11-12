@@ -4385,17 +4385,29 @@ function TQuakeWorld.MoverTraceAt(const Mover: TQuakeMover; const M: TMatrix4;
   const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer): TQuakeTrace;
 var
   Inv: TMatrix4;
-  LStart, LStop: TVector3;
+  LStart, LStop, Org: TVector3;
 begin
   { Into the brush model's own coordinates (CM_TransformedBoxTrace): the
     scene is placed relative to the entity origin (BaseOffset) by its
     transform; a rotated model keeps the box axis-aligned, like Quake 2.
-    Console-spawned boxes (ModelIndex 0) have no brushes: never hit. }
-  if (Mover.ModelIndex <= 0) or not M.TryInverse(Inv) then
+    Console-spawned boxes (ModelIndex 0) have no brushes: doors are traced
+    as their mins / maxs box at the entity origin (so they block and can be
+    shot); turrets are never hit (their muzzle is inside the breach box). }
+  if not M.TryInverse(Inv) then
     Exit(BoxTraceAgainstBox(Stop, Stop, TVector3.Zero, TVector3.Zero, Vector3(1, 1, 1), Vector3(0, 0, 0), 0));
   LStart := CgeToQuake(Inv.MultPoint(QuakeToCge(Start)) + Mover.BaseOffset);
   LStop := CgeToQuake(Inv.MultPoint(QuakeToCge(Stop)) + Mover.BaseOffset);
-  Result := FCollision.BoxTrace(LStart, LStop, Mins, Maxs, FBsp.Models[Mover.ModelIndex].HeadNode, Mask);
+  if Mover.ModelIndex <= 0 then
+  begin
+    if (not (Mover.Kind in [mkDoor, mkSecretDoor])) or ((Mask and CONTENTS_SOLID) = 0) or
+       not (Mover.Entity.HasField('mins') and Mover.Entity.HasField('maxs')) then
+      Exit(BoxTraceAgainstBox(Stop, Stop, TVector3.Zero, TVector3.Zero, Vector3(1, 1, 1), Vector3(0, 0, 0), 0));
+    Org := Mover.Entity.Origin;
+    Result := BoxTraceAgainstBox(LStart, LStop, Mins, Maxs,
+      Org + Mover.Entity.GetVector('mins', TVector3.Zero),
+      Org + Mover.Entity.GetVector('maxs', TVector3.Zero), CONTENTS_SOLID);
+  end else
+    Result := FCollision.BoxTrace(LStart, LStop, Mins, Maxs, FBsp.Models[Mover.ModelIndex].HeadNode, Mask);
   if Result.Hit then
   begin
     Result.Normal := CgeToQuake(M.MultDirection(QuakeToCge(Result.Normal))).Normalize;
@@ -4458,7 +4470,9 @@ begin
   if FGeometry <> nil then
     for Mover in FGeometry.Movers do
     begin
-      if (not Mover.Transform.Exists) or (Mover.ModelIndex <= 0) or (Mover.ModelIndex >= FBsp.ModelCount) then
+      { Model 0: console-spawned box movers, only doors are solid (MoverTraceAt) }
+      if (not Mover.Transform.Exists) or (Mover.ModelIndex >= FBsp.ModelCount) or
+         ((Mover.ModelIndex <= 0) and not (Mover.Kind in [mkDoor, mkSecretDoor])) then
         Continue;
       Box := Mover.WorldBox;
       if Box.IsEmpty then
