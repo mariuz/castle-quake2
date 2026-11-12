@@ -33,7 +33,7 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - **Reach**: options menu with key rebinding, skill levels, gamepad, touch controls, Android APK and WebAssembly builds.
 - **Engineering**: CI on Windows / Linux / Android / Web, autotests under Mesa (keyboard, virtual gamepad and simulated touch), screenshot references, culling check (vis vs `novis`), map compatibility report, recorded replays, 371 unit checks.
 - **Levels**: random levels from a seed (`QuakeLevelGen`, Quake / Doom layout rules: loops, steps, lifts, doors, pools, an exit switch, pacing) and an in-game level editor (`QuakeLevelEditor`: doors, lifts, switches, water, sky, themes, entities), compiled at runtime into Quake 2 maps (`QuakeBspBuilder`); levels show in the CGE editor through `TQuakeMap`.
-- **Releases**: v0.3.0 to v0.30.0, each with Windows / Linux / Android packages and the browser build ([changelog](CHANGELOG.md)).
+- **Releases**: v0.3.0 to v0.31.0, each with Windows / Linux / Android packages and the browser build ([changelog](CHANGELOG.md)).
 
 ## Next (prioritised)
 

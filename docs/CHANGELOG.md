@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.31.0 — 2026-11-12
+
+Smooth Textures and Brightness options. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - Two video options in *Options*: *Smooth Textures* (filtered textures instead of Quake 2's sharp pixels) and *Brightness* (the lightmap gamma, 0.8 to 2.0; before only `-gamma` on the command line, which still wins). Both apply when a map is loaded and are saved with the other options. CI checks that they change the picture.
 - Roadmap: the remaster's fog is parked until its density can be checked against the real game (its renderer, which turns `fog_density` into fog, is not in id's released source).
