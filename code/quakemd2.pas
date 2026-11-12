@@ -480,8 +480,15 @@ begin
   if Skin <> '' then
   begin
     TexProps := TTexturePropertiesNode.Create;
-    TexProps.MagnificationFilter := magNearest;
-    TexProps.MinificationFilter := minNearestMipmapLinear;
+    if SmoothTextures then
+    begin
+      TexProps.MagnificationFilter := magLinear;
+      TexProps.MinificationFilter := minLinearMipmapLinear;
+    end else
+    begin
+      TexProps.MagnificationFilter := magNearest;
+      TexProps.MinificationFilter := minNearestMipmapLinear;
+    end;
     Tex := TImageTextureNode.Create;
     FTexture := Tex;
     Tex.SetUrl(['quaketex:/' + Skin]);

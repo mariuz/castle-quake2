@@ -190,6 +190,7 @@ begin
     if ((Parameters[I] = '-gamma') or (Parameters[I] = '--gamma')) and (I + 1 <= Parameters.High) then
     begin
       LightmapGamma := StrToFloatDef(Parameters[I + 1], LightmapGamma);
+      GammaFromCommandLine := True;
       Inc(I);
     end else
     if ((Parameters[I] = '-game') or (Parameters[I] = '--game')) and (I + 1 <= Parameters.High) then
@@ -277,6 +278,9 @@ begin
   end else
     Settings.Persistent := False;
   GameSkill := Settings.Skill;
+  SmoothTextures := Settings.SmoothTextures;
+  if not GammaFromCommandLine then
+    LightmapGamma := Settings.Brightness;
   if CmdSkill >= 0 then
     GameSkill := CmdSkill;
   { Game controllers; not in autotests (results must not depend on devices) }

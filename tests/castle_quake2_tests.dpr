@@ -538,6 +538,10 @@ begin
     S.FieldOfView := 110;
     S.MusicVolume := 30;
     S.InterfaceSize := 3;
+    Check(not S.SmoothTextures and SameValue(S.Brightness, DefaultBrightness, 0.001),
+      'sharp textures and the default brightness by default');
+    S.SmoothTextures := True;
+    S.Brightness := 1.6;
     Path := GetTempDir + 'castle_quake2_test_settings.xml';
     Config := TCastleConfig.Create(nil);
     try
@@ -554,6 +558,7 @@ begin
     Check((S.Keys[qaForward] = keyA) and (S.Keys[qaMoveLeft] = keyW) and (S.Keys[qaFire] = keyCtrl),
       'key bindings survive save / load');
     Check(S.InterfaceSize = 3, 'interface size survives save / load');
+    Check(S.SmoothTextures and SameValue(S.Brightness, 1.6, 0.001), 'smooth textures and brightness survive save / load');
     Check((S.PadButtons[paUse] = gbSouth) and (S.PadButtons[paJump] = gbWest) and
       (S.PadButtons[paNextWeapon] = gbDPadRight) and (S.PadButtons[paCrouch] = gbEast),
       'gamepad bindings survive save / load');

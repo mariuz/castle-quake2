@@ -19,7 +19,7 @@ type
 
   { Rows of the Options page }
   TOptionItem = (oiCamera, oiSensitivity, oiInvert, oiViewBob, oiFieldOfView, oiInterfaceSize,
-    oiSoundVolume, oiMusicVolume, oiControls, oiBack);
+    oiSmoothTextures, oiBrightness, oiSoundVolume, oiMusicVolume, oiControls, oiBack);
 
 const
   { Map name the menu passes for a new random level }
@@ -169,6 +169,9 @@ begin
         FItems.Add('View Bob: [' + OnOff(Settings.ViewBob) + ']');
         FItems.Add(Format('Field of View: [%d]', [Settings.FieldOfView]));
         FItems.Add('Interface Size: [' + InterfaceSizeNames[Settings.InterfaceSize] + ']');
+        { These two apply when a map is loaded (lightmaps and textures are built then) }
+        FItems.Add('Smooth Textures: [' + OnOff(Settings.SmoothTextures) + ']');
+        FItems.Add(Format('Brightness: [%.1f]', [Settings.Brightness], DefaultFormatSettings));
         FItems.Add(Format('Sound Volume: [%d%%]', [Settings.SoundVolume]));
         FItems.Add(Format('Music Volume: [%d%%]', [Settings.MusicVolume]));
         FItems.Add('Controls...');
@@ -235,6 +238,11 @@ begin
       Settings.FieldOfView := EnsureRange(Settings.FieldOfView + 5 * Delta, 70, 120);
     oiInterfaceSize:
       Settings.InterfaceSize := EnsureRange(Settings.InterfaceSize + Delta, 0, High(InterfaceSizeNames));
+    oiSmoothTextures:
+      Settings.SmoothTextures := not Settings.SmoothTextures;
+    oiBrightness:
+      Settings.Brightness := EnsureRange(Round((Settings.Brightness + 0.1 * Delta) * 10) / 10,
+        MinBrightness, MaxBrightness);
     oiSoundVolume:
       Settings.SoundVolume := EnsureRange(Settings.SoundVolume + 10 * Delta, 0, 100);
     oiMusicVolume:

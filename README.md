@@ -72,7 +72,7 @@ The full feature list, with the engine parts each feature uses, is in [FEATURES.
 | **F12** | Screenshot |
 | **~** | Console (`map`, `maps`, `save`, `load`, `god`, `give all`, `give quad`, `give invulnerability`, `give <item>` (e.g. `give power shield`), `powerarmor`, `noclip`, `notarget`, `kill`, `fps`, `markers`, `novis`, `skill`, `lightstyle`, `record <name>` / `stop`, `spawn <class> [key value]...`, `sky <name> [rotate [x y z]]`, `randmap [seed]`, `editor [command]`, `quit`, `help`) |
 | **F8** (debug build) | CGE inspector: hierarchy and live properties |
-| **Escape** | Menu: *Single Player* (choose Easy / Medium / Hard / Nightmare), *Map Warp*, *Options* (camera, mouse sensitivity, invert mouse, view bob, field of view, sound and music volume, *Controls* to rebind keys) |
+| **Escape** | Menu: *Single Player* (choose Easy / Medium / Hard / Nightmare), *Map Warp*, *Options* (camera, mouse sensitivity, invert mouse, view bob, field of view, interface size, smooth textures, brightness, sound and music volume, *Controls* to rebind keys) |
 
 | Other input | How |
 | --- | --- |

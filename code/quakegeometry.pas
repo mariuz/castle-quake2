@@ -379,6 +379,8 @@ var
   { Gamma applied to lightmaps (1.0 = original data; >1 brightens the dark
     areas, like raising Quake 2's brightness slider). Set with -gamma. }
   LightmapGamma: Single = 1.2;
+  { -gamma was given: it wins over the Brightness option }
+  GammaFromCommandLine: Boolean = False;
 
 implementation
 
@@ -611,8 +613,15 @@ begin
   end;
 
   TexProps := TTexturePropertiesNode.Create;
-  TexProps.MagnificationFilter := magNearest;
-  TexProps.MinificationFilter := minNearestMipmapLinear;
+  if SmoothTextures then
+  begin
+    TexProps.MagnificationFilter := magLinear;
+    TexProps.MinificationFilter := minLinearMipmapLinear;
+  end else
+  begin
+    TexProps.MagnificationFilter := magNearest;
+    TexProps.MinificationFilter := minNearestMipmapLinear;
+  end;
   TexProps.AnisotropicDegree := 4;
 
   TexNode := TImageTextureNode.Create;

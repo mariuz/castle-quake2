@@ -216,6 +216,10 @@ end;
 
 procedure TViewPlay.ApplySettings;
 begin
+  { Used by the next map load: textures and lightmaps are built then }
+  SmoothTextures := Settings.SmoothTextures;
+  if not GammaFromCommandLine then
+    LightmapGamma := Settings.Brightness;
   WalkNavigation.MouseLookHorizontalSensitivity :=
     TCastleWalkNavigation.DefaultMouseLookHorizontalSensitivity * Settings.MouseSensitivity;
   WalkNavigation.MouseLookVerticalSensitivity :=

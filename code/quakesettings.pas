@@ -9,6 +9,12 @@ interface
 uses
   SysUtils, CastleKeysMouse, CastleXmlConfig;
 
+const
+  { Brightness option range and default (the lightmap gamma) }
+  DefaultBrightness = 1.2;
+  MinBrightness = 0.8;
+  MaxBrightness = 2.0;
+
 type
   { Actions with a configurable key (weapon number keys stay fixed) }
   TQuakeAction = (qaForward, qaBack, qaMoveLeft, qaMoveRight, qaJump, qaCrouch,
@@ -28,6 +34,12 @@ type
     ViewBob: Boolean;
     { Horizontal field of view in degrees (Quake 2 default 90) }
     FieldOfView: Integer;
+    { Smooth (linear) instead of sharp (nearest) textures; applies when a
+      map is loaded }
+    SmoothTextures: Boolean;
+    { Lightmap brightness: the gamma applied to lightmaps when a map is
+      loaded (1.2 by default; -gamma on the command line overrides it) }
+    Brightness: Single;
     { Percent }
     SoundVolume, MusicVolume: Integer;
     { Size of the menu, console and HUD text: 0 auto (larger on touch
@@ -193,6 +205,8 @@ begin
   InvertMouse := False;
   ViewBob := True;
   FieldOfView := 90;
+  SmoothTextures := False;
+  Brightness := DefaultBrightness;
   SoundVolume := 100;
   MusicVolume := 70;
   InterfaceSize := 0;
@@ -231,6 +245,8 @@ begin
   InvertMouse := C.GetValue('quake2/invert_mouse', False);
   ViewBob := C.GetValue('quake2/view_bob', True);
   FieldOfView := EnsureRange(C.GetValue('quake2/fov', 90), 60, 130);
+  SmoothTextures := C.GetValue('quake2/smooth_textures', False);
+  Brightness := EnsureRange(C.GetFloat('quake2/brightness', DefaultBrightness), MinBrightness, MaxBrightness);
   SoundVolume := EnsureRange(C.GetValue('quake2/sound_volume', 100), 0, 100);
   MusicVolume := EnsureRange(C.GetValue('quake2/music_volume', 70), 0, 100);
   InterfaceSize := EnsureRange(C.GetValue('quake2/interface_size', 0), 0, High(InterfaceSizeNames));
@@ -263,6 +279,8 @@ begin
   C.SetDeleteValue('quake2/invert_mouse', InvertMouse, False);
   C.SetDeleteValue('quake2/view_bob', ViewBob, True);
   C.SetDeleteValue('quake2/fov', FieldOfView, 90);
+  C.SetDeleteValue('quake2/smooth_textures', SmoothTextures, False);
+  C.SetDeleteFloat('quake2/brightness', Brightness, DefaultBrightness);
   C.SetDeleteValue('quake2/sound_volume', SoundVolume, 100);
   C.SetDeleteValue('quake2/music_volume', MusicVolume, 70);
   C.SetDeleteValue('quake2/interface_size', InterfaceSize, 0);

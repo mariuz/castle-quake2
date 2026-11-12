@@ -61,9 +61,9 @@ Suggestions from a review of the code and the web build (November 2026). Each on
 6. **Particles**: `RebuildBatch` rebuilds the whole particle mesh every frame. Billboard in a vertex shader from a fixed buffer of quads instead (only positions, sizes and colours change).
 
 ### B. Graphics
-1. **Quality settings** (*Options → Video*): render scale (draw at 50–100 % and upscale, the biggest win on phones and in the browser), texture filtering (Quake 2's nearest-pixel look, or linear with mipmaps and anisotropy), dynamic light count (now 4 nearest per surface), particle density, brightness / gamma.
+1. **Quality settings** — started: *Smooth Textures* and *Brightness* in *Options* (November 2026). Still to do: render scale (needs the viewport drawn to a smaller texture and scaled up; the engine has no option for it), dynamic light count, particle density. Original plan (*Options → Video*): render scale (draw at 50–100 % and upscale, the biggest win on phones and in the browser), texture filtering (Quake 2's nearest-pixel look, or linear with mipmaps and anisotropy), dynamic light count (now 4 nearest per surface), particle density, brightness / gamma.
 2. **More dynamic lights**, and lit models: monsters and the gun now take a single `SampleLight` colour; give them the nearest dynamic lights too (muzzle flashes, rockets passing, `dynamic_light`).
-3. **The remaster's fog**: worldspawn `fog_*` keys and `trigger_fog` mapped to CGE's `TFogNode` (its maps use them; the original game has none).
+3. **The remaster's fog** — parked: the game code only carries `fog_density` / `fog_color` / `fog_sky_factor` and `trigger_fog`'s on / off values; how density becomes fog is in the remaster's renderer, which id did not release, so the scale can't be matched without the game to compare. Original plan: worldspawn `fog_*` keys and `trigger_fog` mapped to CGE's `TFogNode` (its maps use them; the original game has none).
 4. **Water and sky**: refraction-like warp of what is seen through water (the underwater warp is done), and the remaster's sky keys.
 5. **Check exported levels' lighting**: in Yamagi the key door alcoves look much darker than the rooms; the compiler's lights are per room, so give doorways and corridors a light of their own.
 

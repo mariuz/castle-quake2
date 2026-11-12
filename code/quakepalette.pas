@@ -14,6 +14,12 @@ const
   { Quake 2 palette index 255 is used as the transparent color in skins and pics. }
   TransparentIndex = 255;
 
+var
+  { Wall and model textures filtered smoothly (linear) instead of Quake 2's
+    sharp nearest-pixel look; from the Smooth Textures option, used when
+    a map or model is built }
+  SmoothTextures: Boolean = False;
+
 type
   TQuakeRGB = packed record
     R, G, B: Byte;
