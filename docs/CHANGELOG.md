@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.30.0 — 2026-11-12
+
+Doors spawned from the console are solid and can be shot. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - Doors spawned from the console (`spawn func_door ... mins "..." maxs "..."`, also `func_door_secret` / `func_door_secret2`) are solid: they block the player and monsters and can be shot, so a secret door without a targetname opens when hit, as on a real map. Before, shots and players went through them, so only compiled maps could test shootable doors. CI shoots one.
 - Roadmap: model animation on the GPU was tried and parked (the engine sets effect uniforms per shader program, shared by all models; the benchmark gained only 2–6 %).
