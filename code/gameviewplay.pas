@@ -812,7 +812,51 @@ begin
       FDemoCommands.Add(Trim(Cmd));
 end;
 
+{ What a trace hit, for logs: the world, a mover, monster, prop or the player }
+function TraceHitName(const Ent: TObject): String;
+begin
+  if Ent = nil then
+    Result := 'world'
+  else
+  if Ent is TQuakeMover then
+    Result := TQuakeMover(Ent).Entity.ClassName + ' ' + TQuakeMover(Ent).Entity.Model
+  else
+  if Ent is TQuakeMonster then
+    Result := TQuakeMonster(Ent).Transform.Name
+  else
+  if Ent is TQuakeProp then
+    Result := TQuakeProp(Ent).Transform.Name
+  else
+    Result := Ent.ClassName;
+end;
+
+{ The smallest move (Quake units, along an axis) that gets a monster's box
+  out of solid, for the V log: 'none within 32' if there is none }
+function FreeingNudge(const M: TQuakeMonster): String;
+const
+  Dirs: array[0..5] of TVector3 = ((X: 1; Y: 0; Z: 0), (X: -1; Y: 0; Z: 0), (X: 0; Y: 1; Z: 0),
+    (X: 0; Y: -1; Z: 0), (X: 0; Y: 0; Z: 1), (X: 0; Y: 0; Z: -1));
+  Steps: array[0..10] of Single = (0.001, 0.03125, 0.125, 0.5, 1, 2, 4, 8, 16, 24, 32);
+var
+  D: Single;
+  I: Integer;
+  P: TVector3;
+begin
+  for D in Steps do
+    for I := 0 to High(Dirs) do
+    begin
+      P := M.Origin + Dirs[I] * D;
+      if not EntityTrace(P, P, M.BoxMins, M.BoxMaxs, MASK_MONSTERSOLID, M).StartSolid then
+        Exit((Dirs[I] * D).ToString);
+    end;
+  Result := 'none within 32';
+end;
+
 procedure TViewPlay.RunDemoStep(const SecondsPassed: Single);
+const
+  { V log: how far a monster's box may overlap solid and still count as
+    touching (twice Quake 2's DIST_EPSILON) }
+  SolidSlack = 0.0625;
 var
   Cmd, Action, Param: String;
   P, J: Integer;
@@ -821,6 +865,7 @@ var
   Ignore: TCastleTransform;
   Key, K: TKey;
   SolidCount: Integer;
+  SolidTrace, SweepTrace: TQuakeTrace;
   Vals: TStringArray;
   Button: TGameControllerButton;
   PadEvent: TInputPressRelease;
@@ -1190,13 +1235,28 @@ begin
         Val := Val + 1;
         if FWorld.Monsters[J].Alerted then
           Inc(P);
-        if Assigned(EntityTrace) and EntityTrace(FWorld.Monsters[J].Origin, FWorld.Monsters[J].Origin,
-           FWorld.Monsters[J].BoxMins, FWorld.Monsters[J].BoxMaxs, MASK_MONSTERSOLID,
-           FWorld.Monsters[J]).StartSolid then
+        if Assigned(EntityTrace) then
         begin
-          Inc(SolidCount);
-          WritelnLog('Demo', 'Monster %d %s in solid at %s', [J, FWorld.Monsters[J].Def^.ClassName,
-            FWorld.Monsters[J].Origin.ToString]);
+          { Inside, not touching: maps place monsters with their box exactly
+            against a wall, and movers push them to DIST_EPSILON (1/32) from
+            one; Quake 2 doesn't count either as stuck (they move away fine),
+            so the box is tested 1/16 smaller on each side }
+          SolidTrace := EntityTrace(FWorld.Monsters[J].Origin, FWorld.Monsters[J].Origin,
+            FWorld.Monsters[J].BoxMins + Vector3(SolidSlack, SolidSlack, SolidSlack),
+            FWorld.Monsters[J].BoxMaxs - Vector3(SolidSlack, SolidSlack, SolidSlack),
+            MASK_MONSTERSOLID, FWorld.Monsters[J]);
+          if SolidTrace.StartSolid then
+          begin
+            Inc(SolidCount);
+            { StepMove's second trace: from the position itself down a step }
+            SweepTrace := EntityTrace(FWorld.Monsters[J].Origin,
+              FWorld.Monsters[J].Origin - Vector3(0, 0, 18), FWorld.Monsters[J].BoxMins,
+              FWorld.Monsters[J].BoxMaxs, MASK_MONSTERSOLID, FWorld.Monsters[J]);
+            WritelnLog('Demo', 'Monster %d %s in solid at %s (%s%s, free by %s; step sweep start solid %s all solid %s fraction %.3f)', [J, FWorld.Monsters[J].Def^.ClassName,
+              FWorld.Monsters[J].Origin.ToString, TraceHitName(SolidTrace.Ent),
+              Iff(SolidTrace.AllSolid, ', all solid', ''), FreeingNudge(FWorld.Monsters[J]),
+              BoolToStr(SweepTrace.StartSolid, True), BoolToStr(SweepTrace.AllSolid, True), SweepTrace.Fraction]);
+          end;
         end;
       end;
     WritelnLog('Demo', 'Monsters: %d alerted of %d alive, %d in solid', [P, Round(Val), SolidCount]);

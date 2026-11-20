@@ -4927,8 +4927,9 @@ begin
       { Monsters and corpses (a corpse caught in a door is gibbed) }
       for Monster in FMonsters do
       begin
-        if Monster.Dormant or Monster.Gibbed or (Monster.Transform = nil) or (not Monster.Transform.Exists) or
-           Monster.Def^.Flying then
+        { Flyers too (SV_Push moves every MOVETYPE_STEP entity): a closing
+          door used to swallow floaters }
+        if Monster.Dormant or Monster.Gibbed or (Monster.Transform = nil) or (not Monster.Transform.Exists) then
           Continue;
         Org := Monster.Origin;
         Maxs := Monster.BoxMaxs;

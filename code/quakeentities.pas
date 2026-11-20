@@ -192,6 +192,9 @@ type
     function OnGroundTrace: Boolean;
     { Quake 2 SV_movestep / M_CheckBottom: Move in Quake units }
     function StepMove(const Move: TVector3): Boolean;
+    { The box at ToPos doesn't overlap solid (more than touching), or it
+      already does at FromPos }
+    function ClearToMoveTo(const FromPos, ToPos: TVector3): Boolean;
     function CheckBottom(const Pos: TVector3): Boolean;
     procedure DropToFloor;
     { Nothing opaque between two CGE points (Quake 2 visible()) }
@@ -1459,7 +1462,7 @@ begin
   begin
     { Flyers: the whole move must be free }
     T := MTrace(Org, Org + Move, BoxMins, BoxMaxs);
-    if T.AllSolid or T.StartSolid or (T.Fraction < 1) then
+    if T.AllSolid or T.StartSolid or (T.Fraction < 1) or not ClearToMoveTo(Org, T.EndPos) then
       Exit(False);
     SetOrigin(T.EndPos);
     Exit(True);
@@ -1483,8 +1486,25 @@ begin
     Exit(False);
   if not CheckBottom(T.EndPos) then
     Exit(False);
+  if not ClearToMoveTo(Org, T.EndPos) then
+    Exit(False);
   SetOrigin(T.EndPos);
   Result := True;
+end;
+
+function TQuakeMonster.ClearToMoveTo(const FromPos, ToPos: TVector3): Boolean;
+const
+  { Overlap allowed: exact contact (maps place monsters against walls) and
+    the DIST_EPSILON gaps of traces aren't stuck }
+  Slack = 0.0625;
+  SlackV: TVector3 = (X: Slack; Y: Slack; Z: Slack);
+begin
+  { A swept trace stops at the first thing it hits at fraction 0 (the floor
+    a walker stands on), so it can miss a brush the box overlaps higher up
+    (a ledge, an angled wall): test the new spot itself. A monster already
+    stuck may move anywhere (it has to get out somehow). }
+  Result := (not MTrace(ToPos, ToPos, BoxMins + SlackV, BoxMaxs - SlackV).StartSolid) or
+    MTrace(FromPos, FromPos, BoxMins + SlackV, BoxMaxs - SlackV).StartSolid;
 end;
 
 procedure TQuakeMonster.DropToFloor;
