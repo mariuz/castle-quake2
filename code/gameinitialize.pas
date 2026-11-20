@@ -288,12 +288,16 @@ begin
 
   { Quake 2 data: bundled demo PAK first, then a full install (overrides it),
     then PAKs given explicitly on the command line. }
+  { No installed games in the browser or on Android (and the current folder
+    can't be asked there: on WASI it traps) }
+  {$if not defined(WASI) and not defined(ANDROID)}
   if IsDetectWord(CmdBaseDir) then
     DetectBaseDir(True)
   else
   if (CmdBaseDir = '') and (AutoTestMap = '') and not CmdNoDetect and
      not HasQuake2Data(GetCurrentDir) then
     DetectBaseDir(False);
+  {$endif}
 
   LoadedAny := False;
   if UriFileExists('castle-data:/paks/quake2_demo.pak') then
@@ -393,9 +397,11 @@ initialization
   ApplicationProperties.Version := '0.32.0';
   LogFileName := 'castle-quake2.log';
   { --log-file <file>: a log of its own (several runs at once) }
+  {$ifndef WASI}
   for LogArg := 1 to ParamCount - 1 do
     if ParamStr(LogArg) = '--log-file' then
       LogFileName := ParamStr(LogArg + 1);
+  {$endif}
   InitializeLog;
   Application.OnInitialize := @ApplicationInitialize;
 
