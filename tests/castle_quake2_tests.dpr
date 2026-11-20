@@ -2007,8 +2007,13 @@ begin
     Stream := TMemoryStream.Create;
     Stream.WriteBuffer(Data^, Size);
     Pak.AddMemoryFile('textures/e9u9/' + Copies[I][1] + '.wal', Stream);
+    { The same in "test" (the full game's number textures' folder) }
+    Stream := TMemoryStream.Create;
+    Stream.WriteBuffer(Data^, Size);
+    Pak.AddMemoryFile('textures/test/' + Copies[I][1] + '.wal', Stream);
   end;
   EnsureLevelThemes;
+  Check(ThemeIndex('test') = -1, 'the "test" texture folder is no theme');
   Idx := ThemeIndex('e9u9');
   Check((Idx = Builtin) and (Length(LevelThemes) = Builtin + 1), 'a full-game texture directory becomes a theme');
   if Idx >= 0 then

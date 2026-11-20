@@ -257,7 +257,7 @@ function EntityFloorOffset(const AClassName: String): Single;
 implementation
 
 uses
-  Math, StrUtils, fpjson, jsonparser, CastleDownload, CastleFilesUtils, CastleUriUtils, CastleLog, QuakePak;
+  Math, StrUtils, fpjson, jsonparser, CastleDownload, CastleFilesUtils, CastleUriUtils, CastleLog, QuakePak, QuakePalette;
 
 var
   DotFormat: TFormatSettings;
@@ -287,6 +287,8 @@ procedure DiscoverLevelThemes;
 const
   { A directory needs this many plain textures to be a theme }
   MinTextures = 12;
+  { Mean brightness a plain texture needs (Brightness) }
+  MinBrightness = 24;
   SURF_LIGHT = 1;
   SURF_SKY = 4;
   SURF_WARP = 8;
@@ -303,10 +305,40 @@ var
   Flags, Contents, Value: LongInt;
   T: TLevelTheme;
 
+  { Mean brightness 0..255 of the WAL's full-size image (255 without a
+    palette): the full game has near-black metal (e1u4's fmet*, about 21)
+    that makes rooms of a theme dark; usual floors and walls are 27..40 }
+  function Brightness(const AData: PByte; const ASize: Cardinal): Single;
+  var
+    W, H, Ofs, K, Count: Integer;
+    C: TVector4Byte;
+    Sum: Single;
+  begin
+    Result := 255;
+    if (Palette = nil) or not Palette.HasPalette then
+      Exit;
+    W := PLongInt(AData + 32)^;
+    H := PLongInt(AData + 36)^;
+    Ofs := PLongInt(AData + 40)^;
+    if (W <= 0) or (H <= 0) or (Ofs < 0) or (Int64(Ofs) + Int64(W) * H > ASize) then
+      Exit;
+    Sum := 0;
+    Count := 0;
+    K := 0;
+    while K < W * H do
+    begin
+      C := Palette.Color(AData[Ofs + K]);
+      Sum := Sum + (C.X + C.Y + C.Z) / 3;
+      Inc(Count);
+      Inc(K, 3);
+    end;
+    Result := Sum / Count;
+  end;
+
   function Skipped(const N: String): Boolean;
   const
-    Words: array[0..15] of String = ('sky', 'clip', 'trigger', 'hint', 'origin', 'skip', 'door', 'dr0',
-      'btn', 'button', 'sign', 'exit', 'arrow', 'lever', 'alarm', 'black');
+    Words: array[0..16] of String = ('sky', 'clip', 'trigger', 'hint', 'origin', 'skip', 'door', 'dr0',
+      'btn', 'button', 'sign', 'exit', 'arrow', 'lever', 'alarm', 'black', 'num_');
   var
     W: String;
   begin
@@ -346,8 +378,9 @@ begin
     end;
     for Dir in Dirs do
     begin
-      { The demo's own textures are the built-in themes }
-      if Dir = 'e1u1' then
+      { The demo's own textures are the built-in themes; "test" holds id's
+        number textures (num_0 ...), not a style }
+      if (Dir = 'e1u1') or (Dir = 'test') then
         Continue;
       Plain.Clear;
       Lights.Clear;
@@ -372,13 +405,16 @@ begin
         if ((Flags and SURF_LIGHT) <> 0) and (Value > 0) then
           Lights.Add(Name)
         else
+        { Near-black textures make dark rooms: not floors, walls or ceilings }
+        if Brightness(Data, Size) >= MinBrightness then
           Plain.Add(Name);
       end;
       if Plain.Count < MinTextures then
         Continue;
       T.Name := Dir;
       T.Floor := Pick(['floor', 'flr', 'grate', 'grnd', 'flat', 'plat', 'grass', 'dirt'], Dir + '/' + Plain[0]);
-      T.Wall := Pick(['wall', 'wbasic', 'wslt', 'brick', 'stone', 'rock', 'metal', 'comp', 'bas'], Dir + '/' + Plain[1]);
+      { No "comp" (computer banks): a room of them is a wall of screens }
+      T.Wall := Pick(['wall', 'wbasic', 'wslt', 'hall', 'brick', 'stone', 'rock', 'metal', 'bas'], Dir + '/' + Plain[1]);
       T.Ceil := Pick(['ceil', 'roof', 'top'], T.Floor);
       T.Step := Pick(['step', 'trim', 'support', 'metal', 'pip'], T.Wall);
       if Lights.Count > 0 then
