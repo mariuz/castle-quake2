@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.32.0 — 2026-11-20
+
+The browser build draws at a sensible resolution on phones and takes `?scale=`, and every setting in its address now arrives. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.
 
 - Browser build: on high-density screens (phones, tablets, retina laptops) the game no longer draws at the screen's full pixel count (3× the page size on many phones, 9× the pixels): it draws at most at 1.5× and 1920 × 1080 in all, and the browser scales the picture up. `?scale=0.5` in the address draws at half resolution on top (in CI's software rendering 27 instead of 9 frames a second); `?fullres=1` turns the limits off.
 - Fixed: the first setting in the web address was ignored (`?map=demo1` stayed in the menu, `?skill=0&map=demo2` played at the saved skill). CI now checks that the skill arrives.
