@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- An installed Quake II is found by itself: GOG (Galaxy's registry, `GOG Games` folders), Steam (all libraries) and common folders, Quake II Remastered first. `-basedir auto` / `gog` / `steam` ask for it (autotests and the map report too), `--no-detect` keeps the demo. `castle-quake2-tests --retail auto` checks the full game's monster tables against the installed PAK. Checked on GOG's Quake II: all 65 maps load, base1 plays, Ground Zero loads with `-game rogue`.
+
 ## v0.32.0 — 2026-11-20
 
 The browser build draws at a sensible resolution on phones and takes `?scale=`, and every setting in its address now arrives. Windows, Linux and Android packages below; the browser build is at <https://mariuz.github.io/castle-quake2/>.

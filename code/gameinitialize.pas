@@ -11,7 +11,7 @@ uses
   SysUtils, Classes, Math,
   CastleWindow, CastleLog, CastleUIControls, CastleApplicationProperties, CastleParameters,
   CastleUtils, CastleFilesUtils, CastleUriUtils,
-  QuakePak, QuakePalette, QuakeSound, QuakeGeometry, QuakeMonsterTypes, QuakeSettings, QuakeGamepad, QuakeTouch, QuakeBenchmark, QuakeWebParams, CastleConfig
+  QuakePak, QuakePalette, QuakeSound, QuakeGeometry, QuakeMonsterTypes, QuakeSettings, QuakeGamepad, QuakeTouch, QuakeBenchmark, QuakeWebParams, QuakeInstalls, CastleConfig, StrUtils
   {$ifdef WASI}, CastleInternalJobWeb{$endif}
   {$region 'Castle Initialization Uses'}
   // The content here may be automatically updated by CGE editor.
@@ -30,7 +30,10 @@ var
   CmdSkill: Integer = -1;
   { --fps (or ?fps=1): show the frame rate from the start }
   CmdShowFps: Boolean;
+  { -basedir <dir>; "auto" / "gog" / "steam" find an installation }
   CmdBaseDir: String;
+  { --no-detect: don't look for an installed Quake II }
+  CmdNoDetect: Boolean;
   CmdPaks: TStringList;
   { -game <dir> / +set game <dir>: a mod folder loaded over baseq2 (e.g.
     q1q2, Call of the Void) }
@@ -103,6 +106,46 @@ begin
   end;
 end;
 
+{ -basedir auto / gog / steam, or nothing next to the game: the first Quake II
+  installation found (remastered first). Not in autotests unless asked
+  (their results must not depend on what is installed), not with --no-detect. }
+procedure DetectBaseDir(const Asked: Boolean);
+{$if defined(WASI) or defined(ANDROID)}
+begin
+  if Asked then
+    WritelnWarning('GameInitialize', 'Finding a Quake II installation is not possible on this platform');
+  CmdBaseDir := '';
+end;
+{$else}
+var
+  Filter: String;
+  Installs: TQuakeInstallList;
+  I: Integer;
+begin
+  Filter := '';
+  if Asked and not SameText(CmdBaseDir, 'auto') then
+    Filter := CmdBaseDir;
+  CmdBaseDir := '';
+  Installs := FindQuake2Installs(Filter);
+  for I := 0 to High(Installs) do
+    WritelnLog('GameInitialize', 'Quake II installation found: %s', [InstallDescription(Installs[I])]);
+  if Length(Installs) > 0 then
+  begin
+    CmdBaseDir := Installs[0].Root;
+    WritelnLog('GameInitialize', 'Using the Quake II data in "%s" (-basedir <dir> picks another, --no-detect none)',
+      [CmdBaseDir]);
+  end else
+  if Asked then
+    WritelnWarning('GameInitialize', 'No Quake II installation found (%s); playing the demo',
+      [IfThen(Filter = '', 'GOG, Steam or common folders', Filter)]);
+end;
+{$endif}
+
+function IsDetectWord(const S: String): Boolean;
+begin
+  Result := SameText(S, 'auto') or SameText(S, 'gog') or SameText(S, 'steam');
+end;
+
 { On the web: the page address's settings ("?map=demo2&skill=2") as more
   command-line arguments }
 procedure AddWebAddressParameters;
@@ -172,6 +215,8 @@ begin
       TouchControlsForced := True;
     if Parameters[I] = '--fps' then
       CmdShowFps := True;
+    if (Parameters[I] = '--no-detect') or (Parameters[I] = '-nodetect') then
+      CmdNoDetect := True;
     if (Parameters[I] = '--demo') and (I + 1 <= Parameters.High) then
     begin
       AutoTestDemo := Parameters[I + 1];
@@ -233,6 +278,13 @@ begin
 
   { Quake 2 data: bundled demo PAK first, then a full install (overrides it),
     then PAKs given explicitly on the command line. }
+  if IsDetectWord(CmdBaseDir) then
+    DetectBaseDir(True)
+  else
+  if (CmdBaseDir = '') and (AutoTestMap = '') and not CmdNoDetect and
+     not HasQuake2Data(GetCurrentDir) then
+    DetectBaseDir(False);
+
   LoadedAny := False;
   if UriFileExists('castle-data:/paks/quake2_demo.pak') then
     LoadedAny := Pak.AddFile('castle-data:/paks/quake2_demo.pak') or LoadedAny;

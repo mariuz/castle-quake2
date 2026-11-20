@@ -16,6 +16,15 @@ cd tests
 castle-engine compile
 .\castle-quake2-tests.exe     # run from tests/: it loads ../data/paks/quake2_demo.pak
 .\castle-quake2-tests.exe --retail <path>\baseq2\pak0.pak   # the full game's monster tables against its models (not in CI)
+.\castle-quake2-tests.exe --retail auto     # the same with an installed Quake II's pak0.pak (GOG / Steam, remaster first; or gog / steam)
+```
+
+Testing the game on retail data: `-basedir auto` (or `gog` / `steam`) finds an installed Quake II (see [MODDING.md](MODDING.md)); autotests never pick one up without it, so CI results don't depend on what is installed:
+
+```powershell
+.\castle-quake2.exe -basedir auto --map-report retail.md
+.\castle-quake2.exe -basedir auto --autotest base1 test_output\base1 --demo "W:2,S,K,C:4,W:1,N:0,W:1.5,X,W:0.5,S,V,Q"
+.\castle-quake2.exe -basedir auto -game rogue --autotest rmine1 test_output\rmine1 --demo "W:2,S,V,Q"
 ```
 
 It prints `N passed, M failed` and exits with an error when something fails.

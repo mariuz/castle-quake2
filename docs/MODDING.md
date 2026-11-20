@@ -5,7 +5,7 @@
 Data is loaded in this order, each source over the earlier ones:
 
 1. `data/paks/quake2_demo.pak`: the bundled shareware demo (`pak0.pak` from `q2-314-demo-x86.exe`).
-2. The `baseq2` game folder: next to the executable, in `rerelease/` (Quake II Remastered's layout), and in `-basedir <dir>` (also `<dir>/rerelease/`). The PAKs right in `-basedir` load too.
+2. The `baseq2` game folder: next to the executable, in `rerelease/` (Quake II Remastered's layout), and in `-basedir <dir>` (also `<dir>/rerelease/`). The PAKs right in `-basedir` load too. Without `-basedir` and without a `baseq2` next to the game, an installed Quake II is found (`QuakeInstalls`): GOG (Galaxy's registry entries, `GOG Games` folders), Steam (every library in `libraryfolders.vdf`, `steamapps/common/Quake 2`) and common folders, Quake II Remastered first; the log says `Quake II installation found` / `Using the Quake II data in`. `-basedir auto`, `-basedir gog` or `-basedir steam` ask for it explicitly (also in autotests and the map report, which otherwise use the demo only); `--no-detect` plays the demo.
 3. The mod folder given by `-game <folder>` (or `+set game <folder>`), looked up in the same places.
 4. `-pak <file>`: any extra PAK.
 

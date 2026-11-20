@@ -50,7 +50,7 @@ The full feature list, with the engine parts each feature uses, is in [FEATURES.
 - **In the browser**: open <https://mariuz.github.io/castle-quake2/>. Settings can go in the address of the game page, e.g. <https://mariuz.github.io/castle-quake2/play/?map=demo2&skill=2&fps=1> (`map`, `skill` 0–3, `touch=1`, `fps=1`, `gamma`, and `scale=0.5` to draw at half resolution on a slow device). On high-density phone screens the game draws at most at 1.5× the page's size and 1920 × 1080 pixels, so it stays playable; `fullres=1` turns that off.
 - **On your computer**: download the Windows or Linux package from the [releases](https://github.com/mariuz/castle-quake2/releases), unpack it and run `castle-quake2`. The shareware demo is included.
 - **On Android**: install the APK from the releases (`adb install castle-quake2-*.apk`, or open it on the phone). It is debug-signed and not yet tried on a real device.
-- **With the full game**: point it at your Quake 2 folder: `castle-quake2 -basedir "C:\Games\Quake2"` (also finds Quake II Remastered's `rerelease` folder), then pick a map in *Map Warp* or start with `+map base1`.
+- **With the full game**: a Quake II bought on GOG or Steam (the original or Quake II Remastered) is found by itself; or point it at your Quake 2 folder: `castle-quake2 -basedir "C:\Games\Quake2"` (also finds Quake II Remastered's `rerelease` folder; `-basedir gog` / `steam` picks a store, `--no-detect` plays the demo), then pick a map in *Map Warp* or start with `+map base1`.
 - **With a mod**: add `-game <folder>`, e.g. `-game q1q2` for Call of the Void. See [MODDING.md](docs/MODDING.md).
 - **New levels**: *Random Level* or *Level Editor* in the menu.
 

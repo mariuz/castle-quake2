@@ -8,6 +8,8 @@
 
   With the full game's PAK, checks its monsters' tables against its models:
     ./castle-quake2-tests --retail <path to baseq2/pak0.pak> [<mod pak0.pak>]
+  ("auto", "gog" or "steam" instead of the path: an installed Quake II's,
+  the remaster's first)
 
   Also compares autotest screenshots with reference images (used by CI):
     ./castle-quake2-tests --compare reference.png screenshot.png diff.png [max-mean-diff]
@@ -27,10 +29,11 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeWebParams, Zipper;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeWebParams, QuakeInstalls, Zipper;
 
 var
   Passed, Failed: Integer;
+  RetailPak: String;
 
 procedure Check(const Condition: Boolean; const What: String);
 begin
@@ -3214,6 +3217,61 @@ begin
   end;
 end;
 
+{ --retail auto / gog / steam: pak0.pak of the first installation found }
+function FindRetailPak(const Filter: String): String;
+var
+  Installs: TQuakeInstallList;
+  Root: String;
+begin
+  Result := '';
+  if SameText(Filter, 'auto') then
+    Installs := FindQuake2Installs('')
+  else
+    Installs := FindQuake2Installs(Filter);
+  if Length(Installs) = 0 then
+  begin
+    Writeln('No Quake II installation found (', Filter, ')');
+    Halt(2);
+  end;
+  Root := IncludeTrailingPathDelimiter(Installs[0].Root);
+  if FileExists(Root + 'rerelease' + PathDelim + 'baseq2' + PathDelim + 'pak0.pak') then
+    Result := Root + 'rerelease' + PathDelim + 'baseq2' + PathDelim + 'pak0.pak'
+  else
+    Result := Root + 'baseq2' + PathDelim + 'pak0.pak';
+  Writeln('Retail data: ', InstallDescription(Installs[0]), ' -> ', Result);
+end;
+
+{ Finding installations: Steam's library list, what counts as Quake II data }
+procedure TestInstalls;
+const
+  Vdf = '"libraryfolders"'#10'{'#10#9'"0"'#10#9'{'#10#9#9'"path"'#9#9'"C:\\Program Files (x86)\\Steam"'#10 +
+    #9#9'"label"'#9#9'""'#10#9#9'"apps"'#10#9#9'{'#10#9#9#9'"2320"'#9#9'"123"'#10#9#9'}'#10#9'}'#10 +
+    #9'"1"'#10#9'{'#10#9#9'"path"'#9#9'"/home/me/Steam Games"'#10#9'}'#10'}'#10;
+var
+  Libs: TStringList;
+  Dir: String;
+begin
+  Libs := ParseSteamLibraryPaths(Vdf);
+  try
+    Check((Libs.Count = 2) and (Libs[0] = 'C:\Program Files (x86)\Steam') and (Libs[1] = '/home/me/Steam Games'),
+      'Steam library paths from libraryfolders.vdf (unescaped, with spaces)');
+  finally
+    Libs.Free;
+  end;
+  Dir := IncludeTrailingPathDelimiter(GetTempDir) + 'cq2-installs-test';
+  ForceDirectories(Dir + PathDelim + 'rerelease' + PathDelim + 'baseq2');
+  try
+    Check(not HasQuake2Data(Dir) and not HasQuake2Data(''), 'an empty folder is no Quake II installation');
+    TFileStream.Create(Dir + PathDelim + 'rerelease' + PathDelim + 'baseq2' + PathDelim + 'Q2Game.pkz', fmCreate).Free;
+    Check(HasQuake2Data(Dir) and HasRemasterData(Dir), 'a rerelease/baseq2 with a .pkz is the remaster');
+  finally
+    DeleteFile(Dir + PathDelim + 'rerelease' + PathDelim + 'baseq2' + PathDelim + 'Q2Game.pkz');
+    RemoveDir(Dir + PathDelim + 'rerelease' + PathDelim + 'baseq2');
+    RemoveDir(Dir + PathDelim + 'rerelease');
+    RemoveDir(Dir);
+  end;
+end;
+
 begin
   if (ParamCount >= 2) and (ParamStr(1) = '--generate-designs') then
   begin
@@ -3235,9 +3293,12 @@ begin
 
   if (ParamCount >= 2) and (ParamStr(1) = '--retail') then
   begin
-    if not Pak.AddFile(ParamStr(2)) then
+    RetailPak := ParamStr(2);
+    if SameText(RetailPak, 'auto') or SameText(RetailPak, 'gog') or SameText(RetailPak, 'steam') then
+      RetailPak := FindRetailPak(RetailPak);
+    if not Pak.AddFile(RetailPak) then
     begin
-      Writeln('Cannot load ', ParamStr(2));
+      Writeln('Cannot load ', RetailPak);
       Halt(2);
     end;
     TestRetailMonsters;
@@ -3296,6 +3357,7 @@ begin
   TestModSupport;
   TestBenchmark;
   TestWebParams;
+  TestInstalls;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then
