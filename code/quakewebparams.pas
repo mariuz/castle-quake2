@@ -4,7 +4,8 @@
   (GameInitialize).
 
   Keys: map, skill (0..3), touch (1), fps (1), gamma, demo (a demo script;
-  it runs as an autotest on the map, demo1 by default, and quits). Unknown
+  it runs as an autotest on the map, demo1 by default, and quits); scale
+  and fullres are the page's (web/page.html), not arguments. Unknown
   keys are returned in Ignored. Pure string code, so the unit tests check
   it on the desktop. }
 unit QuakeWebParams;
@@ -98,6 +99,9 @@ begin
       end else
       if Key = 'demo' then
         Demo := Value
+      else
+      if (Key = 'scale') or (Key = 'fullres') then
+        { read by the page itself (web/page.html: drawing resolution) }
       else
       if Ignored <> nil then
         Ignored.Add(Key);

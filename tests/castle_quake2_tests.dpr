@@ -3114,8 +3114,8 @@ begin
     'a demo script on the chosen map, URL-decoded');
   Ignored := TStringList.Create;
   try
-    QueryToParameters('?foo=1&map=demo1&bar', Ignored);
-    Check(Ignored.CommaText = 'foo,bar', 'unknown address keys are reported');
+    QueryToParameters('?foo=1&map=demo1&bar&scale=0.5&fullres=1', Ignored);
+    Check(Ignored.CommaText = 'foo,bar', 'unknown address keys are reported (scale / fullres are the page''s)');
   finally
     Ignored.Free;
   end;

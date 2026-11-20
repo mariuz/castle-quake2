@@ -23,6 +23,8 @@
     <icon path="art/icon.png" />
     <icon path="art/icon.ico" />
   </icons>
+  <!-- Web page: web/page.html caps the drawing resolution (and reads ?scale=) -->
+  <web html_contents="web/page.html" />
   <compiler_options>
     <search_paths>
       <path value="code/" />

@@ -1,0 +1,54 @@
+<!--
+  Inserted into the web page by CastleEngineManifest.xml (<web html_contents>).
+
+  Caps the drawing resolution: the page template sizes the canvas to the
+  screen's real pixels, which on a phone (device pixel ratio 3) means about
+  9 times the pixels of the CSS size. Here the canvas's width / height
+  setters are wrapped, so whatever size the template asks for is drawn at
+  most at a pixel ratio of 1.5 and 1920 x 1080 pixels in all; the browser
+  stretches the picture to the canvas. "?scale=0.5" in the address draws at
+  that fraction on top (a render scale for slow devices), "?scale=1" with
+  "?fullres=1" turns the caps off.
+-->
+<script>
+(function () {
+  const canvas = document.getElementById("castle-canvas");
+  if (!canvas) return;
+  const params = new URLSearchParams(window.location.search);
+  const userScale = Math.min(1, Math.max(0.25, parseFloat(params.get("scale")) || 1));
+  const fullRes = params.get("fullres") === "1";
+  const maxRatio = 1.5;
+  const maxPixels = 1920 * 1080;
+  const proto = HTMLCanvasElement.prototype;
+  const widthProp = Object.getOwnPropertyDescriptor(proto, "width");
+  const heightProp = Object.getOwnPropertyDescriptor(proto, "height");
+  let wantedWidth = 0, wantedHeight = 0;
+
+  function apply() {
+    let scale = userScale;
+    if (!fullRes) {
+      // The ratio of what the template asked for to the canvas's CSS size
+      // (devicePixelRatio alone is wrong when the browser already gave CSS
+      // pixels, e.g. without devicePixelContentBoxSize)
+      const ratio = canvas.clientWidth > 0 ? wantedWidth / canvas.clientWidth : (window.devicePixelRatio || 1);
+      if (ratio > maxRatio) scale *= maxRatio / ratio;
+      const pixels = wantedWidth * wantedHeight * scale * scale;
+      if (pixels > maxPixels) scale *= Math.sqrt(maxPixels / pixels);
+    }
+    const w = Math.max(1, Math.round(wantedWidth * scale));
+    const h = Math.max(1, Math.round(wantedHeight * scale));
+    if (widthProp.get.call(canvas) !== w) widthProp.set.call(canvas, w);
+    if (heightProp.get.call(canvas) !== h) heightProp.set.call(canvas, h);
+    console.log(`Castle Quake 2: drawing at ${w}x${h} for a ${wantedWidth}x${wantedHeight} canvas (scale ${scale.toFixed(2)})`);
+  }
+
+  Object.defineProperty(canvas, "width", {
+    get() { return widthProp.get.call(canvas); },
+    set(v) { wantedWidth = v; if (wantedHeight > 0) apply(); else widthProp.set.call(canvas, v); }
+  });
+  Object.defineProperty(canvas, "height", {
+    get() { return heightProp.get.call(canvas); },
+    set(v) { wantedHeight = v; if (wantedWidth > 0) apply(); else heightProp.set.call(canvas, v); }
+  });
+})();
+</script>

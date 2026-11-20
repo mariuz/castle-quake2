@@ -54,9 +54,14 @@ function serve(dir) {
   let loaded = false;
   let ready = false;
   let loadedAt = '';
+  let drawing = '';
   const started = Date.now();
+  const consoleLines = [];
   page.on('console', (msg) => {
     const text = msg.text();
+    consoleLines.push(text);
+    const d = /drawing at (\d+x\d+)/.exec(text);
+    if (d) drawing = d[1];
     if (/WebAssembly library finished initialization/.test(text) && !ready) {
       ready = true;
       console.log(`[${((Date.now() - started) / 1000).toFixed(1)} s] game initialized`);
@@ -106,6 +111,8 @@ function serve(dir) {
     }));
   }
   await page.screenshot({ path: shot });
+  // The whole browser console next to the screenshot, for checks and failures
+  fs.writeFileSync(shot.replace(/\.png$/, '') + '-console.log', consoleLines.join('\n') + '\n');
   await browser.close();
   if (server) server.close();
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
@@ -117,5 +124,5 @@ function serve(dir) {
     console.log(`FAILED: no map loaded within ${timeoutS} s`);
     process.exit(1);
   }
-  console.log(`OK: map loaded at ${loadedAt} s, ${fps.toFixed(1)} frames per second in the browser, screenshot ${shot}`);
+  console.log(`OK: map loaded at ${loadedAt} s, ${fps.toFixed(1)} frames per second in the browser, drawing at ${drawing || '?'}, screenshot ${shot}`);
 })();

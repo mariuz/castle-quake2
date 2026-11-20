@@ -141,6 +141,11 @@ jobs:
           NODE_PATH=/tmp/pw/node_modules node tests/web/smoke.js castle-engine-output/web/dist web-smoke.png 300 | tee web-smoke.log
           # Settings from the address: straight to demo2, easy, FPS counter
           NODE_PATH=/tmp/pw/node_modules node tests/web/smoke.js castle-engine-output/web/dist web-smoke-address.png 300 '?map=demo2&skill=0&fps=1' | tee -a web-smoke.log
+          # Render scale from the address (web/page.html): half of the 960x540 canvas
+          NODE_PATH=/tmp/pw/node_modules node tests/web/smoke.js castle-engine-output/web/dist web-smoke-scale.png 300 '?map=demo1&scale=0.5' | tee -a web-smoke.log
+          grep -q "drawing at 480x270" web-smoke.log || { echo "::error::?scale=0.5 did not halve the drawing resolution"; exit 1; }
+          # Every address setting arrives (the first one used to be dropped)
+          grep -q "Skill 0 from the command line" web-smoke-address-console.log || { echo "::error::?skill=0 was not applied"; exit 1; }
           echo "### Browser build" >> "$GITHUB_STEP_SUMMARY"
           grep "^OK:" web-smoke.log >> "$GITHUB_STEP_SUMMARY"
 
@@ -151,7 +156,7 @@ jobs:
           name: web-smoke
           path: |
             web-smoke*.png
-            web-smoke.log
+            web-smoke*.log
           if-no-files-found: ignore
 
       - name: Assemble site

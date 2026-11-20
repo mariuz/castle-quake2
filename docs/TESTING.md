@@ -110,6 +110,8 @@ node tests/web/smoke.js https://mariuz.github.io/castle-quake2/play/ shot.png
 
 A fourth argument opens the page with settings in its address and expects that map without the menu: `node tests/web/smoke.js <dist> shot.png 300 '?map=demo2&skill=0&fps=1'` (CI runs both).
 
+It writes the whole browser console next to the screenshot (`<name>-console.log`), and its `OK:` line includes the drawing resolution. CI also opens `?map=demo1&scale=0.5` and checks that it draws at 480 × 270, and that `?skill=0` arrived.
+
 It needs Playwright (`npm install playwright`; the cloud container has it). Its frame rate is software rendering, only comparable between runs.
 
 ## Screenshot comparison

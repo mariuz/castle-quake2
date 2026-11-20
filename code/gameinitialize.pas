@@ -114,6 +114,10 @@ begin
   Query := JSWindow.location.search;
   if Query = '' then
     Exit;
+  { On the web Parameters may be empty: no program name in slot 0, where
+    the parser (from 1) skips; without one the first setting was lost }
+  if Parameters.Count = 0 then
+    Parameters.Add(ApplicationName);
   Ignored := TStringList.Create;
   try
     Added := '';
@@ -282,7 +286,10 @@ begin
   if not GammaFromCommandLine then
     LightmapGamma := Settings.Brightness;
   if CmdSkill >= 0 then
+  begin
     GameSkill := CmdSkill;
+    WritelnLog('GameInitialize', 'Skill %d from the command line', [CmdSkill]);
+  end;
   { Game controllers; not in autotests (results must not depend on devices) }
   if AutoTestMap = '' then
     InitializeGamepads;
