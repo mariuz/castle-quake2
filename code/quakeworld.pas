@@ -10,11 +10,20 @@ uses
   SysUtils, Classes, Math, Generics.Collections, fpjson, jsonparser,
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions,
   QuakePak, QuakeBsp, QuakeGeometry, QuakeMap, QuakeMd2, QuakePlayer, QuakeLight, QuakeSound, QuakeHud, QuakeSettings,
-  QuakeParticles, QuakeEntities, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTurret;
+  QuakeParticles, QuakeEntities, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTurret, QuakeInsane;
 
 const
   { Quake 2 player: eye 22 above origin, origin 24 above the feet }
   PlayerEyeHeight = 46.0;
+
+  { Quake 2 temp entities (temp_event_t), as target_temp_entity's "style" }
+  TE_GUNSHOT = 0; TE_BLOOD = 1; TE_BLASTER = 2; TE_RAILTRAIL = 3; TE_SHOTGUN = 4;
+  TE_EXPLOSION1 = 5; TE_EXPLOSION2 = 6; TE_ROCKET_EXPLOSION = 7; TE_GRENADE_EXPLOSION = 8;
+  TE_SPARKS = 9; TE_SPLASH = 10; TE_BUBBLETRAIL = 11; TE_SCREEN_SPARKS = 12;
+  TE_SHIELD_SPARKS = 13; TE_BULLET_SPARKS = 14; TE_LASER_SPARKS = 15; TE_PARASITE_ATTACK = 16;
+  TE_ROCKET_EXPLOSION_WATER = 17; TE_GRENADE_EXPLOSION_WATER = 18; TE_MEDIC_CABLE_ATTACK = 19;
+  TE_BFG_EXPLOSION = 20; TE_BFG_BIGEXPLOSION = 21; TE_BOSSTPORT = 22; TE_BFG_LASER = 23;
+  TE_GRAPPLE_CABLE = 24; TE_WELDING_SPARKS = 25;
 
 type
   { Something to do later: use the entities named Target, or (Entity set)
@@ -120,6 +129,8 @@ type
     FUseSource: TQuakeEntity;
     FHelpPrimary, FHelpSecondary: String;
     FPlayer: TQuakePlayerMovement;
+    { Pickups spawned from the map; later ones are monsters' drops }
+    FMapPickupCount: Integer;
     { Quake 2 game.serverflags: cross-level trigger bits, kept across maps of a unit }
     FServerFlags: Integer;
     { States of levels left through a changelevel in the current unit, by map name }
@@ -170,6 +181,8 @@ type
     { Particles.GibTrace: gibs against the map's brushes and movers }
     function GibTraceMap(const Start, Stop: TVector3; out EndPos, Normal: TVector3): Boolean;
     procedure UpdateFallingProps(const SecondsPassed: Single);
+    procedure UpdateFallingObjects(const SecondsPassed: Single);
+    procedure DropMonsterItem(const M: TQuakeMonster);
     procedure SetPlayerGravity(const Value: Single);
     { Brush model box, or (entities made by "spawn") origin + mins / maxs fields }
     function EntityBox(const Ent: TQuakeEntity; out Box: TBox3D): Boolean;
@@ -268,6 +281,8 @@ type
     function EntityMoveDir(const Ent: TQuakeEntity): TVector3;
     { A transform at the entity origin, for positional one-shot sounds }
     procedure ActivateProp(const Prop: TQuakeProp);
+    { A Quake 2 temp entity (TE_*) at a CGE point: target_temp_entity, Use_Boss3 }
+    procedure TempEntity(const Style: Integer; const Pos: TVector3);
     procedure DamageProp(const Prop: TQuakeProp; const Damage: Integer);
     function PropByTransform(const T: TCastleTransform): TQuakeProp;
     procedure UpdateTimersAndLasers(const SecondsPassed: Single);
@@ -633,10 +648,23 @@ begin
 end;
 
 procedure TQuakeWorld.ChooseSpawnPoint(const SpawnName: String);
+const
+  { Maps whose starts all have targetnames: loaded directly (no "$spawn"),
+    start where the previous level leads, like Yamagi Quake II's
+    SP_CreateUnnamedSpawn table (the original game takes the first start) }
+  DirectStarts: array[0..7, 0..1] of String = (('mine1', 'mintro'), ('mine2', 'mine1'),
+    ('mine3', 'mine2a'), ('mine4', 'mine3'), ('power2', 'power1'), ('waste1', 'power2'),
+    ('waste2', 'waste1'), ('city2', 'city2NL'));
 var
   Ent, Best: TQuakeEntity;
-  Score, BestScore: Integer;
+  Score, BestScore, I: Integer;
+  Wanted: String;
 begin
+  Wanted := SpawnName;
+  if Wanted = '' then
+    for I := 0 to High(DirectStarts) do
+      if SameText(ExtractFileName(ChangeFileExt(FBsp.MapName, '')), DirectStarts[I, 0]) then
+        Wanted := DirectStarts[I, 1];
   { Best: the info_player_start named by the changelevel "$spawn" suffix,
     then an unnamed info_player_start, then any start, then deathmatch spots }
   Best := nil;
@@ -645,7 +673,7 @@ begin
   begin
     if Ent.ClassName = 'info_player_start' then
     begin
-      if (SpawnName <> '') and SameText(Ent.TargetName, SpawnName) then
+      if (Wanted <> '') and SameText(Ent.TargetName, Wanted) then
         Score := 4
       else
       if Ent.TargetName = '' then
@@ -683,6 +711,8 @@ var
   D: TDelayedTarget;
   Mover, M2: TQuakeMover;
   Turret: TQuakeTurret;
+  Prop: TQuakeProp;
+  T: TQuakeTrace;
 begin
   CName := Ent.ClassName;
   Pos := QuakeToCge(Ent.Origin);
@@ -747,6 +777,41 @@ begin
       Monster.Model.PlayAnim('stand', True, 10);
     FMonsters.Add(Monster);
     Inc(FStats.TotalKills);
+    Exit;
+  end;
+
+  { SP_light_mine1 / 2: the mine's lamp models (the light is in the lightmap) }
+  if (CName = 'light_mine1') or (CName = 'light_mine2') then
+  begin
+    FProps.Add(TQuakeProp.CreateProp(FMap, TPropKind(Ord(pkMineLight1) + Ord(CName = 'light_mine2')), Ent));
+    Exit;
+  end;
+  if CName = 'monster_commander_body' then
+  begin
+    Prop := TQuakeProp.CreateProp(FMap, pkCommanderBody, Ent);
+    FProps.Add(Prop);
+    { commander_body_drop: MOVETYPE_TOSS (2 up) onto what is below, box
+      -32 -32 0 .. 32 32 48 }
+    T := WorldTrace(Ent.Origin + Vector3(0, 0, 2), Ent.Origin - Vector3(0, 0, 1024),
+      Vector3(-32, -32, 0), Vector3(32, 32, 48), MASK_MONSTERSOLID, Prop);
+    if not T.StartSolid then
+      Prop.Transform.Translation := QuakeToCge(T.EndPos);
+    Exit;
+  end;
+  if CName = 'monster_boss3_stand' then
+  begin
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkBoss3Stand, Ent));
+    Exit;
+  end;
+
+  if CName = 'misc_insane' then
+  begin
+    { SP_misc_insane: a good guy (AI_GOOD_GUY), not counted in the kills }
+    Monster := TQuakeMonster.CreateMonster(FMap, @InsaneDef, Ent, Pos, Ent.Angle);
+    Monster.OnPickTarget := @PickTarget;
+    Monster.OnUseTargets := @UseTargets;
+    Monster.ResolveTargets;
+    FMonsters.Add(Monster);
     Exit;
   end;
 
@@ -926,6 +991,8 @@ begin
   ChooseSpawnPoint(SpawnName);
   for Ent in FBsp.Entities do
     SpawnEntity(Ent);
+  { Pickups after these are drops (DropMonsterItem), saved by class }
+  FMapPickupCount := FPickups.Count;
 
   WritelnLog('QuakeWorld', 'Spawned %d pickups, %d monsters, %d triggers, %d movers, %d speakers, %d props, %d lasers, %d timers',
     [FPickups.Count, FMonsters.Count, FTriggers.Count, FGeometry.Movers.Count, FSpeakers.Count,
@@ -1177,6 +1244,8 @@ begin
             Inc(FStats.MaxHealth);
             FStats.Health := Max(FStats.Health, FStats.MaxHealth);
           end;
+        POWERUP_ANCIENT_HEAD:
+          Inc(FStats.MaxHealth, 2);
         POWERUP_BANDOLIER, POWERUP_PACK:
           begin
             if Def^.Param = POWERUP_PACK then
@@ -1402,12 +1471,16 @@ begin
       if Laser.Entity = Ent then
         Laser.IsOn := not Laser.IsOn;
   end else
-  if Copy(CName, 1, 5) = 'misc_' then
+  if (Copy(CName, 1, 5) = 'misc_') or (CName = 'monster_commander_body') or (CName = 'monster_boss3_stand') then
   begin
     for Prop in FProps do
       if Prop.Entity = Ent then
         ActivateProp(Prop);
   end else
+  if CName = 'target_temp_entity' then
+    { Use_Target_Tent: the temp entity "style" at its origin }
+    TempEntity(Ent.GetInt('style', 0), QuakeToCge(Ent.Origin))
+  else
   if CName = 'target_explosion' then
   begin
     { use_target_explosion: its own "delay" postpones the blast }
@@ -1541,6 +1614,31 @@ begin
         if CName = 'func_explosive' then
           BreakExplosive(Mover)
         else
+        if CName = 'func_object' then
+        begin
+          { func_object_use: appears (KillBox) and falls }
+          if not Mover.Transform.Exists then
+          begin
+            Mover.Transform.Exists := True;
+            KillBox(Mover.WorldBox);
+            Mover.Tossing := True;
+          end;
+        end else
+        if CName = 'func_wall' then
+        begin
+          { func_wall_use: a plain wall has no use; it appears (killing
+            what is in the way, KillBox) and, with TOGGLE, also goes away }
+          if (Ent.SpawnFlags and 7) <> 0 then
+          begin
+            if not Mover.Transform.Exists then
+            begin
+              Mover.Transform.Exists := True;
+              KillBox(Mover.WorldBox);
+            end else
+            if (Ent.SpawnFlags and 2) <> 0 then
+              Mover.Transform.Exists := False;
+          end;
+        end else
           Mover.Transform.Exists := not Mover.Transform.Exists;
       end else
         Mover.Use;
@@ -1801,7 +1899,7 @@ begin
       not claimed by another medic, the one with the most max health }
     Best := nil;
     for M in FMonsters do
-      if (M <> Medic) and (not M.IsAlive) and (M.State = msDead) and (not M.Gibbed) and
+      if (M <> Medic) and (not M.IsAlive) and (M.State = msDead) and (not M.Gibbed) and (not M.GoodGuy) and
          (not M.Dormant) and M.Transform.Exists and (M.Healer = nil) and
          (PointsDistance(M.Transform.Translation, Medic.Transform.Translation) <= 1024) and
          Medic.HasLineOfSight(M.Transform.Translation + Vector3(0, 8, 0)) and
@@ -1880,6 +1978,73 @@ begin
   end;
 end;
 
+procedure TQuakeWorld.DropMonsterItem(const M: TQuakeMonster);
+var
+  CName: String;
+  Ent: TQuakeEntity;
+  Org: TVector3;
+begin
+  CName := LowerCase(M.Entity.GetField('item'));
+  if FindItemDef(CName) = nil then
+  begin
+    WritelnLog('QuakeWorld', '%s: item "%s" unknown, not dropped', [M.Transform.Name, CName]);
+    Exit;
+  end;
+  { A new entity (no targets of its own), where the monster died, resting
+    like map items (origin 15 above the floor; a monster's is 24) }
+  Org := M.Origin - Vector3(0, 0, 9);
+  Ent := TQuakeEntity.Create;
+  Ent.SetField('classname', CName);
+  Ent.SetField('origin', Format('%d %d %d', [Round(Org.X), Round(Org.Y), Round(Org.Z)]));
+  FBsp.Entities.Add(Ent);
+  SpawnEntity(Ent);
+  WritelnLog('QuakeWorld', '%s dropped %s', [M.Transform.Name, CName]);
+end;
+
+procedure TQuakeWorld.UpdateFallingObjects(const SecondsPassed: Single);
+var
+  Mover: TQuakeMover;
+  Box: TBox3D;
+  A, B, QMin, QMax, C: TVector3;
+  T: TQuakeTrace;
+begin
+  { func_object: MOVETYPE_TOSS (gravity 800) until it lands }
+  if FGeometry = nil then
+    Exit;
+  for Mover in FGeometry.Movers do
+    if Mover.Tossing and Mover.Transform.Exists then
+    begin
+      Box := Mover.WorldBox;
+      if Box.IsEmpty then
+      begin
+        Mover.Tossing := False;
+        Continue;
+      end;
+      A := CgeToQuake(Box.Data[0]);
+      B := CgeToQuake(Box.Data[1]);
+      QMin := Vector3(Min(A.X, B.X), Min(A.Y, B.Y), Min(A.Z, B.Z));
+      QMax := Vector3(Max(A.X, B.X), Max(A.Y, B.Y), Max(A.Z, B.Z));
+      C := (QMin + QMax) * 0.5;
+      Mover.TossSpeed := Min(Mover.TossSpeed + 800 * SecondsPassed, 2000);
+      { SV_Physics_Toss with MASK_SOLID: it falls through players and
+        monsters onto walls and floors (so func_object_touch, which only
+        hurts what it lands on, never fires in practice) }
+      T := WorldTrace(C, C - Vector3(0, 0, Mover.TossSpeed * SecondsPassed), QMin - C, QMax - C,
+        CONTENTS_SOLID or CONTENTS_WINDOW, Mover);
+      if T.StartSolid then
+      begin
+        Mover.Tossing := False;
+        Continue;
+      end;
+      Mover.Transform.Translation := Mover.Transform.Translation + QuakeToCge(T.EndPos) - QuakeToCge(C);
+      if T.Fraction < 1 then
+      begin
+        Mover.Tossing := False;
+        Mover.TossSpeed := 0;
+      end;
+    end;
+end;
+
 procedure TQuakeWorld.UpdateFallingProps(const SecondsPassed: Single);
 var
   Prop: TQuakeProp;
@@ -1912,6 +2077,42 @@ begin
     end;
 end;
 
+procedure TQuakeWorld.TempEntity(const Style: Integer; const Pos: TVector3);
+begin
+  { The client's CL_ParseTEnt for the temp entities maps use }
+  case Style of
+    TE_EXPLOSION1, TE_EXPLOSION2, TE_ROCKET_EXPLOSION, TE_GRENADE_EXPLOSION,
+    TE_ROCKET_EXPLOSION_WATER, TE_GRENADE_EXPLOSION_WATER:
+      begin
+        Particles.SpawnExplosion(Pos);
+        if Style in [TE_GRENADE_EXPLOSION, TE_GRENADE_EXPLOSION_WATER] then
+          Sounds.PlayAtPoint('sound/weapons/grenlx1a.wav', Pos)
+        else
+          Sounds.PlayAtPoint('sound/weapons/rocklx1a.wav', Pos);
+      end;
+    TE_BFG_EXPLOSION, TE_BFG_BIGEXPLOSION:
+      Particles.SpawnBfgExplosion(Pos);
+    TE_BOSSTPORT:
+      begin
+        { CL_BigTeleportParticles and misc/bigtele.wav, heard everywhere }
+        Particles.SpawnTeleport(Pos);
+        Particles.SpawnTeleport(Pos + Vector3(0, 40, 0));
+        Sounds.PlayAtPoint('sound/misc/bigtele.wav', Pos, 1, ATTN_NONE);
+      end;
+    TE_GUNSHOT, TE_SHOTGUN, TE_SPARKS, TE_BULLET_SPARKS, TE_SCREEN_SPARKS, TE_SHIELD_SPARKS,
+    TE_LASER_SPARKS, TE_WELDING_SPARKS:
+      Particles.SpawnImpact(Pos, Vector3(0, 1, 0));
+    TE_BLOOD:
+      Particles.SpawnBlood(Pos, Vector3(0, 1, 0));
+    TE_BLASTER:
+      Particles.SpawnBlasterImpact(Pos, Vector3(0, 1, 0));
+    TE_SPLASH:
+      Particles.SpawnSplash(Pos, Vector3(0, 1, 0), 0, 32);
+  else
+    WritelnLog('QuakeWorld', 'target_temp_entity style %d not drawn', [Style]);
+  end;
+end;
+
 procedure TQuakeWorld.ActivateProp(const Prop: TQuakeProp);
 var
   List: TQuakeEntityList;
@@ -1921,6 +2122,23 @@ begin
     pkSatelliteDish:
       if Prop.Model <> nil then
         Prop.Model.PlayAnim('', False, 10);
+    pkCommanderBody:
+      if not Prop.ThudPlayed and not Prop.AnimOnce then
+      begin
+        { commander_body_use: the tank's pain sound, then frames 1..24 }
+        Sounds.PlayAt('sound/tank/pain.wav', Prop.Transform, 1, 1, chBody);
+        Prop.AnimFirst := 1;
+        Prop.AnimLast := 24;
+        Prop.AnimTime := 0;
+        Prop.AnimOnce := True;
+      end;
+    pkBoss3Stand:
+      begin
+        { Use_Boss3: TE_BOSSTPORT, and the Makron is gone }
+        TempEntity(TE_BOSSTPORT, Prop.Transform.Translation);
+        Prop.Destroyed := True;
+        Prop.Transform.Exists := False;
+      end;
     pkBlackHole:
       begin
         { misc_blackhole_use: it goes away }
@@ -2364,20 +2582,28 @@ begin
       Continue;
     case Mover.Kind of
       mkDoor, mkDoorRotating:
-        if Mover.AutoOpen and (Mover.State = msAtStart) then
+        if Mover.AutoOpen then
         begin
-          { Quake 2 door trigger field: the door box expanded by 60 horizontally }
-          Box.Data[0] := Box.Data[0] - Vector3(60, 0, 60);
-          Box.Data[1] := Box.Data[1] + Vector3(60, 0, 60);
-          if Box.Collision(PBox) or MonsterInField(Box) then
-            Mover.Use;
-        end else
-        if Mover.AutoOpen and (Mover.State = msAtEnd) then
-        begin
-          Box.Data[0] := Box.Data[0] - Vector3(60, 0, 60);
-          Box.Data[1] := Box.Data[1] + Vector3(60, 0, 60);
-          if Box.Collision(PBox) or MonsterInField(Box) then
-            Mover.StateTimer := Mover.WaitTime;
+          { Quake 2 door trigger field: the closed door's box expanded by 60
+            horizontally, made once; it stays there while the door moves, so
+            standing in it keeps an open door open (door_go_up at the top
+            restarts the wait) }
+          if Mover.TriggerField.IsEmpty and (Mover.State = msAtStart) then
+          begin
+            Box.Data[0] := Box.Data[0] - Vector3(60, 0, 60);
+            Box.Data[1] := Box.Data[1] + Vector3(60, 0, 60);
+            Mover.TriggerField := Box;
+          end;
+          if not Mover.TriggerField.IsEmpty then
+          begin
+            if (Mover.State = msAtStart) and
+               (Mover.TriggerField.Collision(PBox) or MonsterInField(Mover.TriggerField)) then
+              Mover.Use
+            else
+            if (Mover.State = msAtEnd) and
+               (Mover.TriggerField.Collision(PBox) or MonsterInField(Mover.TriggerField)) then
+              Mover.StateTimer := Mover.WaitTime;
+          end;
         end;
       mkPlat:
         if (FPlayerPos.X >= Box.Data[0].X) and (FPlayerPos.X <= Box.Data[1].X) and
@@ -3583,7 +3809,11 @@ begin
     if (not M.IsAlive) and not M.KillCounted then
     begin
       M.KillCounted := True;
-      Inc(FStats.Kills);
+      if not M.GoodGuy then
+        Inc(FStats.Kills);
+      { monster_death_use: a monster with an "item" drops it (Drop_Item) }
+      if M.Entity.GetField('item') <> '' then
+        DropMonsterItem(M);
       { Dead monsters fire their targets (Quake 2 monster_death_use) }
       UseTargets(M.DeathTarget);
       { jorg_die: MakronToss on death frame 49, MakronSpawn 0.8 s later,
@@ -3610,6 +3840,7 @@ begin
   UpdateGun(SecondsPassed);
   UpdateProjectiles(SecondsPassed);
   UpdateFallingProps(SecondsPassed);
+  UpdateFallingObjects(SecondsPassed);
   UpdateClocks;
   UpdateMedics(SecondsPassed);
   FMap.UpdateSkyRotation(FStats.LevelTime);
@@ -3844,9 +4075,20 @@ begin
   Result.Add('monsters', Arr);
 
   Arr := TJSONArray.Create;
-  for I := 0 to FPickups.Count - 1 do
+  for I := 0 to Min(FMapPickupCount, FPickups.Count) - 1 do
     Arr.Add(FPickups[I].Collected);
   Result.Add('pickups', Arr);
+  { Items monsters dropped (not in the map): class and origin, if still there }
+  Arr := TJSONArray.Create;
+  for I := FMapPickupCount to FPickups.Count - 1 do
+    if not FPickups[I].Collected then
+    begin
+      O := TJSONObject.Create;
+      O.Add('class', FPickups[I].Entity.ClassName);
+      O.Add('origin', FPickups[I].Entity.GetField('origin'));
+      Arr.Add(O);
+    end;
+  Result.Add('drops', Arr);
 
   Arr := TJSONArray.Create;
   for I := 0 to FGeometry.Movers.Count - 1 do
@@ -3975,6 +4217,7 @@ var
   Proj: TQuakeProjectile;
   D: TDelayedTarget;
   Key: String;
+  DropEnt: TQuakeEntity;
 begin
   O := Obj.Get('player', TJSONObject(nil));
   if (O <> nil) and not IncludePlayer then
@@ -4046,6 +4289,19 @@ begin
   if Arr <> nil then
     for I := 0 to Min(Arr.Count, FPickups.Count) - 1 do
       FPickups[I].Collected := Arr.Booleans[I];
+  Arr := Obj.Get('drops', TJSONArray(nil));
+  if Arr <> nil then
+    for I := 0 to Arr.Count - 1 do
+      if Arr.Items[I] is TJSONObject then
+      begin
+        O := TJSONObject(Arr.Items[I]);
+        DropEnt := TQuakeEntity.Create;
+        DropEnt.SetField('classname', O.Get('class', ''));
+        DropEnt.SetField('origin', O.Get('origin', '0 0 0'));
+        FBsp.Entities.Add(DropEnt);
+        SpawnEntity(DropEnt);
+        WritelnLog('QuakeWorld', 'Restored dropped %s at %s', [DropEnt.ClassName, DropEnt.GetField('origin')]);
+      end;
 
   Arr := Obj.Get('movers', TJSONArray(nil));
   if Arr <> nil then
@@ -4471,7 +4727,7 @@ begin
     for Mover in FGeometry.Movers do
     begin
       { Model 0: console-spawned box movers, only doors are solid (MoverTraceAt) }
-      if (not Mover.Transform.Exists) or (Mover.ModelIndex >= FBsp.ModelCount) or
+      if (Mover = Ignore) or (not Mover.Transform.Exists) or (Mover.ModelIndex >= FBsp.ModelCount) or
          ((Mover.ModelIndex <= 0) and not (Mover.Kind in [mkDoor, mkSecretDoor])) then
         Continue;
       Box := Mover.WorldBox;

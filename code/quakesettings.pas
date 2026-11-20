@@ -25,6 +25,11 @@ type
 
   TQuakeSettings = class
   public
+    const
+      { Hor+ by default, like Yamagi Quake II and Quake II Remastered (also
+        in autotests: CI's reference shots are made with it) }
+      DefaultWidescreenFov = True;
+    var
     { Skill of the last new game: 0 easy, 1 medium, 2 hard, 3 nightmare }
     Skill: Integer;
     { Multiplier of CGE's default mouse look sensitivity }
@@ -34,6 +39,11 @@ type
     ViewBob: Boolean;
     { Horizontal field of view in degrees (Quake 2 default 90) }
     FieldOfView: Integer;
+    { Hor+: FieldOfView is the width of a 4:3 view, and wider screens see
+      more at the sides (Yamagi Quake II, Quake II Remastered; the default); off: it is
+      the width of any screen (the original game, which crops top and
+      bottom on wide screens) }
+    WidescreenFov: Boolean;
     { Smooth (linear) instead of sharp (nearest) textures; applies when a
       map is loaded }
     SmoothTextures: Boolean;
@@ -127,10 +137,19 @@ function SkillSpawnFlag(const ASkill: Integer): Integer;
   halves the attack chance on easy and doubles it from hard on) }
 function SkillAttackDelay(const ASkill: Integer): Single;
 
+{ Hor+: the vertical field of view (radians) of a 4:3 view HorizDegrees
+  wide, used on every screen (wider ones see more at the sides) }
+function HorPlusVerticalFov(const HorizDegrees: Single): Single;
+
 implementation
 
 uses
   Math, CastleConfig, CastleSoundEngine;
+
+function HorPlusVerticalFov(const HorizDegrees: Single): Single;
+begin
+  Result := 2 * ArcTan(Tan(DegToRad(HorizDegrees) / 2) * 3 / 4);
+end;
 
 function InterfaceScaleFor(const Size: Integer; const Touch: Boolean): Single;
 begin
@@ -205,6 +224,7 @@ begin
   InvertMouse := False;
   ViewBob := True;
   FieldOfView := 90;
+  WidescreenFov := DefaultWidescreenFov;
   SmoothTextures := False;
   Brightness := DefaultBrightness;
   SoundVolume := 100;
@@ -245,6 +265,7 @@ begin
   InvertMouse := C.GetValue('quake2/invert_mouse', False);
   ViewBob := C.GetValue('quake2/view_bob', True);
   FieldOfView := EnsureRange(C.GetValue('quake2/fov', 90), 60, 130);
+  WidescreenFov := C.GetValue('quake2/widescreen_fov', DefaultWidescreenFov);
   SmoothTextures := C.GetValue('quake2/smooth_textures', False);
   Brightness := EnsureRange(C.GetFloat('quake2/brightness', DefaultBrightness), MinBrightness, MaxBrightness);
   SoundVolume := EnsureRange(C.GetValue('quake2/sound_volume', 100), 0, 100);
@@ -279,6 +300,7 @@ begin
   C.SetDeleteValue('quake2/invert_mouse', InvertMouse, False);
   C.SetDeleteValue('quake2/view_bob', ViewBob, True);
   C.SetDeleteValue('quake2/fov', FieldOfView, 90);
+  C.SetDeleteValue('quake2/widescreen_fov', WidescreenFov, DefaultWidescreenFov);
   C.SetDeleteValue('quake2/smooth_textures', SmoothTextures, False);
   C.SetDeleteFloat('quake2/brightness', Brightness, DefaultBrightness);
   C.SetDeleteValue('quake2/sound_volume', SoundVolume, 100);

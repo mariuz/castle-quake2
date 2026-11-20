@@ -3,6 +3,15 @@
 ## Unreleased
 
 - An installed Quake II is found by itself: GOG (Galaxy's registry, `GOG Games` folders), Steam (all libraries) and common folders, Quake II Remastered first. `-basedir auto` / `gog` / `steam` ask for it (autotests and the map report too), `--no-detect` keeps the demo. `castle-quake2-tests --retail auto` checks the full game's monster tables against the installed PAK. Checked on GOG's Quake II: all 65 maps load, base1 plays, Ground Zero loads with `-game rogue`.
+- The full game's last unsupported classes: the insane marines (`misc_insane`: on the player's side, never counted as kills, standing, fidgeting, screaming, walking their paths, crawling or hanging crucified and struggling), the commander's body on lab (comes alive when used), the standing Makron on boss1 (`monster_boss3_stand`, teleports away), `target_temp_entity` (explosions, the boss teleport, sparks...), the Ancient Head (city3's secret: 2 more max health), the mine lamps (`light_mine1` / `light_mine2`), `func_wall`'s TRIGGER_SPAWN / TOGGLE / START_ON and falling `func_object`s. The retail map report now has no unsupported class.
+- Monsters with an `item` key drop it when they die (Quake 2's `monster_death_use`: soldiers' ammo, the insane marines' grenades and shells); drops are kept in savegames.
+- Compared with Yamagi Quake II on the 39 single-player maps: the same kill / goal / secret totals on every help computer, and the same start views. Fixes found that way:
+  - Doors that open by themselves no longer close on a player standing in the doorway: their trigger field stays where the closed door was, like Quake 2's (it used to move up with the door, so the door shut after 3 seconds and opened again).
+  - Maps whose starts all have names (entered from another level) start where Yamagi does when loaded directly (`map waste2`, *Map Warp*): mine1–mine4, power2, waste1, waste2 and city2 use the start from the previous level instead of the first one.
+  - `func_object`s fall onto floors only (Quake 2 tosses them with `MASK_SOLID`), so mine4's rocks no longer crush the player at the start.
+  - *Options → Widescreen View* (`horplus` in the console): **Hor+** keeps a 4:3 view's height and shows more at the sides on wide screens, like Yamagi and Quake II Remastered (fov 90 is 106° wide at 16:9); it is the default now; **Fixed** keeps the original game's 90° width. The CI reference screenshots are made anew with it.
+- Fixed: maps with lava or water on doors and other moving brushes logged "X3D node Effect is already part of another TCastleScene" (each brush model has its own warp effect now).
+- Testing on retail data: `tests/retail-playthrough.ps1` plays every map of an installed game; `tests/yamagi-compare.ps1` takes the same shots in Yamagi Quake II; `--log-file <file>` keeps parallel runs' logs apart, `--no-sound` turns audio off and `--offscreen-shots` takes autotest screenshots from a framebuffer (so the tests run minimized); the `V` log adds kill / secret / goal totals; autotest placements check the spot against the brushes (a player placed over a render-only floor fell out of biggun).
 
 ## v0.32.0 — 2026-11-20
 

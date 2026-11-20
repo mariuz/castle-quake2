@@ -12,7 +12,7 @@ uses
   Classes, SysUtils, Math,
   CastleVectors, CastleUIControls, CastleControls, CastleKeysMouse,
   CastleViewport, CastleCameras, CastleTransform, CastleColors, CastleLog,
-  CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene,
+  CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene, CastleGLImages, CastleRectangles, CastleRenderContext,
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound,
   QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad, QuakeTouch, QuakeExitWatchdog, QuakeBenchmark, CastleTimeUtils,
   X3DNodes, X3DFields, CastleRenderOptions,
@@ -135,6 +135,8 @@ type
     procedure ParseDemoScript(const Script: String);
     procedure RunDemoStep(const SecondsPassed: Single);
     procedure CaptureScreenshot(const Prefix: String);
+    { The screen drawn into a framebuffer (OffscreenScreenshots) }
+    function SaveScreenOffscreen: TCastleImage;
     procedure CycleWeapon(const Delta: Integer);
     { Savegames in castle-config:/saves/<name>.json }
     procedure SaveGame(const SaveName: String);
@@ -142,11 +144,16 @@ type
     { Autotest helper: stand on a floor near Target, looking at it }
     procedure GoNear(const Target: TVector3);
     function GoNearByTraces(const Target: TVector3): Boolean;
+    { A free player box with a brush floor just below this eye (CGE) }
+    function SpotStandsOnBrushes(const Eye: TVector3): Boolean;
     procedure QuitNow;
     procedure RunMapReport;
   public
     { --fps / ?fps=1: show the frame rate counter from the start }
     ShowFpsAtStart: Boolean;
+    { --offscreen-shots: autotest screenshots drawn into a framebuffer, so a
+      minimized or covered window still saves real images }
+    OffscreenScreenshots: Boolean;
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
 
@@ -225,8 +232,17 @@ begin
   WalkNavigation.MouseLookVerticalSensitivity :=
     TCastleWalkNavigation.DefaultMouseLookVerticalSensitivity * Settings.MouseSensitivity;
   WalkNavigation.InvertVerticalMouseLook := Settings.InvertMouse;
-  { The design's camera uses a horizontal field of view, like Quake 2 }
-  MainViewport.Camera.Perspective.FieldOfView := DegToRad(Settings.FieldOfView);
+  { The design's camera uses a horizontal field of view, like Quake 2; Hor+
+    keeps the vertical one of a 4:3 view instead (Yamagi, the remaster) }
+  if Settings.WidescreenFov then
+  begin
+    MainViewport.Camera.Perspective.FieldOfViewAxis := faVertical;
+    MainViewport.Camera.Perspective.FieldOfView := HorPlusVerticalFov(Settings.FieldOfView);
+  end else
+  begin
+    MainViewport.Camera.Perspective.FieldOfViewAxis := faHorizontal;
+    MainViewport.Camera.Perspective.FieldOfView := DegToRad(Settings.FieldOfView);
+  end;
   PlayerMovement.ViewBob := Settings.ViewBob;
   Settings.ApplyAudio;
 end;
@@ -664,6 +680,35 @@ begin
     Hud.ShowMessage('Failed to load level: ' + LevelName, 5.0);
 end;
 
+function TViewPlay.SaveScreenOffscreen: TCastleImage;
+var
+  RT: TGLRenderToTexture;
+  R: TRectangle;
+  I: Integer;
+begin
+  { Draw every control into a framebuffer of the window's size and read it
+    back: works while the window is minimized or covered, where reading the
+    window itself gives black }
+  R := Rectangle(0, 0, Container.Width, Container.Height);
+  RT := TGLRenderToTexture.Create(R.Width, R.Height);
+  try
+    RT.Buffer := tbNone;
+    RT.GLContextOpen;
+    RT.RenderBegin;
+    try
+      RenderContext.Clear([cbColor, cbDepth], Black);
+      for I := 0 to Container.Controls.Count - 1 do
+        if Container.Controls[I].Exists then
+          Container.RenderControl(Container.Controls[I], R);
+      Result := RT.SaveScreen(TRGBImage, R);
+    finally
+      RT.RenderEnd;
+    end;
+  finally
+    RT.Free;
+  end;
+end;
+
 procedure TViewPlay.CaptureScreenshot(const Prefix: String);
 var
   OutPath: String;
@@ -672,7 +717,10 @@ begin
   Inc(FAutoTestShots);
   OutPath := Prefix + '_' + IntToStr(FAutoTestShots) + '.png';
   try
-    Img := Container.SaveScreen;
+    if OffscreenScreenshots then
+      Img := SaveScreenOffscreen
+    else
+      Img := Container.SaveScreen;
     try
       SaveImage(Img, OutPath);
     finally
@@ -1163,6 +1211,8 @@ begin
     WritelnLog('Demo', 'Monster shots: %d, player health %d armor %d, player stuck %d', [FWorld.MonsterShots,
       FWorld.Stats.Health, FWorld.Stats.Armor, PlayerMovement.StuckCount]);
     WritelnLog('Demo', 'Replay drift: max %.1f units', [FDemoMaxDrift]);
+    WritelnLog('Demo', 'Kills: %d / %d, secrets %d / %d, goals %d / %d', [FWorld.Stats.Kills, FWorld.Stats.TotalKills,
+      FWorld.Stats.Secrets, FWorld.Stats.TotalSecrets, FWorld.Stats.Goals, FWorld.Stats.TotalGoals]);
     WritelnLog('Demo', 'Gun: weapon %d state %d frame %d, ammo shells %d bullets %d grenades %d cells %d slugs %d', [
       FWorld.Gun.Slot, Ord(FWorld.Gun.State), FWorld.Gun.Frame, FWorld.Stats.Ammo[atShells],
       FWorld.Stats.Ammo[atBullets], FWorld.Stats.Ammo[atGrenades], FWorld.Stats.Ammo[atCells],
@@ -1227,6 +1277,11 @@ begin
       if (Items.WorldRayCast(Spot, Vector3(0, -1, 0), FloorDist) = nil) or (FloorDist > 160) then
         Continue;
       Spot.Y := Spot.Y - FloorDist + PlayerEyeHeight;
+      { Render meshes aren't the brushes (sky, clip, detail): the spot must
+        be free and over a brush floor for Quake traces too, else the
+        player may land outside the map and fall forever }
+      if not SpotStandsOnBrushes(Spot) then
+        Continue;
       MainViewport.Camera.SetWorldView(Spot, (Target - Spot).Normalize, Vector3(0, 1, 0));
       WritelnLog('GameViewPlay', 'GoNear %s -> %s', [Target.ToString, Spot.ToString]);
       Exit;
@@ -1236,6 +1291,20 @@ begin
   if GoNearByTraces(Target) then
     Exit;
   WritelnWarning('GameViewPlay', 'GoNear %s: no free spot found', [Target.ToString]);
+end;
+
+function TViewPlay.SpotStandsOnBrushes(const Eye: TVector3): Boolean;
+const
+  BoxMins: TVector3 = (X: -16; Y: -16; Z: -24);
+  BoxMaxs: TVector3 = (X: 16; Y: 16; Z: 32);
+var
+  Org: TVector3;
+  Tr: TQuakeTrace;
+begin
+  { The player's origin is 22 below the eye }
+  Org := CgeToQuake(Eye) - Vector3(0, 0, PlayerEyeHeight - 24);
+  Tr := FWorld.WorldTrace(Org + Vector3(0, 0, 2), Org - Vector3(0, 0, 48), BoxMins, BoxMaxs, MASK_PLAYERSOLID, nil);
+  Result := (not Tr.StartSolid) and (Tr.Fraction < 1) and (Tr.Normal.Z >= 0.7);
 end;
 
 function TViewPlay.GoNearByTraces(const Target: TVector3): Boolean;
@@ -2042,6 +2111,17 @@ begin
   begin
     FWorld.Geometry.NoVis := not FWorld.Geometry.NoVis;
     Hud.ShowMessage('novis ' + Iff(FWorld.Geometry.NoVis, 'ON', 'OFF'), 2);
+  end else
+  if Cmd = 'horplus' then
+  begin
+    { horplus [0|1]: Hor+ widescreen field of view (Options -> Widescreen View) }
+    if Args = '' then
+      Settings.WidescreenFov := not Settings.WidescreenFov
+    else
+      Settings.WidescreenFov := Args <> '0';
+    Settings.Save;
+    ApplySettings;
+    Hud.ShowMessage('horplus ' + Iff(Settings.WidescreenFov, 'ON', 'OFF'), 2);
   end else
   if Cmd = 'save' then
   begin

@@ -18,7 +18,7 @@ type
   TMenuPage = (smMain, smSkill, smMaps, smOptions, smControls, smPad, smShowcase);
 
   { Rows of the Options page }
-  TOptionItem = (oiCamera, oiSensitivity, oiInvert, oiViewBob, oiFieldOfView, oiInterfaceSize,
+  TOptionItem = (oiCamera, oiSensitivity, oiInvert, oiViewBob, oiFieldOfView, oiWidescreenFov, oiInterfaceSize,
     oiSmoothTextures, oiBrightness, oiSoundVolume, oiMusicVolume, oiControls, oiBack);
 
 const
@@ -168,6 +168,10 @@ begin
         FItems.Add('Invert Mouse: [' + OnOff(Settings.InvertMouse) + ']');
         FItems.Add('View Bob: [' + OnOff(Settings.ViewBob) + ']');
         FItems.Add(Format('Field of View: [%d]', [Settings.FieldOfView]));
+        if Settings.WidescreenFov then
+          FItems.Add('Widescreen View: [Hor+]')
+        else
+          FItems.Add('Widescreen View: [Fixed]');
         FItems.Add('Interface Size: [' + InterfaceSizeNames[Settings.InterfaceSize] + ']');
         { These two apply when a map is loaded (lightmaps and textures are built then) }
         FItems.Add('Smooth Textures: [' + OnOff(Settings.SmoothTextures) + ']');
@@ -236,6 +240,8 @@ begin
       Settings.ViewBob := not Settings.ViewBob;
     oiFieldOfView:
       Settings.FieldOfView := EnsureRange(Settings.FieldOfView + 5 * Delta, 70, 120);
+    oiWidescreenFov:
+      Settings.WidescreenFov := not Settings.WidescreenFov;
     oiInterfaceSize:
       Settings.InterfaceSize := EnsureRange(Settings.InterfaceSize + Delta, 0, High(InterfaceSizeNames));
     oiSmoothTextures:

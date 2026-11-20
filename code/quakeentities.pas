@@ -169,6 +169,14 @@ type
     FScreenModel: TQuakeMd2Instance;
     { Seconds to stand at the current path_corner ("wait") }
     FPauseTime: Single;
+    { misc_insane: the staggering walk, seconds to the next fidget /
+      struggle, playing one now, seconds of pain flinches left }
+    FInsaneWalk: Boolean;
+    FInsaneTimer: Single;
+    FInsaneFidget: Boolean;
+    FPainDebounce: Single;
+    { misc_insane between pain / fidgets (QuakeInsane) }
+    procedure UpdateInsane(const SecondsPassed: Single);
     { Fraction of the attack animation at which the attack happens }
     function AttackFirePoint: Single;
     { Start a Quake 2 attack sequence for the distance; False if the
@@ -230,6 +238,9 @@ type
     TurretDriver: Boolean;
     { The driver took its breach (turret_driver_link), once }
     TurretLinked: Boolean;
+    { Quake 2 AI_GOOD_GUY (misc_insane): never notices or attacks, not
+      counted in the kills, not revived by medics }
+    GoodGuy: Boolean;
     { Targets fired on death (monster_death_use); empty when "target" was a path }
     DeathTarget: String;
     { path_corner walked to while idle }
@@ -422,7 +433,7 @@ type
 
   TPropKind = (pkExplobox, pkBanner, pkDeadSoldier, pkSatelliteDish, pkStroggShip, pkGibHead,
     pkViper, pkBigViper, pkViperBomb, pkBlackHole, pkEasterTank, pkEasterChick, pkEasterChick2,
-    pkTeleporter);
+    pkTeleporter, pkCommanderBody, pkBoss3Stand, pkMineLight1, pkMineLight2);
 
   { misc_* decorations: exploding barrels, banners, corpses, the satellite dish,
     flying Strogg ships and vipers (follow path_corners when triggered), gib
@@ -449,6 +460,10 @@ type
     { Looping frame range (black hole, easter tank / chick), 10 frames a second }
     AnimFirst, AnimLast: Integer;
     AnimTime: Single;
+    { Play AnimFirst..AnimLast once and stay on the last frame (the
+      commander's body when used); its thud sound was played }
+    AnimOnce: Boolean;
+    ThudPlayed: Boolean;
     { Re-light the model 10 times a second (light styles flicker) }
     LightTimer: Single;
     constructor CreateProp(const AParent: TCastleTransform; const AKind: TPropKind;
@@ -542,8 +557,9 @@ const
   POWERUP_BANDOLIER = 4;
   POWERUP_PACK = 5;
   POWERUP_OTHER = 6;
+  POWERUP_ANCIENT_HEAD = 7;
 
-  ItemDefs: array[0..57] of TQuakeItemDef = (
+  ItemDefs: array[0..58] of TQuakeItemDef = (
     (ClassName: 'weapon_shotgun'; Category: icWeapon; Model: 'models/weapons/g_shotg/tris.md2'; Icon: 'w_shotgun'; Name: 'Shotgun'; Sound: 'sound/misc/w_pkup.wav'; Weapon: 2; AmmoType: atShells; Amount: 10; Param: 0),
     (ClassName: 'weapon_supershotgun'; Category: icWeapon; Model: 'models/weapons/g_shotg2/tris.md2'; Icon: 'w_sshotgun'; Name: 'Super Shotgun'; Sound: 'sound/misc/w_pkup.wav'; Weapon: 3; AmmoType: atShells; Amount: 10; Param: 0),
     (ClassName: 'weapon_machinegun'; Category: icWeapon; Model: 'models/weapons/g_machn/tris.md2'; Icon: 'w_machinegun'; Name: 'Machinegun'; Sound: 'sound/misc/w_pkup.wav'; Weapon: 4; AmmoType: atBullets; Amount: 50; Param: 0),
@@ -609,7 +625,9 @@ const
     (ClassName: 'key_q1_medieval_gold_key'; Category: icKey; Model: 'models/items/keys/medieval/m_g_key.md2'; Icon: ''; Name: 'Runic Gold Key'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_MEDIEVAL_GOLD; Param: 0),
     (ClassName: 'key_q1_medieval_silver_key'; Category: icKey; Model: 'models/items/keys/medieval/m_s_key.md2'; Icon: ''; Name: 'Runic Silver Key'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_MEDIEVAL_SILVER; Param: 0),
     (ClassName: 'key_q1_runic_gold_key'; Category: icKey; Model: 'models/items/keys/wizard/w_g_key.md2'; Icon: ''; Name: 'Medieval Gold Key'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_RUNIC_GOLD; Param: 0),
-    (ClassName: 'key_q1_runic_silver_key'; Category: icKey; Model: 'models/items/keys/wizard/w_s_key.md2'; Icon: ''; Name: 'Medieval Silver Key'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_RUNIC_SILVER; Param: 0)
+    (ClassName: 'key_q1_runic_silver_key'; Category: icKey; Model: 'models/items/keys/wizard/w_s_key.md2'; Icon: ''; Name: 'Medieval Silver Key'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_RUNIC_SILVER; Param: 0),
+    { Pickup_AncientHead: 2 more max health (city3's secret) }
+    (ClassName: 'item_ancient_head'; Category: icPowerup; Model: 'models/items/c_head/tris.md2'; Icon: 'i_fixme'; Name: 'Ancient Head'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: 0; Param: POWERUP_ANCIENT_HEAD)
   );
 
   { Weapon slots 1..11 (key 0 selects slot 10, G slot 11) }
@@ -796,7 +814,7 @@ function MonsterGibs(const MonsterClass: String): TMonsterGibs;
 implementation
 
 uses
-  QuakeQ1Monsters;
+  QuakeQ1Monsters, QuakeInsane;
 
 procedure AdaptVariantAttacks(var Seqs: TMonsterAttackSeqs; const Def: PQuakeMonsterDef); forward;
 
@@ -893,7 +911,10 @@ begin
       Result.GibHealth := -200
     else
     if MonsterClass = 'monster_makron' then
-      Result.GibHealth := -2000;
+      Result.GibHealth := -2000
+    else
+    if MonsterClass = 'misc_insane' then
+      Result.GibHealth := -50;
     Add('bone', 2);
     Add('sm_meat', 4);
     Add('head2', 1);
@@ -1193,6 +1214,8 @@ end;
 
 constructor TQuakeMonster.CreateMonster(const AParent: TCastleTransform; const ADef: PQuakeMonsterDef;
   const AEntity: TQuakeEntity; const Pos: TVector3; const Yaw: Single);
+var
+  Skin: Integer;
 begin
   inherited Create(nil);
   Def := ADef;
@@ -1214,6 +1237,22 @@ begin
   FWalkSeq := MonsterMoveSeq(Def^.ClassName, False);
   FRunSeq := MonsterMoveSeq(Def^.ClassName, True);
   MonsterBoxSize(Def^.ClassName, BoxMins, BoxMaxs);
+  Skin := Def^.Skin;
+  if Def^.ClassName = 'misc_insane' then
+  begin
+    { SP_misc_insane: one of three skins; a crucified one hangs in a thin
+      box (no gravity, never moves) }
+    GoodGuy := True;
+    Skin := Random(3);
+    FInsaneWalk := Random < 0.5;
+    FInsaneTimer := 4 + Random * 10;
+    if (AEntity.SpawnFlags and INSANE_CRUCIFIED) <> 0 then
+    begin
+      BoxMins := Vector3(-16, 0, 0);
+      BoxMaxs := Vector3(16, 8, 32);
+      FDropped := True;
+    end;
+  end;
   { Quake 2 base game: only the brain has power armor (a power screen) }
   if Def^.ClassName = 'monster_brain' then
   begin
@@ -1227,7 +1266,7 @@ begin
   Transform.Rotation := Vector4(0, 1, 0, DegToRad(Yaw));
   Transform.CollisionSphereRadius := 16;
 
-  Model := Md2Manager.CreateInstance(Def^.Model, Def^.Skin);
+  Model := Md2Manager.CreateInstance(Def^.Model, Skin);
   { Jorg: the Makron riding (modelindex) on Jorg's legs (modelindex2) }
   if (Model <> nil) and (Def^.ClassName = 'monster_jorg') then
   begin
@@ -1565,7 +1604,7 @@ end;
 
 procedure TQuakeMonster.Alert;
 begin
-  if Alerted or not IsAlive or NoTarget or Dormant then
+  if Alerted or not IsAlive or NoTarget or Dormant or GoodGuy then
     Exit;
   Alerted := True;
   Sounds.PlayAt(MonsterSound(Def, Def^.SightSound), Transform, 1, 1, chVoice);
@@ -1835,6 +1874,32 @@ begin
   end;
 
   Health := Health - (Dmg - AbsorbPowerArmor(Dmg));
+  if GoodGuy then
+  begin
+    { insane_pain / insane_die: the player's voice; a flinch at most every
+      3 seconds (crucified ones struggle) }
+    if Health <= 0 then
+    begin
+      if Model <> nil then
+        Model.Scene.Collides := False;
+      if Health <= GibHealth then
+      begin
+        Gib(Dmg);
+        State := msDead;
+      end else
+      begin
+        Sounds.PlayAt(InsaneDeathSound(1 + Random(4)), Transform, 1, ATTN_IDLE, chVoice);
+        SetState(msDying);
+      end;
+    end else
+    if FPainDebounce <= 0 then
+    begin
+      FPainDebounce := 3;
+      Sounds.PlayAt(InsanePainSound(Health, 1 + Random(2)), Transform, 1, ATTN_IDLE, chVoice);
+      SetState(msPain);
+    end;
+    Exit;
+  end;
   if Health <= 0 then
   begin
     Sounds.PlayAt(MonsterSound(Def, Def^.DeathSound), Transform, 1, 1, chVoice);
@@ -1869,6 +1934,9 @@ var
   T: TQuakeTrace;
 begin
   if Def^.Flying then
+    Exit;
+  { A crucified misc_insane hangs where it is }
+  if GoodGuy and ((Entity.SpawnFlags and INSANE_CRUCIFIED) <> 0) then
     Exit;
   if Assigned(EntityTrace) then
   begin
@@ -1911,6 +1979,7 @@ begin
   FLastPlayerPos := PlayerPos;
   if Dormant then
     Exit;
+  FPainDebounce := FPainDebounce - SecondsPassed;
   if Model <> nil then
   begin
     Model.Update(SecondsPassed);
@@ -1981,6 +2050,13 @@ begin
       end;
     msPain:
       begin
+        if GoodGuy then
+        begin
+          StickToFloor(SecondsPassed);
+          if (Model = nil) or Model.AnimDone or (StateTimer > 1.5) then
+            SetState(msIdle);
+          Exit;
+        end;
         if (Model = nil) or Model.AnimDone or (StateTimer > 0.6) then
           SetState(msChase);
         Exit;
@@ -1993,6 +2069,12 @@ begin
           SetState(msChase);
         Exit;
       end;
+  end;
+
+  if GoodGuy then
+  begin
+    UpdateInsane(SecondsPassed);
+    Exit;
   end;
 
   { A medic on its way to a corpse (AI_MEDIC) does only that }
@@ -2143,6 +2225,55 @@ begin
   StickToFloor(SecondsPassed);
 end;
 
+procedure TQuakeMonster.UpdateInsane(const SecondsPassed: Single);
+var
+  Cross: Boolean;
+begin
+  Cross := (Entity.SpawnFlags and INSANE_CRUCIFIED) <> 0;
+  { Screams and moans (ATTN_IDLE) }
+  FIdleTimer := FIdleTimer - SecondsPassed;
+  if FIdleTimer <= 0 then
+  begin
+    FIdleTimer := 3 + Random * 7;
+    Sounds.PlayAt(InsaneIdleSound(Random), Transform, 1, ATTN_IDLE, chVoice);
+  end;
+
+  { A fidget (insane_move_stand_insane) or, on the cross, a struggle with
+    its shake sound, now and then; back to the loop when it's done }
+  if FInsaneFidget then
+  begin
+    if (Model = nil) or Model.AnimDone then
+    begin
+      FInsaneFidget := False;
+      SetState(msIdle);
+    end;
+    StickToFloor(SecondsPassed);
+    Exit;
+  end;
+  FInsaneTimer := FInsaneTimer - SecondsPassed;
+  if (FInsaneTimer <= 0) and (not FWalking) and (Model <> nil) and
+     ((Entity.SpawnFlags and INSANE_CRAWL) = 0) then
+  begin
+    FInsaneTimer := 6 + Random * 12;
+    FInsaneFidget := True;
+    if Cross then
+    begin
+      Model.PlayAnim(InsaneStruggle, False, 10);
+      Sounds.PlayAt(InsaneShake, Transform, 1, ATTN_IDLE, chBody);
+    end else
+      Model.PlayAnim(InsaneFidget, False, 10);
+    Exit;
+  end;
+
+  { Walk the path_corners, unless crucified or told to stand }
+  if (MoveTarget <> nil) and not Cross and
+     ((Entity.SpawnFlags and (INSANE_STAND_GROUND or INSANE_ALWAYS_STAND)) = 0) then
+    Patrol(SecondsPassed)
+  else
+    SetWalking(False);
+  StickToFloor(SecondsPassed);
+end;
+
 procedure TQuakeMonster.UpdateDriverSight(const PlayerPos: TVector3);
 var
   Delta: TVector3;
@@ -2228,6 +2359,11 @@ end;
 function TQuakeMonster.AnimNames(const Names: String): String;
 begin
   Result := Names;
+  if GoodGuy then
+  begin
+    Result := InsaneAnim(Names, Entity.SpawnFlags, FInsaneWalk);
+    Exit;
+  end;
   { Call of the Void's Quake 1 monsters: frame ranges by index }
   if Q1Archetype(Def^.ClassName) <> qaNone then
   begin
@@ -2742,7 +2878,9 @@ const
     'models/ships/viper/tris.md2', 'models/ships/bigviper/tris.md2',
     'models/objects/bomb/tris.md2', 'models/objects/black/tris.md2',
     'models/monsters/tank/tris.md2', 'models/monsters/bitch/tris.md2',
-    'models/monsters/bitch/tris.md2', 'models/objects/dmspot/tris.md2');
+    'models/monsters/bitch/tris.md2', 'models/objects/dmspot/tris.md2',
+    'models/monsters/commandr/tris.md2', 'models/monsters/boss3/rider/tris.md2',
+    'models/objects/minelite/light1/tris.md2', 'models/objects/minelite/light2/tris.md2');
 var
   Pos: TVector3;
   Flags, Frame: Integer;
@@ -2808,8 +2946,13 @@ begin
     pkEasterTank: begin AnimFirst := 254; AnimLast := 292; end;
     pkEasterChick: begin AnimFirst := 208; AnimLast := 247; end;
     pkEasterChick2: begin AnimFirst := 248; AnimLast := 286; end;
+    { Think_Boss3Stand: the Makron's stand201..stand260 on the rider model }
+    pkBoss3Stand: begin AnimFirst := 414; AnimLast := 473; end;
     else ;
   end;
+  { monster_commander_body: lying still (frame 0, "inactive") until used }
+  if (AKind = pkCommanderBody) and (Model <> nil) then
+    Model.SetFrame(0);
   if (AnimFirst >= 0) and (Model <> nil) then
     Model.SetFrame(AnimFirst);
 
@@ -2851,6 +2994,21 @@ begin
   end;
   if (Model <> nil) and (Kind in [pkBanner, pkSatelliteDish]) then
     Model.Update(SecondsPassed);
+  if (Model <> nil) and AnimOnce then
+  begin
+    { commander_body_think: frames 1..24 once, 10 a second; the thud on 22 }
+    AnimTime := AnimTime + SecondsPassed * 10;
+    Frame := Min(Trunc(AnimTime), AnimLast - AnimFirst);
+    Model.ShowFrames(AnimFirst + Frame, AnimFirst + Min(Frame + 1, AnimLast - AnimFirst),
+      IfThen(Frame < AnimLast - AnimFirst, Frac(AnimTime), 0));
+    if (Kind = pkCommanderBody) and (not ThudPlayed) and (AnimFirst + Frame >= 22) then
+    begin
+      ThudPlayed := True;
+      Sounds.PlayAt('sound/tank/thud.wav', Transform, 1, 1, chBody);
+    end;
+    if Frame >= AnimLast - AnimFirst then
+      AnimOnce := False;
+  end else
   if (Model <> nil) and (AnimFirst >= 0) and (AnimLast > AnimFirst) then
   begin
     AnimTime := AnimTime + SecondsPassed * 10;

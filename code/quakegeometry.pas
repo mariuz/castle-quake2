@@ -105,6 +105,16 @@ type
   end;
   TQuakeDLightEffectList = specialize TObjectList<TQuakeDLightEffect>;
 
+  { Liquid warp shader effect of one brush model (an X3D node belongs to
+    one scene: the world's liquids and each mover get their own) }
+  TQuakeWarpEffect = class
+  public
+    Effect: TEffectNode;
+    Time: TSFFloat;
+    destructor Destroy; override;
+  end;
+  TQuakeWarpEffectList = specialize TObjectList<TQuakeWarpEffect>;
+
   { Packs per-face RGB lightmaps into one atlas texture. }
   TQuakeLightmapAtlas = class
   private
@@ -158,6 +168,9 @@ type
     Health: Integer;
     { True for doors with no targetname: they open when the player comes near }
     AutoOpen: Boolean;
+    { Quake 2 Think_SpawnDoorTrigger: the auto door's field, made once from
+      the closed door (CGE space; empty until the world first needs it) }
+    TriggerField: TBox3D;
     StartSound, EndSound: String;
     { Looping sound while moving (Quake 2 moveinfo.sound_middle) }
     MoveSound: String;
@@ -185,6 +198,10 @@ type
     { func_door_secret: shootable (no targetname or SECRET_ALWAYS_SHOOT);
       it gets health back each time it has closed }
     SecretShootable: Boolean;
+    { func_object: falling (MOVETYPE_TOSS) at TossSpeed (Quake units a
+      second, down) until it lands (TQuakeWorld.UpdateFallingObjects) }
+    Tossing: Boolean;
+    TossSpeed: Single;
     constructor CreateMover(const AGeometry: TQuakeGeometry; const AEntity: TQuakeEntity;
       const AModelIndex: Integer);
     destructor Destroy; override;
@@ -270,8 +287,7 @@ type
     { Invisible walls from player-clip brushes (they have no faces) }
     FScenePlayerClip: TCastleScene;
     { Shader effect warping liquid textures like Quake 2's EmitWaterPolys }
-    FWarpEffect: TEffectNode;
-    FWarpTime: TSFFloat;
+    FWarpEffects: TQuakeWarpEffectList;
     { Shader effects on the lightmap textures adding dynamic lights
       (Quake 2 R_AddDynamicLights), one per brush model because an X3D node
       can't be shared by scenes; see SetSurfaceLights }
@@ -307,6 +323,7 @@ type
     procedure RegisterAnimNode(const TexName: String; const Node: TImageTextureNode; const ModelIdx: Integer);
 
     function CreateDLightEffect: TEffectNode;
+    function CreateWarpEffect: TEffectNode;
   public
     { Texture animation frame of a brush model (0 = world) now }
     function ModelTexFrame(const ModelIdx: Integer): Integer;
@@ -907,6 +924,7 @@ var
   SecretFwd, SecretRight, SecretSize, SecretP1, SecretSide, SecretBack: TVector3;
 begin
   inherited Create(nil);
+  TriggerField := TBox3D.Empty;
   { SP_target_character: blank until its target_string writes it }
   if AEntity.ClassName = 'target_character' then
     CharFrame := 12
@@ -1151,6 +1169,17 @@ begin
   else
   if Kind = mkTurret then
     Transform.Rotation := TurretRotation(TurretPitch, TurretYaw);
+  { SP_func_wall: TRIGGER_SPAWN (TOGGLE and START_ON imply it) without
+    START_ON starts absent: not drawn, not solid }
+  if (CName = 'func_wall') and ((SpawnFlags and 7) <> 0) and ((SpawnFlags and 4) = 0) then
+    Transform.Exists := False;
+  { SP_func_object with TRIGGER_SPAWN (1): absent until used }
+  if (CName = 'func_object') and ((SpawnFlags and 1) <> 0) then
+    Transform.Exists := False
+  else
+  if CName = 'func_object' then
+    { func_object_release, two frames after spawning: falls }
+    Tossing := True;
 end;
 
 procedure TQuakeMover.UpdateMoveSound(const Moving: Boolean);
@@ -1588,7 +1617,6 @@ end;
 constructor TQuakeGeometry.Create(const ABsp: TQuakeBsp);
 var
   World: TQuakeEntity;
-  WarpPart: TEffectPartNode;
 begin
   inherited Create;
   FBsp := ABsp;
@@ -1612,23 +1640,7 @@ begin
   { Blocks walking, but shots and projectiles fly through, like Quake 2 }
   FScenePlayerClip.Pickable := False;
 
-  FWarpEffect := TEffectNode.Create;
-  FWarpEffect.Language := slGLSL;
-  FWarpEffect.WaitForRelease; { shared by many shapes; freed in our destructor }
-  FWarpTime := TSFFloat.Create(FWarpEffect, True, 'time', 0);
-  FWarpEffect.AddCustomField(FWarpTime);
-  WarpPart := TEffectPartNode.Create;
-  WarpPart.ShaderType := stFragment;
-  { Quake 2: s += 8 texels * sin(t * 8 radians per 64 texels + time), same for t }
-  WarpPart.Contents :=
-    'uniform float time;' + LineEnding +
-    'void PLUG_texture_coord_shift(inout vec2 tex_coord)' + LineEnding +
-    '{' + LineEnding +
-    '  vec2 tc = tex_coord;' + LineEnding +
-    '  tex_coord.x += 0.125 * sin(tc.y * 8.0 + time);' + LineEnding +
-    '  tex_coord.y += 0.125 * sin(tc.x * 8.0 + time);' + LineEnding +
-    '}';
-  FWarpEffect.SetParts([WarpPart]);
+  FWarpEffects := TQuakeWarpEffectList.Create(True);
   FDLightEffects := TQuakeDLightEffectList.Create(True);
   FWorldTransform := TCastleTransform.Create(nil);
   FWorldTransform.Name := 'World';
@@ -1659,8 +1671,8 @@ begin
   FSceneLiquids.Free;
   FScenePlayerClip.Free;
   FWorldTransform.Free;
-  { All scenes using the effect are gone now }
-  FWarpEffect.FreeIfUnused;
+  { All scenes using the effects are gone now }
+  FWarpEffects.Free;
   FDLightEffects.Free;
   FAnimTextures.Free;
   FScrollNodes.Free;
@@ -1736,7 +1748,7 @@ var
   RawVert: TVector3;
   Atlas, DynAtlas: TQuakeLightmapAtlas;
   LightmapTex, DynTex: TPixelTextureNode;
-  DLightEffect: TEffectNode;
+  DLightEffect, WarpEffect: TEffectNode;
   Dyn: TQuakeDynamicLightmap;
   DynFace: TQuakeDynFace;
   IsDynamic: Boolean;
@@ -1879,6 +1891,7 @@ begin
     end;
 
     DLightEffect := CreateDLightEffect;
+    WarpEffect := nil;
     LightmapTex := Atlas.CreateTextureNode;
     LightmapTex.SetEffects([DLightEffect]);
     DynTex := nil;
@@ -1899,7 +1912,11 @@ begin
       if Batch.Shape = nil then
         Continue;
       if (Batch.Flags and SURF_WARP) <> 0 then
-        Batch.Shape.Appearance.SetEffects([FWarpEffect]);
+      begin
+        if WarpEffect = nil then
+          WarpEffect := CreateWarpEffect;
+        Batch.Shape.Appearance.SetEffects([WarpEffect]);
+      end;
       if (LiquidRoot <> nil) and ((Batch.Flags and SURF_WARP) <> 0) then
         LiquidRoot.AddChildren(Batch.Shape)
       else
@@ -2365,6 +2382,7 @@ var
   I, Frame: Integer;
   Scroll: TTextureTransformNode;
   Dyn: TQuakeDynamicLightmap;
+  W: TQuakeWarpEffect;
 begin
   FTime := FTime + SecondsPassed;
 
@@ -2394,7 +2412,8 @@ begin
       end;
     end;
 
-  FWarpTime.Send(FTime);
+  for W in FWarpEffects do
+    W.Time.Send(FTime);
 
   { SURF_FLOWING: same scroll as Quake 2 GL (-64 texture repeats per 40 seconds) }
   for Scroll in FScrollNodes do
@@ -2467,6 +2486,40 @@ begin
       end else
       if E.Pos[I].Value.W <> 0 then
         E.Pos[I].Send(TVector4.Zero);
+end;
+
+function TQuakeGeometry.CreateWarpEffect: TEffectNode;
+var
+  W: TQuakeWarpEffect;
+  WarpPart: TEffectPartNode;
+begin
+  W := TQuakeWarpEffect.Create;
+  FWarpEffects.Add(W);
+  Result := TEffectNode.Create;
+  Result.Language := slGLSL;
+  Result.WaitForRelease; { freed by TQuakeWarpEffect, after the scenes }
+  W.Effect := Result;
+  W.Time := TSFFloat.Create(Result, True, 'time', FTime);
+  Result.AddCustomField(W.Time);
+  WarpPart := TEffectPartNode.Create;
+  WarpPart.ShaderType := stFragment;
+  { Quake 2: s += 8 texels * sin(t * 8 radians per 64 texels + time), same for t }
+  WarpPart.Contents :=
+    'uniform float time;' + LineEnding +
+    'void PLUG_texture_coord_shift(inout vec2 tex_coord)' + LineEnding +
+    '{' + LineEnding +
+    '  vec2 tc = tex_coord;' + LineEnding +
+    '  tex_coord.x += 0.125 * sin(tc.y * 8.0 + time);' + LineEnding +
+    '  tex_coord.y += 0.125 * sin(tc.x * 8.0 + time);' + LineEnding +
+    '}';
+  Result.SetParts([WarpPart]);
+end;
+
+destructor TQuakeWarpEffect.Destroy;
+begin
+  if Effect <> nil then
+    Effect.FreeIfUnused;
+  inherited Destroy;
 end;
 
 destructor TQuakeDLightEffect.Destroy;

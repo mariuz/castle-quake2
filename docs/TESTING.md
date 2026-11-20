@@ -27,6 +27,18 @@ Testing the game on retail data: `-basedir auto` (or `gog` / `steam`) finds an i
 .\castle-quake2.exe -basedir auto -game rogue --autotest rmine1 test_output\rmine1 --demo "W:2,S,V,Q"
 ```
 
+Every map of an installed Quake II at once (`tests/retail-playthrough.ps1`): a map report lists the maps, then each is played in its own process (`--log-file` keeps the logs apart, 4 at a time) with god mode, all weapons and the chaingun held while standing near every monster in turn; it prints a table (kills, monsters in solid, player stuck, placements without a free spot, warnings, errors, lowest FPS) and the most common warnings, and writes `summary.csv`; the games run minimized without sound:
+
+```powershell
+powershell -File tests\retail-playthrough.ps1 [-Maps base1,jail2] [-Jobs 4] [-Game rogue] [-Out test_output\retail]
+```
+
+Side by side with Yamagi Quake II (`tests/yamagi-compare.ps1`, the Windows release from yamagi.org unpacked anywhere): Yamagi plays every single-player map in one session (`-datadir` = the same installation, a generated `cmp.cfg` in `Documents\YamagiQ2\baseq2`: `map`, waits, `notarget`, `screenshot png`, `cmd help`, `screenshot png`), and our game takes the same two shots (start view, help computer) per map; `<map>_castle_1/2.png` and `<map>_yamagi_1/2.png`, our totals in `totals.csv`. The help computers' kill / secret / goal totals show whether both spawned the same monsters, secrets and goals. Our game runs minimized and silent (`--no-sound`, `--offscreen-shots`: screenshots are drawn into a framebuffer, so a minimized or covered window still saves real images); Yamagi keeps its window (sound off), `-CastleOnly` / `-YamagiOnly` redo one side.
+
+```powershell
+powershell -File tests\yamagi-compare.ps1 -Yamagi F:\yamagi\quake2-8.70a [-DataDir "F:\GOG Games\Quake II"] [-Maps base1,base2]
+```
+
 It prints `N passed, M failed` and exits with an error when something fails.
 
 ## Scripted play sessions (autotests)

@@ -11,7 +11,7 @@ uses
   SysUtils, Classes, Math,
   CastleWindow, CastleLog, CastleUIControls, CastleApplicationProperties, CastleParameters,
   CastleUtils, CastleFilesUtils, CastleUriUtils,
-  QuakePak, QuakePalette, QuakeSound, QuakeGeometry, QuakeMonsterTypes, QuakeSettings, QuakeGamepad, QuakeTouch, QuakeBenchmark, QuakeWebParams, QuakeInstalls, CastleConfig, StrUtils
+  QuakePak, QuakePalette, QuakeSound, QuakeGeometry, QuakeMonsterTypes, QuakeSettings, QuakeGamepad, QuakeTouch, QuakeBenchmark, QuakeWebParams, QuakeInstalls, CastleConfig, StrUtils, CastleSoundEngine
   {$ifdef WASI}, CastleInternalJobWeb{$endif}
   {$region 'Castle Initialization Uses'}
   // The content here may be automatically updated by CGE editor.
@@ -34,6 +34,8 @@ var
   CmdBaseDir: String;
   { --no-detect: don't look for an installed Quake II }
   CmdNoDetect: Boolean;
+  { --offscreen-shots: see TViewPlay.OffscreenScreenshots }
+  CmdOffscreenShots: Boolean;
   CmdPaks: TStringList;
   { -game <dir> / +set game <dir>: a mod folder loaded over baseq2 (e.g.
     q1q2, Call of the Void) }
@@ -42,6 +44,9 @@ var
 procedure ApplicationInitialize;
 
 implementation
+
+var
+  LogArg: Integer;
 
 { Load pak0.pak, pak1.pak ... from a directory (later paks override earlier ones). }
 function AddPakDir(const Dir: String): Boolean;
@@ -217,6 +222,11 @@ begin
       CmdShowFps := True;
     if (Parameters[I] = '--no-detect') or (Parameters[I] = '-nodetect') then
       CmdNoDetect := True;
+    { --no-sound: no audio device at all (quiet test runs) }
+    if Parameters[I] = '--offscreen-shots' then
+      CmdOffscreenShots := True;
+    if Parameters[I] = '--no-sound' then
+      SoundEngine.Enabled := False;
     if (Parameters[I] = '--demo') and (I + 1 <= Parameters.High) then
     begin
       AutoTestDemo := Parameters[I + 1];
@@ -359,6 +369,7 @@ begin
   ViewPlay := TViewPlay.Create(Application);
   {$endregion 'Castle View Creation'}
   ViewPlay.ShowFpsAtStart := CmdShowFps;
+  ViewPlay.OffscreenScreenshots := CmdOffscreenShots;
 
   if AutoTestMap <> '' then
   begin
@@ -381,6 +392,10 @@ initialization
   ApplicationProperties.ApplicationName := 'castle-quake2';
   ApplicationProperties.Version := '0.32.0';
   LogFileName := 'castle-quake2.log';
+  { --log-file <file>: a log of its own (several runs at once) }
+  for LogArg := 1 to ParamCount - 1 do
+    if ParamStr(LogArg) = '--log-file' then
+      LogFileName := ParamStr(LogArg + 1);
   InitializeLog;
   Application.OnInitialize := @ApplicationInitialize;
 

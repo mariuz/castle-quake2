@@ -29,7 +29,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeWebParams, QuakeInstalls, Zipper;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeWebParams, QuakeInstalls, QuakeInsane, Zipper;
 
 var
   Passed, Failed: Integer;
@@ -624,7 +624,7 @@ begin
   Check(ClassSupport('func_group', NoteText) = csSupported, 'func_group is merged into the world');
   Check(ClassSupport('monster_medic', NoteText) = csSupported, 'the medic is supported (revive, attack and move tables)');
   Check(ClassSupport('monster_jorg', NoteText) = csSupported, 'Jorg is supported');
-  Check(ClassSupport('func_object', NoteText) = csPartial, 'unknown func_ brushes are drawn (partial)');
+  Check(ClassSupport('func_force_wall', NoteText) = csPartial, 'unknown func_ brushes are drawn (partial)');
   Check(ClassSupport('func_conveyor', NoteText) = csSupported, 'func_conveyor moves the player by its contents');
   Check(ClassSupport('misc_viper', NoteText) = csSupported, 'misc_viper flies its path');
   Check(ClassSupport('trigger_elevator', NoteText) = csSupported, 'trigger_elevator sends its train to the pathtarget of its user');
@@ -1183,6 +1183,51 @@ begin
   end;
 end;
 
+{ misc_insane's frame ranges and the props' frames on the retail models }
+procedure TestRetailInsaneAndProps;
+
+  { '#first:count' covers frames named Prefix<From>..Prefix<From+count-1> }
+  function RangeIs(const Mdl: TQuakeMd2; const Range, Prefix: String; const From: Integer): Boolean;
+  var
+    P, First, Count, I: Integer;
+  begin
+    P := Pos(':', Range);
+    First := StrToIntDef(Copy(Range, 2, P - 2), -1);
+    Count := StrToIntDef(Copy(Range, P + 1, MaxInt), 0);
+    Result := (Mdl <> nil) and (First >= 0) and (First + Count <= Mdl.FrameCount);
+    if Result then
+      for I := 0 to Count - 1 do
+        if Mdl.FrameNames[First + I] <> Prefix + IntToStr(From + I) then
+        begin
+          Writeln('  ', Range, ': frame ', First + I, ' is ', Mdl.FrameNames[First + I], ', not ', Prefix, From + I);
+          Exit(False);
+        end;
+  end;
+
+var
+  Mdl: TQuakeMd2;
+begin
+  Mdl := Md2Manager.GetModel(InsaneDef.Model);
+  Check((Mdl <> nil) and (Mdl.FrameCount = 282), 'insane marine model, 282 frames');
+  Check(RangeIs(Mdl, InsaneStand, 'stand', 60) and RangeIs(Mdl, InsaneFidget, 'stand', 100) and
+    RangeIs(Mdl, InsaneWalkNormal, 'walk', 27) and RangeIs(Mdl, InsaneWalkInsane, 'walk', 1),
+    'insane stand / fidget / walk ranges on the model');
+  Check(RangeIs(Mdl, InsanePain, 'st_pain', 2) and RangeIs(Mdl, InsaneDeath, 'st_death', 2) and
+    RangeIs(Mdl, InsaneCrawl, 'crawl', 1) and RangeIs(Mdl, InsaneCrawlPain, 'cr_pain', 2) and
+    RangeIs(Mdl, InsaneCrawlDeath, 'cr_death', 10) and RangeIs(Mdl, InsaneCross, 'cross', 1) and
+    RangeIs(Mdl, InsaneStruggle, 'cross', 16),
+    'insane pain / death / crawl / cross ranges on the model');
+  Mdl := Md2Manager.GetModel('models/monsters/commandr/tris.md2');
+  Check((Mdl <> nil) and (Mdl.FrameCount = 25) and (Mdl.FrameNames[1] = 'active01') and
+    (Mdl.FrameNames[24] = 'active24'), 'commander body: inactive, then active01..24');
+  Mdl := Md2Manager.GetModel('models/monsters/boss3/rider/tris.md2');
+  Check((Mdl <> nil) and (Mdl.FrameNames[414] = 'stand201') and (Mdl.FrameNames[473] = 'stand260'),
+    'standing Makron: stand201..stand260 are frames 414..473');
+  Check((Md2Manager.GetModel('models/objects/minelite/light1/tris.md2') <> nil) and
+    (Md2Manager.GetModel('models/objects/minelite/light2/tris.md2') <> nil) and
+    (Md2Manager.GetModel('models/items/c_head/tris.md2') <> nil), 'mine lamps and the ancient head');
+end;
+
 procedure TestRetailMonsters;
 const
   RetailClasses: array[0..13] of String = ('monster_gladiator', 'monster_chick', 'monster_mutant',
@@ -1234,6 +1279,7 @@ begin
   { Jorg's legs follow the rider's frames: the same names for its 188 }
   Mdl := Md2Manager.GetModel('models/monsters/boss3/jorg/tris.md2');
   Check((Mdl <> nil) and (Mdl.FrameCount = 188), 'Jorg legs model, 188 frames');
+  TestRetailInsaneAndProps;
 end;
 
 { Call of the Void's Quake 1 monsters: tables inside one $frame group each }
@@ -3241,6 +3287,40 @@ begin
   Writeln('Retail data: ', InstallDescription(Installs[0]), ' -> ', Result);
 end;
 
+{ misc_insane: animations by spawnflags, sounds, the class report }
+procedure TestInsane;
+var
+  Note: String;
+begin
+  Check((InsaneAnim('stand,idle,fidget', 0, False) = InsaneStand) and
+    (InsaneAnim('walk,run', 0, True) = InsaneWalkInsane) and (InsaneAnim('walk,run', 0, False) = InsaneWalkNormal),
+    'insane marine stands and walks (two walks)');
+  Check((InsaneAnim('stand,idle,fidget', INSANE_CRAWL, False) = InsaneCrawlStill) and
+    (InsaneAnim('walk,run', INSANE_CRAWL, False) = InsaneCrawl) and
+    (InsaneAnim('pain', INSANE_CRAWL, False) = InsaneCrawlPain) and
+    (InsaneAnim('death,die,dead', INSANE_CRAWL, False) = InsaneCrawlDeath), 'a crawling one crawls');
+  Check((InsaneAnim('stand,idle,fidget', INSANE_CRUCIFIED, False) = InsaneCross) and
+    (InsaneAnim('pain', INSANE_CRUCIFIED or INSANE_CRAWL, False) = InsaneStruggle) and
+    (InsaneAnim('death,die,dead', INSANE_CRUCIFIED, False) = InsaneCrossDead), 'a crucified one hangs and struggles');
+  Check((InsanePainSound(100, 1) = 'sound/player/male/pain100_1.wav') and
+    (InsanePainSound(60, 2) = 'sound/player/male/pain75_2.wav') and
+    (InsanePainSound(10, 1) = 'sound/player/male/pain25_1.wav') and
+    (InsaneDeathSound(4) = 'sound/player/male/death4.wav'), 'insane pain / death sounds are the player''s');
+  Check((InsaneIdleSound(0.1) = InsaneMoan) and (InsaneIdleSound(0.99) = 'sound/insane/insane10.wav'),
+    'insane moans and screams');
+  CheckEquals(-50, MonsterGibs('misc_insane').GibHealth, 'insane gib health');
+  Check((ClassSupport('misc_insane', Note) = csSupported) and (ClassSupport('monster_commander_body', Note) = csSupported) and
+    (ClassSupport('monster_boss3_stand', Note) = csSupported) and (ClassSupport('target_temp_entity', Note) = csSupported) and
+    (ClassSupport('func_wall', Note) = csSupported) and (ClassSupport('func_object', Note) = csSupported) and
+    (ClassSupport('light_mine2', Note) = csSupported) and (ClassSupport('item_ancient_head', Note) = csSupported),
+    'the retail report''s unsupported classes are handled');
+  Check(FindItemDef('item_ancient_head')^.Param = POWERUP_ANCIENT_HEAD, 'ancient head item');
+  { Hor+: fov 90 is a 4:3 view 73.74 degrees high, 106.26 wide at 16:9 }
+  Check((Abs(RadToDeg(HorPlusVerticalFov(90)) - 73.74) < 0.01) and
+    (Abs(RadToDeg(2 * ArcTan(Tan(HorPlusVerticalFov(90) / 2) * 16 / 9)) - 106.26) < 0.01),
+    'Hor+ field of view like Yamagi Quake II');
+end;
+
 { Finding installations: Steam's library list, what counts as Quake II data }
 procedure TestInstalls;
 const
@@ -3358,6 +3438,7 @@ begin
   TestBenchmark;
   TestWebParams;
   TestInstalls;
+  TestInsane;
 
   Writeln(Format('%d passed, %d failed', [Passed, Failed]));
   if Failed > 0 then

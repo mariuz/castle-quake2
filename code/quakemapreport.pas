@@ -66,7 +66,7 @@ uses
 
 const
   { Spawned, used by targets, drawn or used as markers by the game code }
-  SupportedClasses: array[0..82] of String = (
+  SupportedClasses: array[0..90] of String = (
     { func_group: brushes the map compiler merged into the world }
     'func_group', 'worldspawn', 'info_player_start', 'info_player_deathmatch', 'info_player_coop',
     'info_player_intermission', 'info_null', 'info_notnull', 'misc_teleporter',
@@ -85,6 +85,11 @@ const
     'func_killbox', 'trigger_gravity', 'trigger_elevator', 'dynamic_light',
     { a brush whose CURRENT contents move the player (PM_AddCurrents) }
     'func_conveyor',
+    { m_insane.c's good guys; the commander's body and the standing Makron
+      (props used by triggers); temp entities; the path of misc_actor
+      (there are no actors in the game's maps, so it is never followed) }
+    'misc_insane', 'monster_commander_body', 'monster_boss3_stand', 'target_temp_entity', 'target_actor',
+    'light_mine1', 'light_mine2', 'func_object',
     { clocks and displays (target_character frames) }
     'func_clock', 'target_string', 'target_character',
     { g_turret.c: the gun, its base and the infantry driving it }
@@ -127,11 +132,9 @@ begin
     Note := 'no definition: not spawned';
     Exit(csUnsupported);
   end;
+  { SP_func_wall: TRIGGER_SPAWN / TOGGLE / START_ON (QuakeGeometry, UseEntity) }
   if CName = 'func_wall' then
-  begin
-    Note := 'TRIGGER_SPAWN / TOGGLE spawnflags not handled (plain walls are)';
-    Exit(csPartial);
-  end;
+    Exit(csSupported);
   if IsVisibleBrushClass(CName) then
   begin
     Note := 'drawn and solid as a static brush, no behaviour';
