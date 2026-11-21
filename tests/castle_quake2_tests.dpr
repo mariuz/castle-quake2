@@ -854,7 +854,7 @@ begin
     (FindItemDef('item_quadfire')^.Param = POWERUP_QUADFIRE), 'ammo_trap is the trap weapon; item_quadfire is DualFire');
   Check((MonsterMass('monster_soldier_light') = 100) and (MonsterMass('monster_tank_commander') = 500) and
     (MonsterMass('monster_gladb') = 350) and (MonsterMass('monster_gladiator') = 400) and
-    (MonsterMass('monster_stalker') = 200), 'monster masses by class prefix (traps take under 400)');
+    (MonsterMass('monster_carrier') = 200), 'monster masses by class prefix (traps take under 400)');
 end;
 
 type
@@ -946,7 +946,7 @@ begin
     end;
   end;
   Check(AllMatch, 'monster attack sequences match the demo models frame names');
-  CheckEquals(0, Length(MonsterAttackSeqs('monster_stalker')), 'monsters without a table use the generic attack');
+  CheckEquals(0, Length(MonsterAttackSeqs('monster_carrier')), 'monsters without a table use the generic attack');
   Check((Length(MonsterAttackSeqs('monster_gekk')) = 4) and (MonsterAttackSeqs('monster_soldier_ripper')[0].Kind = akRipper) and
     (MonsterAttackSeqs('monster_boss5')[1].Kind = akHeatRocket) and (MonsterAttackSeqs('monster_gladb')[0].Kind = akPlasma) and
     (MonsterAttackSeqs('monster_chick_heat')[0].Kind = akHeatRocket), 'The Reckoning''s monsters: their own weapons on their base tables');
@@ -1284,6 +1284,54 @@ begin
   Check(MonsterWaterAttackSeqs('monster_gekk')[0].FirstFrame = Runs[0].First, 'the water attack is the checked one');
 end;
 
+{ --retail <pak> <rogue pak0.pak>: Ground Zero's monsters' attack and move
+  tables on its models (every sequence within one animation) }
+procedure TestRogueModels;
+const
+  Classes: array[0..3] of String = ('monster_daedalus', 'monster_medic_commander', 'monster_stalker',
+    'monster_turret');
+var
+  C: String;
+  Mdl: TQuakeMd2;
+  Seqs: TMonsterAttackSeqs;
+  I: Integer;
+
+  function SeqFits(const First: String; const Count: Integer): Boolean;
+  var
+    F, J: Integer;
+  begin
+    F := Mdl.FrameNames.IndexOf(First);
+    Result := (F >= 0) and (F + Count <= Mdl.FrameCount);
+    if Result then
+      for J := F to F + Count - 1 do
+        if FrameBase(Mdl.FrameNames[J]) <> FrameBase(First) then
+        begin
+          Writeln('  ', C, ': ', First, ' runs into ', Mdl.FrameNames[J]);
+          Exit(False);
+        end;
+  end;
+
+begin
+  if Md2Manager.GetModel('models/monsters/stalker/tris.md2') = nil then
+    Exit;
+  for C in Classes do
+  begin
+    Mdl := Md2Manager.GetModel(FindMonsterDef(C)^.Model);
+    if Mdl = nil then
+    begin
+      Check(False, C + ': its model is in the PAK');
+      Continue;
+    end;
+    Seqs := MonsterAttackSeqs(C);
+    for I := 0 to High(Seqs) do
+      Check(SeqFits(Seqs[I].FirstFrame, Seqs[I].Count),
+        Format('%s attack %s + %d on Ground Zero''s model', [C, Seqs[I].FirstFrame, Seqs[I].Count]));
+    Check(SeqFits(MonsterMoveSeq(C, True).FirstFrame, Length(MonsterMoveSeq(C, True).Dists)) and
+      SeqFits(MonsterMoveSeq(C, False).FirstFrame, Length(MonsterMoveSeq(C, False).Dists)),
+      C + ' walk / run on Ground Zero''s model');
+  end;
+end;
+
 procedure TestModQ1Models;
 const
   Classes: array[0..33] of String = ('monster_ogre', 'monster_ogre_prototype', 'monster_ogre2_strogg',
@@ -1500,7 +1548,7 @@ begin
     end;
   end;
   Check(AllMatch, 'monster walk / run loops match the demo models frame names');
-  CheckEquals(0, Length(MonsterMoveSeq('monster_stalker', True).Dists), 'monsters without a move table keep their speed');
+  CheckEquals(0, Length(MonsterMoveSeq('monster_carrier', True).Dists), 'monsters without a move table keep their speed');
   Check((Length(MonsterMoveSeq('monster_gekk', True).Dists) = 6) and (MonsterMoveSeq('monster_gladb', True).FirstFrame = 'run1'),
     'the gekk runs on run_01 .. 06, the beta gladiator like the gladiator');
   { The gekk in water: amb_01 .. 04 at 16 a frame, bites then claws }
@@ -1508,6 +1556,18 @@ begin
     SameValue(MoveSeqSpeed(MonsterSwimSeq('monster_gekk')), 160, 0.01) and
     (Length(MonsterSwimSeq('monster_soldier').Dists) = 0), 'the gekk swims on amb_01 .. 04 at 160 a second, others don''t swim');
   GekkWaterAttack;
+  { Ground Zero: the daedalus is a hover with a power screen's mass, the
+    commander a medic that calls reinforcements }
+  Check((XatrixBaseClass('monster_daedalus') = 'monster_hover') and
+    (XatrixBaseClass('monster_medic_commander') = 'monster_medic') and
+    (MonsterAttackSeqs('monster_daedalus')[0].FirstFrame = 'attak101') and
+    (MonsterAttackSeqs('monster_medic_commander')[High(MonsterAttackSeqs('monster_medic_commander'))].Kind = akSummon) and
+    (MonsterMass('monster_daedalus') = 225) and (MonsterMass('monster_medic_commander') = 600),
+    'the daedalus and the medic commander are the hover''s and the medic''s variants');
+  Check((MonsterMoveSeq('monster_stalker', True).FirstFrame = 'run01') and
+    (Length(MonsterMoveSeq('monster_stalker', False).Dists) = 8) and
+    (MonsterAttackSeqs('monster_turret')[0].FirstFrame = 'pow01'),
+    'the stalker runs on run01 .. 04 and walks on walk01 .. 08; the turret fires on pow01');
   { Quake 2 paces: 10 frames a second of ai_run distances }
   Check(SameValue(MoveSeqSpeed(MonsterMoveSeq('monster_soldier', True)), 121.67, 0.01) and
     SameValue(MoveSeqSpeed(MonsterMoveSeq('monster_tank', True)), 46.875, 0.01) and
@@ -3601,9 +3661,12 @@ begin
     { A mod PAK too (Call of the Void): its Quake 1 monsters' models }
     if (ParamCount >= 3) and Pak.AddFile(ParamStr(3)) then
     begin
-      { The Reckoning's PAK, or a Quake 1 mod's }
+      { The Reckoning's PAK, Ground Zero's or a Quake 1 mod's }
       if Md2Manager.GetModel('models/monsters/gekk/tris.md2') <> nil then
         TestXatrixModels
+      else
+      if Md2Manager.GetModel('models/monsters/stalker/tris.md2') <> nil then
+        TestRogueModels
       else
         TestModQ1Models;
     end;

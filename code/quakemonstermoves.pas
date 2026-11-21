@@ -193,6 +193,18 @@ begin
     else
       Result := Even('forwrd01', 35, 4);
   end else
+  if MonsterClass = 'monster_stalker' then
+  begin
+    { stalker_move_run / stalker_move_walk }
+    if Run then
+      Result := MakeMove('run01', [13, 17, 21, 18])
+    else
+      Result := MakeMove('walk01', [4, 6, 8, 5, 4, 6, 8, 4]);
+  end else
+  if MonsterClass = 'monster_turret' then
+    { turret_move_run: it never moves }
+    Result := Even('run01', 2, 0)
+  else
   if MonsterClass = 'monster_flipper' then
   begin
     { flipper_move_run_loop (FLIPPER_RUN_SPEED 24) / flipper_move_walk }

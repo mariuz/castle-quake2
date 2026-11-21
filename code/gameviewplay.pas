@@ -1407,7 +1407,8 @@ begin
         Val := Val + 1;
         if FWorld.Monsters[J].Alerted then
           Inc(P);
-        if Assigned(EntityTrace) then
+        { Turrets hang in their walls by design }
+        if Assigned(EntityTrace) and not FWorld.Monsters[J].IsTurretMonster then
         begin
           { Inside, not touching: maps place monsters with their box exactly
             against a wall, and movers push them to DIST_EPSILON (1/32) from

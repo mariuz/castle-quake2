@@ -170,6 +170,10 @@ type
     FRoamFlags, FRoamPhase, FRoamFrame: Integer;
     FRoamGoal, FRoamOld: TVector3;
     FRoamClock, FRoamStuck: Single;
+    FCeilingStuck: Boolean;
+    FTurretCooldown, FTurretThink, FTurretReady, FTurretOutSpeed: Single;
+    FTurretBase: TCastleTransform;
+    FTurretBaseModel: TQuakeMd2Instance;
     FMove: TMonsterMoveAnim;
     FMoveFirst: Integer;
     FMoveRun: Boolean;
@@ -212,6 +216,8 @@ type
     FPainDebounce: Single;
     { misc_insane between pain / fidgets (QuakeInsane) }
     procedure UpdateInsane(const SecondsPassed: Single);
+    { monster_turret: aim within its mounting, fire, come out of the wall }
+    procedure UpdateTurret(const SecondsPassed: Single; const PlayerPos: TVector3);
     { Fraction of the attack animation at which the attack happens }
     function AttackFirePoint: Single;
     { Start a Quake 2 attack sequence for the distance; False if the
@@ -345,6 +351,24 @@ type
       the player until it is hurt }
     AngerActive: Boolean;
     AngerPos: TVector3;
+    { Ground Zero: not counted as a kill (the medic commander's
+      reinforcements, AI_DO_NOT_COUNT); the commander's monster slots }
+    DoNotCount: Boolean;
+    MonsterSlots: Integer;
+    { The stalker on the ceiling (STALKER_ON_CEILING: spawnflag 8, its box
+      and model upside down, walking along the ceiling) }
+    OnCeiling: Boolean;
+    { monster_turret: its weapon (0 blaster, 1 machinegun, 2 rocket), its
+      mounting (the "angle" key: -1 facing up, -2 facing down, else the
+      wall's yaw), its aim (Quake pitch / yaw); a WallUnit waits in the
+      wall until used, then comes out 32 units (TurretOut left) }
+    TurretWeapon: Integer;
+    TurretFacing, TurretAimPitch, TurretAimYaw, TurretOut: Single;
+    TurretWallWaiting: Boolean;
+    function IsTurretMonster: Boolean;
+    procedure ActivateWallTurret;
+    { The stalker drops from the ceiling (stalker_jump_straightup there) }
+    procedure DropFromCeiling;
     { Flying, or swimming }
     function Flies: Boolean;
     { Is a Quake point in water, slime or lava }
@@ -770,7 +794,7 @@ const
   { Built-in monster definitions. At startup data/monsters.castle-transform
     (TQuakeMonsterType components, editable in the CGE editor) overrides
     and extends them in MonsterDefs. }
-  DefaultMonsterDefs: array[0..29] of TQuakeMonsterDef = (
+  DefaultMonsterDefs: array[0..33] of TQuakeMonsterDef = (
     (ClassName: 'monster_soldier_light'; Model: 'models/monsters/soldier/tris.md2'; Skin: 0; Health: 20; Speed: 120; Attack: akBlaster; Damage: 5; AttackRange: 900; AttackCooldown: 1.6; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain2'; DeathSound: 'soldeth1'; AttackSound: 'solatck2'),
     (ClassName: 'monster_soldier'; Model: 'models/monsters/soldier/tris.md2'; Skin: 2; Health: 30; Speed: 120; Attack: akPellets; Damage: 2; AttackRange: 700; AttackCooldown: 1.6; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain1'; DeathSound: 'soldeth1'; AttackSound: 'solatck1'),
     (ClassName: 'monster_soldier_ss'; Model: 'models/monsters/soldier/tris.md2'; Skin: 4; Health: 40; Speed: 120; Attack: akHitscan; Damage: 2; AttackRange: 900; AttackCooldown: 0.9; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain3'; DeathSound: 'soldeth3'; AttackSound: 'solatck3'),
@@ -803,7 +827,13 @@ const
     (ClassName: 'monster_gladb'; Model: 'models/monsters/gladb/tris.md2'; Skin: 0; Health: 250; Speed: 120; Attack: akPlasma; Damage: 35; AttackRange: 1200; AttackCooldown: 2.5; Flying: False; SoundDir: 'gladiator'; SightSound: 'sight'; PainSound: 'pain'; DeathSound: 'glddeth2'; AttackSound: ''),
     (ClassName: 'monster_boss5'; Model: 'models/monsters/boss5/tris.md2'; Skin: 0; Health: 1500; Speed: 80; Attack: akHeatRocket; Damage: 40; AttackRange: 1500; AttackCooldown: 1.2; Flying: False; SoundDir: 'bosstank'; SightSound: 'btkunqv1'; PainSound: 'btkpain1'; DeathSound: 'btkdeth1'; AttackSound: 'btkunqv2'),
     (ClassName: 'monster_gekk'; Model: 'models/monsters/gekk/tris.md2'; Skin: 0; Health: 125; Speed: 150; Attack: akMelee; Damage: 5; AttackRange: 1000; AttackCooldown: 1.0; Flying: False; SoundDir: 'gek'; SightSound: 'gk_sght1'; PainSound: 'gk_pain1'; DeathSound: 'gk_deth1'; AttackSound: 'gk_atck1'),
-    (ClassName: 'monster_fixbot'; Model: 'models/monsters/fixbot/tris.md2'; Skin: 0; Health: 150; Speed: 110; Attack: akBlaster; Damage: 15; AttackRange: 900; AttackCooldown: 2.0; Flying: True; SoundDir: 'flyer'; SightSound: 'flysght1'; PainSound: 'flypain1'; DeathSound: 'flydeth1'; AttackSound: '')
+    (ClassName: 'monster_fixbot'; Model: 'models/monsters/fixbot/tris.md2'; Skin: 0; Health: 150; Speed: 110; Attack: akBlaster; Damage: 15; AttackRange: 900; AttackCooldown: 2.0; Flying: True; SoundDir: 'flyer'; SightSound: 'flysght1'; PainSound: 'flypain1'; DeathSound: 'flydeth1'; AttackSound: ''),
+    { Ground Zero (its PAK's hover / medic models have the variants' skin 2;
+      facts from yquake2/rogue's hover.c, medic.c, stalker.c, turret.c) }
+    (ClassName: 'monster_daedalus'; Model: 'models/monsters/hover/tris.md2'; Skin: 2; Health: 450; Speed: 120; Attack: akBlaster; Damage: 1; AttackRange: 900; AttackCooldown: 0.8; Flying: True; SoundDir: 'daedalus'; SightSound: 'daedsght1'; PainSound: 'daedpain1'; DeathSound: 'daeddeth1'; AttackSound: 'daedatck1'),
+    (ClassName: 'monster_medic_commander'; Model: 'models/monsters/medic/tris.md2'; Skin: 2; Health: 600; Speed: 110; Attack: akBlaster; Damage: 2; AttackRange: 900; AttackCooldown: 0.4; Flying: False; SoundDir: 'medic_commander'; SightSound: 'medsght'; PainSound: 'medpain1'; DeathSound: 'meddeth'; AttackSound: 'medatck1a'),
+    (ClassName: 'monster_stalker'; Model: 'models/monsters/stalker/tris.md2'; Skin: 0; Health: 250; Speed: 170; Attack: akBlaster; Damage: 15; AttackRange: 1000; AttackCooldown: 1.0; Flying: False; SoundDir: 'stalker'; SightSound: 'sight'; PainSound: 'pain'; DeathSound: 'death'; AttackSound: ''),
+    (ClassName: 'monster_turret'; Model: 'models/monsters/turret/tris.md2'; Skin: 0; Health: 240; Speed: 0; Attack: akBlaster; Damage: 20; AttackRange: 2000; AttackCooldown: 1.2; Flying: True; SoundDir: ''; SightSound: ''; PainSound: ''; DeathSound: ''; AttackSound: '')
   );
 
 var
@@ -966,13 +996,13 @@ function MonsterMass(const MonsterClass: String): Integer;
 implementation
 
 uses
-  QuakeQ1Monsters, QuakeInsane;
+  QuakeQ1Monsters, QuakeInsane, QuakeTurret;
 
 procedure AdaptVariantAttacks(var Seqs: TMonsterAttackSeqs; const Def: PQuakeMonsterDef); forward;
 
 function MonsterMass(const MonsterClass: String): Integer;
 const
-  Masses: array[0..23] of record
+  Masses: array[0..27] of record
     ClassName: String;
     Mass: Integer;
   end = (
@@ -987,7 +1017,9 @@ const
     (ClassName: 'monster_supertank'; Mass: 800), (ClassName: 'monster_boss5'; Mass: 800),
     (ClassName: 'monster_boss2'; Mass: 1000), (ClassName: 'monster_jorg'; Mass: 1000),
     (ClassName: 'monster_makron'; Mass: 500), (ClassName: 'misc_insane'; Mass: 300),
-    (ClassName: 'monster_gekk'; Mass: 300), (ClassName: 'monster_fixbot'; Mass: 150));
+    (ClassName: 'monster_gekk'; Mass: 300), (ClassName: 'monster_fixbot'; Mass: 150),
+    (ClassName: 'monster_daedalus'; Mass: 225), (ClassName: 'monster_medic_commander'; Mass: 600),
+    (ClassName: 'monster_stalker'; Mass: 250), (ClassName: 'monster_turret'; Mass: 250));
 var
   I, Best: Integer;
 begin
@@ -1079,6 +1111,20 @@ begin
     Add('gekkgib/claw', 1);
     Add('gekkgib/leg', 2);
     Add('gekkgib/head', 1);
+  end else
+  if MonsterClass = 'monster_stalker' then
+  begin
+    { stalker_die: 2 bones, 4 small meats and a head below -50 }
+    Result.GibHealth := -50;
+    Add('bone', 2);
+    Add('sm_meat', 4);
+    Add('head2', 1);
+  end else
+  if MonsterClass = 'monster_turret' then
+  begin
+    { turret_die: an explosion and debris, always }
+    Result.GibHealth := -100;
+    Result.Explodes := True;
   end else
   if MonsterClass = 'monster_fixbot' then
   begin
@@ -1199,6 +1245,16 @@ begin
   if MonsterClass = 'monster_fixbot' then
   begin
     Mins := Vector3(-32, -32, -24); Maxs := Vector3(32, 32, 24);
+  end else
+  if MonsterClass = 'monster_stalker' then
+  begin
+    Mins := Vector3(-28, -28, -18); Maxs := Vector3(28, 28, 18);
+  end else
+  if MonsterClass = 'monster_turret' then
+  begin
+    { A 24 cube around its origin, in the wall it hangs on }
+    Mins := Vector3(-12, -12, -12); Maxs := Vector3(12, 12, 12);
+    Exit;
   end;
   { Our monster origins are 24 above the feet }
   Height := Maxs.Z - Mins.Z;
@@ -1444,6 +1500,7 @@ constructor TQuakeMonster.CreateMonster(const AParent: TCastleTransform; const A
   const AEntity: TQuakeEntity; const Pos: TVector3; const Yaw: Single);
 var
   Skin: Integer;
+  SwapZ: Single;
 begin
   inherited Create(nil);
   Def := ADef;
@@ -1491,6 +1548,44 @@ begin
   end;
   { The Reckoning: power shields on the beta gladiator (250) and boss5 (400),
     unless the map gives its own "power_armor_power" }
+  { Ground Zero: the daedalus has a power screen of 100 }
+  if Def^.ClassName = 'monster_daedalus' then
+  begin
+    PowerArmorType := paScreen;
+    PowerArmorPower := AEntity.GetInt('power_armor_power', 100);
+  end;
+  { The medic commander's reinforcement slots by skill }
+  if Def^.ClassName = 'monster_medic_commander' then
+    case GameSkill of
+      0: MonsterSlots := 3;
+      1: MonsterSlots := 4;
+      else MonsterSlots := 6;
+    end;
+  if Def^.ClassName = 'monster_turret' then
+  begin
+    { SP_monster_turret: the weapon from the spawnflags (heatbeam is a
+      blaster), the skin with it; no gravity, never dropped }
+    FDropped := True;
+    if (AEntity.SpawnFlags and 16) <> 0 then
+      TurretWeapon := 1
+    else
+    if (AEntity.SpawnFlags and 32) <> 0 then
+      TurretWeapon := 2
+    else
+      TurretWeapon := 0;
+    Skin := TurretWeapon;
+    TurretFacing := AEntity.GetFloat('angle', 0);
+    TurretWallWaiting := ((AEntity.SpawnFlags and 128) <> 0) and (AEntity.TargetName <> '');
+  end;
+  if (Def^.ClassName = 'monster_stalker') and ((AEntity.SpawnFlags and 8) <> 0) then
+  begin
+    { STALKER_ON_CEILING: upside down; its box mirrored }
+    OnCeiling := True;
+    FDropped := True;
+    SwapZ := BoxMins.Z;
+    BoxMins.Z := -BoxMaxs.Z;
+    BoxMaxs.Z := -SwapZ;
+  end;
   if (Def^.ClassName = 'monster_gladb') or (Def^.ClassName = 'monster_boss5') then
   begin
     PowerArmorType := paShield;
@@ -1527,6 +1622,51 @@ begin
     if FModel2 <> nil then
       Transform.Add(FModel2.Scene);
     Transform.Add(Model.Scene);
+    { The stalker on the ceiling: upside down (roll 180) }
+    if OnCeiling then
+      Model.Scene.Rotation := Vector4(1, 0, 0, Pi);
+  end;
+  if IsTurretMonster then
+  begin
+    { The mounting: facing up / down (pitch 270 / 90), else the wall's yaw;
+      2 units out of the wall }
+    if TurretFacing = -1 then
+    begin
+      TurretAimPitch := 270;
+      TurretAimYaw := 0;
+      Transform.Translation := Transform.Translation + Vector3(0, 2, 0);
+    end else
+    if TurretFacing = -2 then
+    begin
+      TurretAimPitch := 90;
+      TurretAimYaw := 0;
+      Transform.Translation := Transform.Translation - Vector3(0, 2, 0);
+    end else
+    begin
+      TurretAimPitch := 0;
+      TurretAimYaw := TurretFacing;
+      Transform.Translation := Transform.Translation + YawToCgeDir(TurretFacing) * 2;
+    end;
+    FacingAngle := TurretAimYaw;
+    Transform.Rotation := TurretRotation(TurretAimPitch, TurretAimYaw);
+    if (AEntity.SpawnFlags and 128) <> 0 then
+    begin
+      { turret_wall_spawn: the base it comes out of }
+      FTurretBase := TCastleTransform.Create(nil);
+      FTurretBase.Name := Transform.Name + '_Base';
+      FTurretBase.Translation := Transform.Translation;
+      FTurretBase.Rotation := Transform.Rotation;
+      FTurretBaseModel := Md2Manager.CreateInstance('models/monsters/turretbase/tris.md2');
+      if FTurretBaseModel <> nil then
+      begin
+        FTurretBaseModel.Scene.Collides := False;
+        FTurretBaseModel.Scene.Pickable := False;
+        FTurretBaseModel.SetTint(Lighting.SampleLight(Pos));
+        FTurretBase.Add(FTurretBaseModel.Scene);
+      end;
+      AParent.Add(FTurretBase);
+      FTurretOutSpeed := Max(1, AEntity.GetFloat('speed', 15));
+    end;
   end;
   SetState(msIdle);
   Ambush := (AEntity.SpawnFlags and 1) <> 0;
@@ -1564,7 +1704,8 @@ begin
   { The monsters with monsterinfo.dodge in the Quake 2 game code }
   Result := (Copy(Def^.ClassName, 1, 15) = 'monster_soldier') or
     (Def^.ClassName = 'monster_infantry') or (Def^.ClassName = 'monster_gunner') or
-    (Def^.ClassName = 'monster_medic') or (Def^.ClassName = 'monster_chick');
+    (Def^.ClassName = 'monster_medic') or (Def^.ClassName = 'monster_medic_commander') or
+    (Def^.ClassName = 'monster_chick');
 end;
 
 procedure TQuakeMonster.Dodge(const Eta: Single);
@@ -1705,6 +1846,19 @@ var
   T: TQuakeTrace;
 begin
   Org := Origin;
+  if OnCeiling then
+  begin
+    { SV_movestep upside down: from a step below the wished position,
+      push up two steps; it must find the ceiling }
+    NewOrg := Org + Move;
+    NewOrg.Z := NewOrg.Z - StepSize;
+    EndPos := NewOrg + Vector3(0, 0, StepSize * 2);
+    T := MTrace(NewOrg, EndPos, BoxMins, BoxMaxs);
+    if T.AllSolid or T.StartSolid or (T.Fraction >= 1) or not ClearToMoveTo(Org, T.EndPos) then
+      Exit(False);
+    SetOrigin(T.EndPos);
+    Exit(True);
+  end;
   if Flies then
   begin
     { Flyers: the whole move must be free }
@@ -1788,6 +1942,8 @@ begin
     Model.Follower := nil;
   FreeAndNil(FModel2);
   FreeAndNil(Model);
+  FreeAndNil(FTurretBaseModel);
+  FreeAndNil(FTurretBase);
   FreeAndNil(Transform);
   FreeAndNil(FAttack);
   FreeAndNil(FMove);
@@ -2034,7 +2190,7 @@ end;
 function TQuakeMonster.IsMedic: Boolean;
 begin
   { The fixbot revives the dead too (fixbot_search, AI_MEDIC) }
-  Result := (Def^.ClassName = 'monster_medic') or IsFixbot;
+  Result := (Def^.ClassName = 'monster_medic') or (Def^.ClassName = 'monster_medic_commander') or IsFixbot;
 end;
 
 function TQuakeMonster.IsFixbot: Boolean;
@@ -2235,6 +2391,186 @@ begin
         end;
       end;
   end;
+end;
+
+function TQuakeMonster.IsTurretMonster: Boolean;
+begin
+  Result := Def^.ClassName = 'monster_turret';
+end;
+
+procedure TQuakeMonster.ActivateWallTurret;
+begin
+  { turret_activate: 32 units out of the wall at "speed", then turret_wake }
+  if not TurretWallWaiting then
+    Exit;
+  TurretWallWaiting := False;
+  TurretOut := 32;
+  Sounds.PlayAt('sound/world/dr_short.wav', Transform, 1, 1, chVoice);
+  WritelnLog('QuakeEntities', '%s comes out of the wall', [Transform.Name]);
+end;
+
+procedure TQuakeMonster.DropFromCeiling;
+var
+  T: TQuakeTrace;
+  SwapZ: Single;
+begin
+  if not OnCeiling then
+    Exit;
+  { stalker_ok_to_transition from the ceiling: a floor within 384 below
+    (alive; a dying one just falls) }
+  if IsAlive and Assigned(EntityTrace) then
+  begin
+    T := MTrace(Origin, Origin - Vector3(0, 0, 384), BoxMins, BoxMaxs);
+    if (T.Fraction >= 1) or (T.Normal.Z < 0.9) then
+      Exit;
+  end;
+  OnCeiling := False;
+  SwapZ := BoxMins.Z;
+  BoxMins.Z := -BoxMaxs.Z;
+  BoxMaxs.Z := -SwapZ;
+  if Model <> nil then
+    Model.Scene.Rotation := Vector4(0, 1, 0, 0);
+  if IsAlive then
+  begin
+    FJumping := True;
+    FJumpVel := TVector3.Zero;
+  end;
+  WritelnLog('QuakeEntities', '%s drops from the ceiling', [Transform.Name]);
+end;
+
+procedure TQuakeMonster.UpdateTurret(const SecondsPassed: Single; const PlayerPos: TVector3);
+const
+  { turret_checkattack: blaster, machinegun, rocket }
+  Chances: array[0..2] of Single = (0.35, 0.5, 0.1);
+var
+  Aim, Dir: TVector3;
+  WantPitch, WantYaw, Step, Diff, Chance, Dist: Single;
+begin
+  { A WallUnit coming out of the wall (Move_Calc at "speed"), with its base }
+  if TurretOut > 0 then
+  begin
+    Step := Min(TurretOut, FTurretOutSpeed * SecondsPassed);
+    TurretOut := TurretOut - Step;
+    if TurretFacing = -1 then
+      Dir := Vector3(0, 1, 0)
+    else
+    if TurretFacing = -2 then
+      Dir := Vector3(0, -1, 0)
+    else
+      Dir := YawToCgeDir(TurretFacing);
+    Transform.Translation := Transform.Translation + Dir * Step;
+    if FTurretBase <> nil then
+      FTurretBase.Translation := FTurretBase.Translation + Dir * Step;
+    Exit;
+  end;
+  if TurretWallWaiting or not IsAlive then
+    Exit;
+  Dist := PointsDistance(PlayerPos, Transform.Translation);
+  FSightTimer := FSightTimer - SecondsPassed;
+  if FSightTimer <= 0 then
+  begin
+    FSightTimer := 0.2;
+    CanSeePlayer := (Dist < 2000) and SightClear(Transform.Translation, PlayerPos);
+    if (not Alerted) and CanSeePlayer and (Dist < 1000) and (not NoTarget) and (not PlayerDisguised) then
+      Alert;
+  end;
+  if not Alerted then
+    Exit;
+  { turret_move_ready_gun (active01 .. run01) the first time }
+  if FTurretReady = 0 then
+  begin
+    FTurretReady := 0.7;
+    if Model <> nil then
+      Model.PlayAnim('active', False, 10);
+  end;
+  if FTurretReady > 0.01 then
+  begin
+    FTurretReady := Max(0.01, FTurretReady - SecondsPassed);
+    if FTurretReady > 0.01 then
+      Exit;
+  end;
+  { TurretAim: at the player, limited by the mounting, 45 degrees a frame }
+  Aim := CgeToQuake(PlayerPos) - Origin;
+  WantYaw := RadToDeg(ArcTan2(Aim.Y, Aim.X));
+  WantPitch := -RadToDeg(ArcTan2(Aim.Z, Sqrt(Sqr(Aim.X) + Sqr(Aim.Y))));
+  if TurretFacing = -1 then
+    WantPitch := Min(WantPitch, -5)
+  else
+  if TurretFacing = -2 then
+    WantPitch := Max(WantPitch, 5)
+  else
+  begin
+    WantPitch := EnsureRange(WantPitch, -85, 85);
+    Diff := FloatModulo(WantYaw - TurretFacing + 540, 360) - 180;
+    WantYaw := TurretFacing + EnsureRange(Diff, -85, 85);
+  end;
+  if TurretAimPitch > 180 then
+    TurretAimPitch := TurretAimPitch - 360;
+  Step := 450 * SecondsPassed;
+  TurretAimPitch := TurretAimPitch + EnsureRange(WantPitch - TurretAimPitch, -Step, Step);
+  Diff := FloatModulo(WantYaw - TurretAimYaw + 540, 360) - 180;
+  TurretAimYaw := TurretAimYaw + EnsureRange(Diff, -Step, Step);
+  FacingAngle := TurretAimYaw;
+  Transform.Rotation := TurretRotation(TurretAimPitch, TurretAimYaw);
+  { turret_checkattack, a frame at a time: the weapon's chance (half on
+    easy, double on hard), then its cooldown }
+  FTurretCooldown := FTurretCooldown - SecondsPassed;
+  FTurretThink := FTurretThink - SecondsPassed;
+  if (FTurretThink > 0) or (FTurretCooldown > 0) or not CanSeePlayer then
+    Exit;
+  FTurretThink := 0.1;
+  Chance := Chances[TurretWeapon];
+  if GameSkill = 0 then
+    Chance := Chance * 0.5
+  else
+  if GameSkill >= 2 then
+    Chance := Chance * 2;
+  if Random >= Chance then
+    Exit;
+  case TurretWeapon of
+    1: FTurretCooldown := 0.8 - 0.1 * GameSkill;
+    2: FTurretCooldown := 1.8 - 0.2 * GameSkill;
+    else FTurretCooldown := 1.2 - 0.2 * GameSkill;
+  end;
+  if Model <> nil then
+    Model.PlayAnim('pow', False, 10);
+  { TurretFire: only within about 11 degrees of where it points; no
+    rockets closer than 72 }
+  Dir := Vector3(Cos(DegToRad(TurretAimPitch)) * Cos(DegToRad(TurretAimYaw)),
+    Cos(DegToRad(TurretAimPitch)) * Sin(DegToRad(TurretAimYaw)), -Sin(DegToRad(TurretAimPitch)));
+  if (Aim.Length < 1) or (TVector3.DotProduct(Dir, Aim.Normalize) < 0.98) then
+    Exit;
+  if (TurretWeapon = 2) and (Dist <= 72) then
+    Exit;
+  case TurretWeapon of
+    1:
+      begin
+        AttackKind := akHitscan;
+        AttackDamage := 4;
+        AttackBullets := 1;
+      end;
+    2:
+      begin
+        AttackKind := akRocket;
+        AttackDamage := 50;
+        AttackBullets := 1;
+      end;
+    else
+      begin
+        AttackKind := akBlaster;
+        AttackDamage := 20;
+        case GameSkill of
+          0: AttackSpeed := 600;
+          1: AttackSpeed := 800;
+          else AttackSpeed := 1000;
+        end;
+      end;
+  end;
+  AttackYaw := 0;
+  AttackKick := 0;
+  AttackReach := 2000;
+  if Assigned(OnAttack) then
+    OnAttack(Self);
 end;
 
 function TQuakeMonster.UpdateRoam(const SecondsPassed: Single): Boolean;
@@ -2521,7 +2857,7 @@ end;
 
 procedure TQuakeMonster.TakeDamage(const Dmg: Integer);
 begin
-  if Dormant then
+  if Dormant or TurretWallWaiting or (TurretOut > 0) then
     Exit;
   { Hurt: back to the player (M_ReactToDamage) }
   AngerActive := False;
@@ -2563,9 +2899,13 @@ begin
   end;
   if Health <= 0 then
   begin
-    Sounds.PlayAt(MonsterSound(Def, Def^.DeathSound), Transform, 1, 1, chVoice);
+    if Def^.DeathSound <> '' then
+      Sounds.PlayAt(MonsterSound(Def, Def^.DeathSound), Transform, 1, 1, chVoice);
     if Model <> nil then
       Model.Scene.Collides := False;
+    { stalker_die: gravity down again, it falls }
+    if OnCeiling then
+      DropFromCeiling;
     if (Health <= GibHealth) or MonsterGibs(Def^.ClassName).Explodes then
     begin
       Gib(Dmg);
@@ -2577,9 +2917,16 @@ begin
 
   if not Alerted then
     Alert;
-  { SP_turret_driver has no pain function }
-  if TurretDriver then
+  { SP_turret_driver has no pain function, turret_pain does nothing }
+  if TurretDriver or IsTurretMonster then
     Exit;
+  { stalker_pain: a hit over 10 makes it jump half the time (off the
+    ceiling there) }
+  if OnCeiling and (Dmg > 10) and (Random < 0.5) then
+  begin
+    DropFromCeiling;
+    Exit;
+  end;
   { Quake 2 monsters don't flinch on every hit, and never on nightmare }
   if (State <> msPain) and (GameSkill < 3) and (Random < 0.6) then
   begin
@@ -2594,7 +2941,7 @@ var
   P: TVector3;
   T: TQuakeTrace;
 begin
-  if Flies then
+  if Flies or OnCeiling then
     Exit;
   { A crucified misc_insane hangs where it is }
   if GoodGuy and ((Entity.SpawnFlags and INSANE_CRUCIFIED) <> 0) then
@@ -2636,6 +2983,8 @@ procedure TQuakeMonster.UpdateAI(const SecondsPassed: Single; const PlayerPos: T
 var
   Delta, MoveVec, Goal: TVector3;
   Dist, TargetYaw, Diff: Single;
+  CeilTrace: TQuakeTrace;
+  CeilDown: Integer;
 begin
   FLastPlayerPos := PlayerPos;
   if Dormant then
@@ -2691,6 +3040,20 @@ begin
 
   if (not FDropped) and Assigned(EntityTrace) and IsAlive then
     DropToFloor;
+  { The stalker on the ceiling: up against it }
+  if OnCeiling and (not FCeilingStuck) and Assigned(EntityTrace) and IsAlive then
+  begin
+    FCeilingStuck := True;
+    { Our box reaches 6 higher above the origin than Quake's (-18 .. 18):
+      down until free, then up against the ceiling }
+    CeilDown := 0;
+    while (CeilDown < 16) and MTrace(Origin - Vector3(0, 0, CeilDown), Origin - Vector3(0, 0, CeilDown),
+      BoxMins, BoxMaxs).StartSolid do
+      Inc(CeilDown);
+    CeilTrace := MTrace(Origin - Vector3(0, 0, CeilDown), Origin + Vector3(0, 0, 256), BoxMins, BoxMaxs);
+    if not CeilTrace.StartSolid then
+      SetOrigin(CeilTrace.EndPos);
+  end;
 
   UpdateSwimming(SecondsPassed, PlayerPos);
 
@@ -2737,6 +3100,11 @@ begin
   if GoodGuy then
   begin
     UpdateInsane(SecondsPassed);
+    Exit;
+  end;
+  if IsTurretMonster then
+  begin
+    UpdateTurret(SecondsPassed, PlayerPos);
     Exit;
   end;
 
@@ -3202,14 +3570,32 @@ end;
 
 function TQuakeMonster.StartAttackSeq(const Dist: Single): Boolean;
 var
-  I, First: Integer;
+  I, J, First: Integer;
 begin
   Result := False;
   if (Model = nil) or (Length(FAttackSeqs) = 0) then
     Exit;
   I := ChooseAttackSeq(FAttackSeqs, Dist, Random);
+  { The medic commander calls reinforcements only with more than 2 slots }
+  if (I >= 0) and (FAttackSeqs[I].Kind = akSummon) and (MonsterSlots <= 2) then
+  begin
+    I := ChooseAttackSeq(FAttackSeqs, Dist, Random);
+    if (I >= 0) and (FAttackSeqs[I].Kind = akSummon) then
+      I := 0;
+  end;
   if I < 0 then
     Exit;
+  { On the ceiling only its blaster (stalker_do_pounce: not from there) }
+  if OnCeiling and (FAttackSeqs[I].Kind <> akBlaster) then
+    for J := 0 to High(FAttackSeqs) do
+      if FAttackSeqs[J].Kind = akBlaster then
+      begin
+        I := J;
+        Break;
+      end;
+  { stalker_shoot_attack: on the ceiling a third of the time it drops }
+  if OnCeiling and (FAttackSeqs[I].Kind = akBlaster) and (Random < 0.33) then
+    DropFromCeiling;
   First := FrameOf(FAttackSeqs[I].FirstFrame);
   if (First < 0) or (First + FAttackSeqs[I].Count > Model.Model.FrameCount) then
     Exit;
@@ -3251,6 +3637,7 @@ begin
     default) }
   if (Seq.Kind = akBlaster) and ((Def^.ClassName = 'monster_floater') or
      (Def^.ClassName = 'monster_hover') or (Def^.ClassName = 'monster_medic') or
+     (Def^.ClassName = 'monster_daedalus') or (Def^.ClassName = 'monster_medic_commander') or
      (Def^.ClassName = 'monster_makron')) then
     AttackSpeed := 1000;
   { fire_hit reaches MELEE_DISTANCE; melee monsters (berserk, parasite)

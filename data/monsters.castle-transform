@@ -775,6 +775,107 @@
         "$$ClassName" : "TCastleVector3Persistent",
         "X" : 2.7840000000000000E+003
       }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akBlaster",
+      "AttackCooldown" : 8.0000001192092896E-001,
+      "AttackRange" : 9.0000000000000000E+002,
+      "AttackSound" : "daedatck1",
+      "Damage" : 1,
+      "DeathSound" : "daeddeth1",
+      "Flying" : true,
+      "Health" : 450,
+      "Model" : "models/monsters/hover/tris.md2",
+      "MonsterClass" : "monster_daedalus",
+      "Name" : "daedalus",
+      "PainSound" : "daedpain1",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SightSound" : "daedsght1",
+      "Skin" : 2,
+      "SoundDir" : "daedalus",
+      "Speed" : 1.2000000000000000E+002,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 2.8800000000000000E+003
+      }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akBlaster",
+      "AttackCooldown" : 4.0000000596046448E-001,
+      "AttackRange" : 9.0000000000000000E+002,
+      "AttackSound" : "medatck1a",
+      "Damage" : 2,
+      "DeathSound" : "meddeth",
+      "Health" : 600,
+      "Model" : "models/monsters/medic/tris.md2",
+      "MonsterClass" : "monster_medic_commander",
+      "Name" : "medic_commander",
+      "PainSound" : "medpain1",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SightSound" : "medsght",
+      "Skin" : 2,
+      "SoundDir" : "medic_commander",
+      "Speed" : 1.1000000000000000E+002,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 2.9760000000000000E+003
+      }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akBlaster",
+      "AttackCooldown" : 1.0000000000000000E+000,
+      "AttackRange" : 1.0000000000000000E+003,
+      "Damage" : 15,
+      "DeathSound" : "death",
+      "Health" : 250,
+      "Model" : "models/monsters/stalker/tris.md2",
+      "MonsterClass" : "monster_stalker",
+      "Name" : "stalker",
+      "PainSound" : "pain",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SightSound" : "sight",
+      "SoundDir" : "stalker",
+      "Speed" : 1.7000000000000000E+002,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 3.0720000000000000E+003
+      }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akBlaster",
+      "AttackCooldown" : 1.2000000476837158E+000,
+      "AttackRange" : 2.0000000000000000E+003,
+      "Damage" : 20,
+      "Flying" : true,
+      "Health" : 240,
+      "Model" : "models/monsters/turret/tris.md2",
+      "MonsterClass" : "monster_turret",
+      "Name" : "turret",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 3.1680000000000000E+003
+      }
     }
   ]
 }

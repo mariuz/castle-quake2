@@ -184,6 +184,10 @@ jobs:
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/gzents --demo 'Y,W:1.5,G:128 -320 46,O:spawn info_notnull targetname rock origin "128 100 40",O:spawn monster_soldier targetname grp origin "128 -150 24" angle 90,O:spawn target_anger targetname ang target grp killtarget rock,O:spawn target_steam targetname st wait 2 count 32 speed 100 angle -1 origin "60 -300 30",W:0.5,E:ang,E:st,W:1,V,W:2,Y,O:spawn target_killplayers targetname kp,E:kp,W:0.5,V,Q' > test_output/gzents.log 2>&1
           L=test_output/gzents.log
           grep -q "monster_soldier angered at rock" $L && grep -q "monster_soldier attacks:" $L && grep -q "target_steam puffs for 2.0 s" $L && grep -q "target_killplayers: the player and" $L && grep -qE "Player (died|gibbed)" $L && ! grep -q Exception $L || { echo "::error::Ground Zero's targets misbehaved (see gzents.log)"; exit 1; }
+          # Ground Zero's turrets (no models in the demo): one in the ceiling fires at the player, a wall unit comes out when used
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/gzturret --demo 'Y,W:1.5,G:128 -320 46,O:spawn monster_turret origin "128 -320 150" angle -2 spawnflags 8,O:spawn monster_turret targetname tw origin "160 -320 150" angle -2 spawnflags 136,W:0.5,E:tw,W:6,V,Q' > test_output/gzturret.log 2>&1
+          L=test_output/gzturret.log
+          grep -q "monster_turret comes out of the wall" $L && grep -qE "Monster shots: [1-9]" $L && ! grep -q Exception $L || { echo "::error::Ground Zero's turrets misbehaved (see gzturret.log)"; exit 1; }
           # Brush entity texture frames (R_TextureAnimation + EF_ANIM*): demo3's alarm button shows frame 0 until
           # pressed, then cycles frames 2 / 3; the ANIMATED key door cycles all its frames
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo3 test_output/btntex --demo "O:notarget,W:1,V,E:lita,W:1.3,V,Q" > test_output/btntex.log 2>&1

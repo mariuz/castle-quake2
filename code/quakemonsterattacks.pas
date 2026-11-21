@@ -29,7 +29,9 @@ type
     { The Reckoning: the ion ripper's bouncing bolt, the blue hyperblaster
       bolt, the laser soldier's beam (damage every frame it holds), the
       heat-seeking rocket, the phalanx plasma ball, the gekk's spit }
-    akRipper, akBlueBlaster, akLaser, akHeatRocket, akPlasma, akLoogie);
+    akRipper, akBlueBlaster, akLaser, akHeatRocket, akPlasma, akLoogie,
+    { Ground Zero: the medic commander calling reinforcements }
+    akSummon);
 
   { When a sequence can be chosen (auDodge: only by a dodge, never by range) }
   TAttackUse = (auRanged, auMelee, auAny, auDodge);
@@ -294,6 +296,14 @@ begin
   if MonsterClass = 'monster_boss5' then
     Result := 'monster_supertank'
   else
+  { Ground Zero's variants: the daedalus is a hover, the medic commander a
+    medic (the same code, told apart by their mass) }
+  if MonsterClass = 'monster_daedalus' then
+    Result := 'monster_hover'
+  else
+  if MonsterClass = 'monster_medic_commander' then
+    Result := 'monster_medic'
+  else
   if Copy(MonsterClass, 1, 16) = 'monster_soldier_' then
     Result := 'monster_soldier'
   else
@@ -386,6 +396,13 @@ begin
           Result[I].Speed := 500;
         end;
       end else
+      if MonsterClass = 'monster_daedalus' then
+        { monster_fire_blaster2, its own sound }
+        Result[I].Sound := 'daedatck1'
+      else
+      if MonsterClass = 'monster_medic_commander' then
+        Result[I].Sound := 'medatck1a'
+      else
       if MonsterClass = 'monster_gladb' then
       begin
         { gladb_attack: plasma of 35 (45 within 45) on attack3, of 17 (22) on
@@ -414,6 +431,20 @@ begin
   Result := nil;
   if Q1Archetype(MonsterClass) <> qaNone then
     Exit(Q1MonsterAttackSeqs(MonsterClass));
+  if MonsterClass = 'monster_medic_commander' then
+  begin
+    { medic_attack: 80 % of the time out of melee range, while it has more
+      than 2 monster slots, medic_callReinforcements (attack33 .. 60: the
+      monsters appear on attack52) }
+    Result := XatrixAttackSeqs(MonsterClass);
+    S := MakeSeq('attack33', 28, [19], akSummon, 0, 'monsterspawn1');
+    S.MinDist := MeleeDistance;
+    AddSeq(Result, Weighted(S, 4));
+    Exit;
+  end;
+  { The daedalus: the hover's, its own sound }
+  if MonsterClass = 'monster_daedalus' then
+    Exit(XatrixAttackSeqs(MonsterClass));
   if IsXatrixMonster(MonsterClass) then
     Exit(XatrixAttackSeqs(MonsterClass));
   if (MonsterClass = 'monster_soldier_light') or (MonsterClass = 'monster_soldier') or
@@ -609,6 +640,29 @@ begin
       hover_reattack on attak106 again 60 % of the time while visible,
       end_attack to attak108 }
     AddSeq(Result, Looping(MakeSeq('attak101', 8, [3, 4], akBlaster, 1, 'hovatck1'), 3, 5, 0.6))
+  else
+  if MonsterClass = 'monster_stalker' then
+  begin
+    { stalker_attack_ranged: stalker_move_shoot (run01 .. 04), green
+      blaster bolts of 15 at 800 on run02 and run04; a third of the time on
+      the ground it pounces instead (stalker_do_pounce, within 450);
+      stalker_attack_melee: swing_l (attack01 .. 08, a hit of 5 .. 9, kick
+      50 on attack05) or swing_r (attack11 .. 15, on attack13) }
+    S := MakeSeq('run01', 4, [1, 3], akBlaster, 15, '');
+    S.Speed := 800;
+    AddSeq(Result, S);
+    S := MakeSeq('jump01', 7, [4], akLeap, 0, '');
+    S.MinDist := 64;
+    S.LeapForward := 450;
+    S.LeapUp := 300;
+    AddSeq(Result, Weighted(S, 0.5));
+    AddSeq(Result, MeleeSeq('attack01', 8, [4], 5, 5, 50, 'melee2'));
+    AddSeq(Result, MeleeSeq('attack11', 5, [2], 5, 5, 50, 'melee1'));
+  end else
+  if MonsterClass = 'monster_turret' then
+    { turret_move_fire (pow01 .. 04): TurretFire on pow01; the turret's own
+      code (TQuakeMonster.UpdateTurret) aims and fires it }
+    AddSeq(Result, MakeSeq('pow01', 4, [0], akBlaster, 20, ''))
   else
   if MonsterClass = 'monster_flipper' then
     { flipper_melee: bites of 5 on flpbit14 and flpbit19 }

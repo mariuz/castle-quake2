@@ -344,6 +344,9 @@ type
     procedure SteamPuff(const Ent: TQuakeEntity);
     procedure UpdateSteam;
     procedure AngerUse(const Ent: TQuakeEntity);
+    { medic_callReinforcements / medic_finish_spawn: the medic commander's
+      monsters around it }
+    procedure MedicSummon(const Medic: TQuakeMonster);
     { InitHintPaths: the hint_path chains of the level, for monsters }
     procedure BuildHintPaths;
     function HintPointsVisible(const FromPos, ToPos: TVector3): Boolean;
@@ -1951,6 +1954,9 @@ begin
     for M in FMonsters do
       if M.Entity = Ent then
       begin
+        if M.TurretWallWaiting then
+          M.ActivateWallTurret
+        else
         if M.Dormant then
           M.Spawn { TRIGGER_SPAWN }
         else
@@ -2943,6 +2949,99 @@ function TQuakeWorld.HintPointsVisible(const FromPos, ToPos: TVector3): Boolean;
 begin
   Result := WorldTrace(CgeToQuake(FromPos), CgeToQuake(ToPos), TVector3.Zero, TVector3.Zero,
     MASK_OPAQUE, nil).Fraction >= 1;
+end;
+
+procedure TQuakeWorld.MedicSummon(const Medic: TQuakeMonster);
+const
+  Reinforcements: array[0..6] of String = ('monster_soldier_light', 'monster_soldier',
+    'monster_soldier_ss', 'monster_infantry', 'monster_gunner', 'monster_medic', 'monster_gladiator');
+  Offsets: array[0..4] of record X, Y: Single; end = (
+    (X: 80; Y: 0), (X: 40; Y: 60), (X: 40; Y: -60), (X: 0; Y: 80), (X: 0; Y: -80));
+  SlotOffsets: array[0..4] of Integer = (0, 2, 2, 4, 4);
+var
+  Strength, Count, I, Side, SideIdx, Cls, Made: Integer;
+  R, YawRad: Single;
+  Fwd, Right, Pos, Mins, Maxs: TVector3;
+  Spots: array of TVector3;
+  T: TQuakeTrace;
+  Ent: TQuakeEntity;
+  Before, M: TQuakeMonster;
+begin
+  if Medic.MonsterSlots <= 0 then
+    Exit;
+  { The strength: the skill plus luck (-3 .. +3), at least 0; the number:
+    1, 1, 1, 3, 3, 5, 5 for strength 0 .. 6 }
+  Strength := GameSkill;
+  R := Random;
+  if R < 0.05 then Dec(Strength, 3)
+  else if R < 0.15 then Dec(Strength, 2)
+  else if R < 0.3 then Dec(Strength)
+  else if R > 0.95 then Inc(Strength, 3)
+  else if R > 0.85 then Inc(Strength, 2)
+  else if R > 0.7 then Inc(Strength);
+  Strength := Max(0, Strength);
+  if Strength = 0 then
+    Count := 1
+  else
+    Count := (Strength - 1) + (Strength mod 2);
+  Count := Min(Min(Count, 5), Medic.MonsterSlots);
+  { The spots in front (80 ahead, 40 ahead and 60 to the sides, 80 to the
+    sides), else the same behind: free for the box, a floor within 256 }
+  YawRad := DegToRad(Medic.Facing);
+  Fwd := Vector3(Cos(YawRad), Sin(YawRad), 0);
+  Right := Vector3(Sin(YawRad), -Cos(YawRad), 0);
+  Spots := nil;
+  for SideIdx := 0 to 1 do
+  begin
+    Side := 1 - 2 * SideIdx;
+    for I := 0 to Count - 1 do
+    begin
+      Cls := EnsureRange(Strength - SlotOffsets[I], 0, 6);
+      MonsterBoxSize(Reinforcements[Cls], Mins, Maxs);
+      Pos := Medic.Origin + Fwd * (Offsets[I].X * Side) - Right * (Offsets[I].Y * Side) + Vector3(0, 0, 10);
+      T := WorldTrace(Pos, Pos, Mins, Maxs, MASK_MONSTERSOLID, Medic);
+      if T.StartSolid then
+        Continue;
+      T := WorldTrace(Pos, Pos - Vector3(0, 0, 256), Mins, Maxs, MASK_MONSTERSOLID, Medic);
+      if T.Fraction >= 1 then
+        Continue;
+      SetLength(Spots, Length(Spots) + 1);
+      Spots[High(Spots)] := Vector3(T.EndPos.X, T.EndPos.Y, I);
+    end;
+    if Length(Spots) > 0 then
+      Break;
+  end;
+  Made := 0;
+  for I := 0 to High(Spots) do
+  begin
+    Cls := EnsureRange(Strength - SlotOffsets[Round(Spots[I].Z)], 0, 6);
+    MonsterBoxSize(Reinforcements[Cls], Mins, Maxs);
+    Pos := Medic.Origin + Fwd * 0;
+    T := WorldTrace(Vector3(Spots[I].X, Spots[I].Y, Medic.Origin.Z + 10),
+      Vector3(Spots[I].X, Spots[I].Y, Medic.Origin.Z + 10 - 256), Mins, Maxs, MASK_MONSTERSOLID, Medic);
+    Pos := T.EndPos;
+    Ent := TQuakeEntity.Create;
+    Ent.SetField('classname', Reinforcements[Cls]);
+    Ent.SetField('origin', Format('%d %d %d', [Round(Pos.X), Round(Pos.Y), Round(Pos.Z)]));
+    Ent.SetField('angle', IntToStr(Round(Medic.Facing)));
+    FBsp.Entities.Add(Ent);
+    Before := nil;
+    if FMonsters.Count > 0 then
+      Before := FMonsters.Last;
+    SpawnEntity(Ent);
+    if (FMonsters.Count = 0) or (FMonsters.Last = Before) then
+      Continue;
+    M := FMonsters.Last;
+    { AI_DO_NOT_COUNT: not in the level's totals }
+    M.DoNotCount := True;
+    Dec(FStats.TotalKills);
+    M.Alert;
+    Particles.SpawnTeleport(M.Transform.Translation);
+    Dec(Medic.MonsterSlots);
+    Inc(Made);
+  end;
+  WritelnLog('QuakeWorld', '%s calls %d reinforcements (strength %d, %d slots left)',
+    [Medic.Transform.Name, Made, Strength, Medic.MonsterSlots]);
 end;
 
 procedure TQuakeWorld.AngerUse(const Ent: TQuakeEntity);
@@ -4745,6 +4844,8 @@ begin
         Min(600, Dist * 1.1), Monster.AttackDamage, False, Monster);
     akRipper, akBlueBlaster, akLoogie, akHeatRocket, akPlasma:
       XatrixMonsterShot(Monster, Eye, Dir);
+    akSummon:
+      MedicSummon(Monster);
     akLaser:
       begin
         { The laser soldier's beam (dabeam): 1 to the player each frame it
@@ -5076,7 +5177,7 @@ begin
     if (not M.IsAlive) and not M.KillCounted then
     begin
       M.KillCounted := True;
-      if not M.GoodGuy then
+      if not (M.GoodGuy or M.DoNotCount) then
         Inc(FStats.Kills);
       { monster_death_use: a monster with an "item" drops it (Drop_Item) }
       if M.Entity.GetField('item') <> '' then
