@@ -1029,6 +1029,13 @@ var
 { Quake 2 bounding box of a monster class (mins / maxs around its origin),
   moved so the bottom is at -24 like every monster's origin here }
 procedure MonsterBoxSize(const MonsterClass: String; out Mins, Maxs: TVector3);
+{ Quake 2's own box of a monster class (True: used as it is, a flyer or
+  a turret whose origin is its middle) }
+function QuakeMonsterBox(const MonsterClass: String; out Mins, Maxs: TVector3): Boolean;
+{ How much lower than our origin its model is drawn (CGE units): Quake's
+  origin is at mins.z above the box's bottom (0 for most monsters, -24 for
+  the chick, Jorg, the Makron, the supertank, the Widows) }
+function MonsterModelOffset(const MonsterClass: String): Single;
 
 type
   TMonsterGibs = record
@@ -1246,10 +1253,9 @@ begin
   end;
 end;
 
-procedure MonsterBoxSize(const MonsterClass: String; out Mins, Maxs: TVector3);
-var
-  Height: Single;
+function QuakeMonsterBox(const MonsterClass: String; out Mins, Maxs: TVector3): Boolean;
 begin
+  Result := False;
   { Quake 2 m_*.c SP_monster_* mins / maxs }
   Mins := Vector3(-16, -16, -24);
   Maxs := Vector3(16, 16, 32);
@@ -1301,8 +1307,7 @@ begin
     (40 high while it swims: SetSwimming), the fixbot 64 x 64 x 48 }
   if XatrixBaseClass(MonsterClass) <> '' then
   begin
-    MonsterBoxSize(XatrixBaseClass(MonsterClass), Mins, Maxs);
-    Exit;
+    Exit(QuakeMonsterBox(XatrixBaseClass(MonsterClass), Mins, Maxs));
   end else
   if MonsterClass = 'monster_gekk' then
   begin
@@ -1320,7 +1325,7 @@ begin
   begin
     { It flies: Quake's box around its origin, not moved to the feet }
     Mins := Vector3(-56, -56, -44); Maxs := Vector3(56, 56, 44);
-    Exit;
+    Exit(True);
   end else
   if MonsterClass = 'monster_widow' then
   begin
@@ -1334,12 +1339,32 @@ begin
   begin
     { A 24 cube around its origin, in the wall it hangs on }
     Mins := Vector3(-12, -12, -12); Maxs := Vector3(12, 12, 12);
-    Exit;
+    Exit(True);
   end;
+end;
+
+procedure MonsterBoxSize(const MonsterClass: String; out Mins, Maxs: TVector3);
+var
+  Height: Single;
+begin
+  if QuakeMonsterBox(MonsterClass, Mins, Maxs) then
+    Exit;
   { Our monster origins are 24 above the feet }
   Height := Maxs.Z - Mins.Z;
   Mins.Z := -24;
   Maxs.Z := -24 + Height;
+end;
+
+function MonsterModelOffset(const MonsterClass: String): Single;
+var
+  Mins, Maxs: TVector3;
+begin
+  { Quake draws a model at the entity's origin, mins.z above the box's
+    bottom; ours is always 24 above it }
+  if QuakeMonsterBox(MonsterClass, Mins, Maxs) then
+    Result := 0
+  else
+    Result := -24 - Mins.Z;
 end;
 
 function FindItemDef(const AClassName: String): PQuakeItemDef;
@@ -1736,10 +1761,14 @@ begin
     { The stalker on the ceiling: upside down (roll 180) }
     if OnCeiling then
       Model.Scene.Rotation := Vector4(1, 0, 0, Pi);
-    { Our origins are 24 above the box's bottom; the Widows' models are
-      drawn from their Quake origin, the box's bottom }
-    if (Def^.ClassName = 'monster_widow') or (Def^.ClassName = 'monster_widow2') then
-      Model.Scene.Translation := Vector3(0, -24, 0);
+    { Drawn from Quake's origin (MonsterModelOffset); upside down the
+      other way }
+    if OnCeiling then
+      Model.Scene.Translation := Vector3(0, -MonsterModelOffset(Def^.ClassName), 0)
+    else
+      Model.Scene.Translation := Vector3(0, MonsterModelOffset(Def^.ClassName), 0);
+    if FModel2 <> nil then
+      FModel2.Scene.Translation := Model.Scene.Translation;
   end;
   if IsTurretMonster then
   begin
@@ -2545,6 +2574,7 @@ begin
   BoxMaxs.Z := -SwapZ;
   if Model <> nil then
     Model.Scene.Rotation := Vector4(0, 1, 0, 0);
+    Model.Scene.Translation := Vector3(0, MonsterModelOffset(Def^.ClassName), 0);
   if IsAlive then
   begin
     FJumping := True;

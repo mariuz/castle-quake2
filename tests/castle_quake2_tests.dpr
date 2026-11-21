@@ -1622,6 +1622,12 @@ begin
     SameValue(MonsterMoveSeq('monster_widow', True).Dists[0], 5.58, 0.01) and
     (MonsterMass('monster_widow2') = 2500) and (MonsterGibs('monster_widow2').GibHealth = -900),
     'the carrier and the Widow: summons, heat beam, doubled walk, mass, gib health');
+  { Models drawn from Quake's origin: mins.z above the box's bottom }
+  Check(SameValue(MonsterModelOffset('monster_soldier'), 0) and SameValue(MonsterModelOffset('monster_chick'), -24) and
+    SameValue(MonsterModelOffset('monster_tank'), -8) and SameValue(MonsterModelOffset('monster_jorg'), -24) and
+    SameValue(MonsterModelOffset('monster_chick_heat'), -24) and SameValue(MonsterModelOffset('monster_stalker'), -6) and
+    SameValue(MonsterModelOffset('monster_carrier'), 0) and SameValue(MonsterModelOffset('monster_turret'), 0),
+    'monster models drawn lower by -24 - mins.z (chick, tank, Jorg, stalker), not flyers kept as Quake''s');
   { Quake 2 paces: 10 frames a second of ai_run distances }
   Check(SameValue(MoveSeqSpeed(MonsterMoveSeq('monster_soldier', True)), 121.67, 0.01) and
     SameValue(MoveSeqSpeed(MonsterMoveSeq('monster_tank', True)), 46.875, 0.01) and
