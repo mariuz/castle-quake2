@@ -360,6 +360,9 @@ type
     procedure PlasmaBeam(const Origin, Dir: TVector3; const Damage: Integer);
     { A prox mine stuck and armed: monsters near it, its lifetime }
     procedure ProxThink(const Proj: TQuakeProjectile; const SecondsPassed: Single);
+    { Ground Zero's tesla: thrown, then opening and zapping }
+    procedure ThrowTesla(const Fuse: Single);
+    procedure TeslaThink(const Proj: TQuakeProjectile; const SecondsPassed: Single);
     { medic_callReinforcements / medic_finish_spawn: the medic commander's
       monsters around it }
     procedure MedicSummon(const Medic: TQuakeMonster);
@@ -696,6 +699,7 @@ begin
   { Ground Zero's InitClientPersistant }
   FStats.MaxAmmo[atFlechettes] := 200;
   FStats.MaxAmmo[atProx] := 50;
+  FStats.MaxAmmo[atTesla] := 50;
   FStats.WeaponMask := 1 shl 1; { Blaster }
   FStats.CurrentWeapon := 1;
 end;
@@ -3792,6 +3796,121 @@ begin
   Sounds.Play('sound/weapons/hgrent1a.wav', 1, chWeapon);
 end;
 
+procedure TQuakeWorld.ThrowTesla(const Fuse: Single);
+const
+  MinSpeed = 400;
+  MaxSpeed = 800;
+var
+  Speed: Single;
+  Right, Vel: TVector3;
+begin
+  if FStats.Ammo[atTesla] > 0 then
+    Dec(FStats.Ammo[atTesla]);
+  { weapon_tesla_fire: a grenade's 400 .. 800 by the time it was held,
+    from 22 below the eyes; fire_tesla: up 200 (+- 10), a little sideways }
+  Speed := EnsureRange(MinSpeed + (GrenadeTimer - Fuse) * (MaxSpeed - MinSpeed) / GrenadeTimer, MinSpeed, MaxSpeed);
+  Right := TVector3.CrossProduct(FPlayerDir, Vector3(0, 1, 0));
+  if Right.IsZero then
+    Right := Vector3(1, 0, 0);
+  Right := Right.Normalize;
+  Vel := FPlayerDir * Speed + Vector3(0, 200 + (Random * 2 - 1) * 10, 0) + Right * ((Random * 2 - 1) * 10);
+  { The damage: TESLA_DAMAGE 3 times the multiplier at the throw }
+  SpawnProjectile(pkTesla, FPlayerPos - Vector3(0, 22, 0) - Right * 4, Vel.Normalize, Vel.Length,
+    3 * DamageMultiplier, True);
+  Sounds.Play('sound/weapons/hgrent1a.wav', 1, chWeapon);
+  WritelnLog('QuakeWorld', 'Tesla thrown at %.0f units/s', [Speed]);
+end;
+
+procedure TQuakeWorld.TeslaThink(const Proj: TQuakeProjectile; const SecondsPassed: Single);
+const
+  { TESLA_ACTIVATE_TIME, TESLA_TIME_TO_LIVE; the field: 128 each way, up
+    128 from its bottom; TESLA_EXPLOSION_DAMAGE_MULT 50, radius 200 }
+  ActivateTime = 3;
+  TimeToLive = 30;
+var
+  Pos, Top, Mins, Maxs: TVector3;
+  M: TQuakeMonster;
+  Frame: Integer;
+
+  procedure Blow;
+  begin
+    { tesla_remove / tesla_blow: the grenade explosion, 50 times its zap }
+    WritelnLog('QuakeWorld', 'Tesla blows up');
+    Explode(Proj.Transform.Translation + Vector3(0, 8, 0), Proj.Damage * 50, 200, Proj.FromPlayer);
+    Proj.Life := 0;
+  end;
+
+begin
+  Proj.TeslaClock := Proj.TeslaClock + SecondsPassed;
+  Pos := Proj.Transform.Translation;
+  if not Proj.TeslaActive then
+  begin
+    if Proj.TeslaClock < ActivateTime then
+      Exit;
+    { tesla_activate: open frames 0..14 a tenth of a second each (skins on
+      10, 12 and 14), then on }
+    Frame := Min(14, Trunc((Proj.TeslaClock - ActivateTime) * 10));
+    if Frame <> Proj.TeslaFrame then
+    begin
+      if Proj.TeslaFrame < 0 then
+        Sounds.PlayAt('sound/weapons/teslaopen.wav', Proj.Transform);
+      Proj.TeslaFrame := Frame;
+      if Proj.Model <> nil then
+      begin
+        Proj.Model.SetFrame(Frame);
+        if Frame >= 14 then
+          Proj.Model.SetSkin(3)
+        else
+        if Frame >= 12 then
+          Proj.Model.SetSkin(2)
+        else
+        if Frame >= 10 then
+          Proj.Model.SetSkin(1);
+      end;
+    end;
+    if Proj.TeslaClock < ActivateTime + 1.6 then
+      Exit;
+    { In water, slime or lava it blows up at once }
+    if (MonsterPointContents(CgeToQuake(Pos + Vector3(0, 4, 0))) and MASK_LIQUID) <> 0 then
+    begin
+      Blow;
+      Exit;
+    end;
+    Proj.TeslaActive := True;
+    Proj.TeslaClock := 0;
+    WritelnLog('QuakeWorld', 'Tesla active at %s', [CgeToQuake(Pos).ToString]);
+    Exit;
+  end;
+  if Proj.TeslaClock >= TimeToLive then
+  begin
+    Blow;
+    Exit;
+  end;
+  { tesla_think_active: every 0.1 s each monster in the field it can see
+    takes 3 (times the multiplier), drawn as lightning }
+  Proj.TeslaZap := Proj.TeslaZap - SecondsPassed;
+  if Proj.TeslaZap > 0 then
+    Exit;
+  Proj.TeslaZap := Proj.TeslaZap + 0.1;
+  Top := Pos + Vector3(0, 16, 0);
+  for M in FMonsters do
+    if M.IsAlive and (not M.Dormant) then
+    begin
+      Mins := M.Origin + M.BoxMins;
+      Maxs := M.Origin + M.BoxMaxs;
+      if (Maxs.X < CgeToQuake(Pos).X - 128) or (Mins.X > CgeToQuake(Pos).X + 128) or
+         (Maxs.Y < CgeToQuake(Pos).Y - 128) or (Mins.Y > CgeToQuake(Pos).Y + 128) or
+         (Maxs.Z < CgeToQuake(Pos).Z) or (Mins.Z > CgeToQuake(Pos).Z + 128) then
+        Continue;
+      if not HintPointsVisible(Top, M.Transform.Translation) then
+        Continue;
+      Particles.SpawnBeam(Top, M.Transform.Translation, Vector3(0.6, 0.7, 1.0));
+      M.TakeDamage(Proj.Damage);
+      if not M.IsAlive then
+        WritelnLog('QuakeWorld', 'Tesla killed %s', [M.Transform.Name]);
+    end;
+end;
+
 procedure TQuakeWorld.ThrowTrap(const Fuse: Single);
 const
   { weapon_trap_fire: 300 .. 700 over TRAP_TIMER (5 s), from the time the
@@ -3959,6 +4078,9 @@ begin
     geGrenadeThrow:
       if FGun.Slot = TrapSlot then
         ThrowTrap(FGun.Fuse)
+      else
+      if FGun.Slot = TeslaSlot then
+        ThrowTesla(FGun.Fuse)
       else
         ThrowHandGrenade(FGun.Fuse);
     geGrenadeBlowUp:
@@ -4587,7 +4709,7 @@ begin
     Remove := False;
     OldPos := Proj.Transform.Translation;
 
-    if (Proj.Kind in [pkGrenade, pkHandGrenade]) or ((Proj.Kind = pkTrap) and not Proj.TrapLanded) or
+    if (Proj.Kind in [pkGrenade, pkHandGrenade]) or ((Proj.Kind in [pkTrap, pkTesla]) and not Proj.TrapLanded) or
        ((Proj.Kind = pkProx) and not Proj.ProxStuck) then
       Proj.Velocity.Y := Proj.Velocity.Y - 800 * SecondsPassed;
     if Proj.Sprite <> nil then
@@ -4614,6 +4736,18 @@ begin
       end;
       FProjectiles.Delete(I);
       Continue;
+    end;
+
+    if Proj.Kind = pkTesla then
+    begin
+      TeslaThink(Proj, SecondsPassed);
+      if Proj.Life <= 0 then
+      begin
+        FProjectiles.Delete(I);
+        Continue;
+      end;
+      if Proj.TrapLanded then
+        Continue;
     end;
 
     if (Proj.Kind = pkProx) and Proj.ProxStuck then
@@ -4679,7 +4813,7 @@ begin
           NewPos := NewPos + HitNormal * 0.5;
         end;
       end else
-      if Proj.Kind = pkTrap then
+      if Proj.Kind in [pkTrap, pkTesla] then
       begin
         { MOVETYPE_BOUNCE off everything; it stays where it lands }
         Proj.Velocity := Proj.Velocity - HitNormal * (1.5 * TVector3.DotProduct(Proj.Velocity, HitNormal));
@@ -5549,7 +5683,7 @@ begin
     6: Chain := [6, ProxLauncherSlot];
     8: Chain := [8, IonRipperSlot, PlasmaBeamSlot];
     9: Chain := [9, PhalanxSlot];
-    HandGrenadeSlot: Chain := [HandGrenadeSlot, TrapSlot];
+    HandGrenadeSlot: Chain := [HandGrenadeSlot, TrapSlot, TeslaSlot];
     else Exit(Slot);
   end;
   Result := Slot;
@@ -7075,7 +7209,7 @@ begin
     FStats.Ammo[A] := FStats.MaxAmmo[A];
   { The Reckoning's weapons when their models are there (-game xatrix) }
   { and Ground Zero's (-game rogue) }
-  for I := IonRipperSlot to PlasmaBeamSlot do
+  for I := IonRipperSlot to TeslaSlot do
     if Pak.FileExists(WeaponDefs[I].ViewModel) then
     begin
       FStats.WeaponMask := FStats.WeaponMask or (1 shl I);

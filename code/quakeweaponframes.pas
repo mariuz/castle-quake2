@@ -21,6 +21,9 @@ const
   { The Reckoning's traps: thrown like hand grenades (Throw_Generic), but
     they never go off in the hand }
   TrapGunSlot = 14;
+  { Ground Zero's tesla mines: Throw_Generic(8, 32, ..., hold 1, fire 2),
+    never going off in the hand }
+  TeslaGunSlot = 19;
 
 type
   { Weapon_Generic's frame ranges: activate 0..ActivateLast, fire
@@ -69,6 +72,7 @@ type
     function Ammo(const ASlot: Integer): Integer;
     procedure Generic(const Def: TGunFrameDef);
     procedure Grenade;
+    procedure Tesla;
     { Fire functions: they advance the frame themselves, like Quake 2's }
     procedure FireFrame;
     procedure ChangeWeapon;
@@ -162,6 +166,8 @@ begin
     16: Result := MakeDef(4, 7, 37, 41, [18, 28], [6, 7]);
     17: Result := MakeDef(5, 16, 59, 64, [34, 51, 59], [6]);
     18: Result := MakeDef(8, 12, 39, 44, [35], [9, 10, 11, 12]);
+    { Weapon_Tesla: throw 0..8, idle 9..32 }
+    19: Result := MakeDef(0, 8, 32, 32, [21], []);
     { Weapon_Grenade: throw 0..15, idle 16..48, no raise / put away }
     else Result := MakeDef(0, 15, 48, 48, [29, 34, 39, 48], []);
   end;
@@ -282,6 +288,9 @@ end;
 procedure TQuakeGun.Think;
 begin
   FOldFrame := FFrame;
+  if FSlot = TeslaGunSlot then
+    Tesla
+  else
   if FSlot in [HandGrenadeSlot, TrapGunSlot] then
     Grenade
   else
@@ -546,6 +555,80 @@ begin
         Event(geFire);
         Inc(FFrame);
       end;
+  end;
+end;
+
+procedure TQuakeGun.Tesla;
+var
+  N: Integer;
+begin
+  { Throw_Generic as Weapon_Tesla calls it: idle 9..32; fire held on frame
+    1 (the hold timer runs like a grenade's), thrown on 2, then the frames
+    to 8 and a second's wait }
+  if (FPendingSlot <> 0) and (FState = gsReady) then
+  begin
+    ChangeWeapon;
+    Exit;
+  end;
+  if FState = gsActivating then
+  begin
+    FState := gsReady;
+    FFrame := 9;
+    Exit;
+  end;
+  if FState = gsReady then
+  begin
+    if Attack or AttackLatched then
+    begin
+      AttackLatched := False;
+      if Ammo(FSlot) > 0 then
+      begin
+        FFrame := 1;
+        FState := gsFiring;
+        FGrenadeTime := 0;
+      end else
+      if FTime >= FNoAmmoTime then
+      begin
+        FNoAmmoTime := FTime + 1;
+        Event(geNoAmmo);
+      end;
+      Exit;
+    end;
+    if FFrame >= 32 then
+    begin
+      FFrame := 9;
+      Exit;
+    end;
+    if RandomPauses then
+      for N in GunFrameDef(TeslaGunSlot).PauseFrames do
+        if (FFrame = N) and (Random(16) <> 0) then
+          Exit;
+    Inc(FFrame);
+    Exit;
+  end;
+  if FState = gsFiring then
+  begin
+    if FFrame = 1 then
+    begin
+      if FGrenadeTime = 0 then
+        FGrenadeTime := FTime + GrenadeTimer + 0.2;
+      if Attack then
+        Exit;
+    end;
+    if FFrame = 2 then
+    begin
+      FFuse := Max(0, FGrenadeTime - FTime);
+      Event(geGrenadeThrow);
+      FGrenadeTime := FTime + 10 * FrameTime;
+    end;
+    if (FFrame = 8) and (FTime < FGrenadeTime) then
+      Exit;
+    Inc(FFrame);
+    if FFrame = 9 then
+    begin
+      FGrenadeTime := 0;
+      FState := gsReady;
+    end;
   end;
 end;
 

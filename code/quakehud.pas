@@ -17,7 +17,9 @@ type
     { The Reckoning: mag slugs (the phalanx), traps (both weapon and ammo) }
     atMagSlugs, atTraps,
     { Ground Zero: flechettes (the ETF rifle), prox mines }
-    atFlechettes, atProx);
+    atFlechettes, atProx,
+    { Ground Zero's tesla mines (both weapon and ammo) }
+    atTesla);
 
   { Player statistics needed for HUD rendering and gameplay }
   TQuakePlayerStats = record
@@ -439,6 +441,7 @@ begin
     16: AmmoT := atFlechettes;
     17: AmmoT := atProx;
     18: AmmoT := atCells;
+    19: AmmoT := atTesla;
     else AmmoT := atNone;
   end;
   if AmmoT <> atNone then

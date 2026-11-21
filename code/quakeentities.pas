@@ -472,7 +472,10 @@ type
     pkTrap,
     { Ground Zero: the ETF rifle's flechette, the prox mine (sticks where it
       lands, arms, goes off when a monster comes near) }
-    pkFlechette, pkProx);
+    pkFlechette, pkProx,
+    { Ground Zero's tesla mine: lands, opens after 3 s, zaps monsters near
+      it for 30 s }
+    pkTesla);
 
   { Active projectile (blaster bolt, rocket, grenade, BFG ball) }
   TQuakeProjectile = class
@@ -509,6 +512,12 @@ type
       lifetime once armed, the countdown after a monster came near }
     ProxStuck: Boolean;
     ProxArm, ProxFuse, ProxTrigger: Single;
+    { pkTesla: seconds since thrown, its open frame (-1 before), active,
+      the next zap }
+    TeslaClock: Single;
+    TeslaFrame: Integer;
+    TeslaActive: Boolean;
+    TeslaZap: Single;
     constructor Create(const Parent: TCastleTransform; const AKind: TProjectileKind;
       const Pos, Vel: TVector3; const ADamage: Integer; const AFromPlayer: Boolean);
     destructor Destroy; override;
@@ -679,7 +688,7 @@ const
     Reckoning's 12 Ion Ripper, 13 Phalanx, 14 Traps (chained with the
     hyperblaster, the railgun and the grenades: their keys switch between
     the two) }
-  WeaponSlots = 18;
+  WeaponSlots = 19;
   IonRipperSlot = 12;
   PhalanxSlot = 13;
   TrapSlot = 14;
@@ -690,6 +699,9 @@ const
   EtfRifleSlot = 16;
   ProxLauncherSlot = 17;
   PlasmaBeamSlot = 18;
+  { Ground Zero's tesla mines: thrown (Throw_Generic), on the G key after
+    the hand grenades and the traps }
+  TeslaSlot = 19;
 
   POWERUP_QUAD = 1;
   POWERUP_INVULN = 2;
@@ -704,7 +716,7 @@ const
   POWERUP_IR = 10;
   POWERUP_DEFENDER = 11;
 
-  ItemDefs: array[0..73] of TQuakeItemDef = (
+  ItemDefs: array[0..74] of TQuakeItemDef = (
     (ClassName: 'weapon_shotgun'; Category: icWeapon; Model: 'models/weapons/g_shotg/tris.md2'; Icon: 'w_shotgun'; Name: 'Shotgun'; Sound: 'sound/misc/w_pkup.wav'; Weapon: 2; AmmoType: atShells; Amount: 10; Param: 0),
     (ClassName: 'weapon_supershotgun'; Category: icWeapon; Model: 'models/weapons/g_shotg2/tris.md2'; Icon: 'w_sshotgun'; Name: 'Super Shotgun'; Sound: 'sound/misc/w_pkup.wav'; Weapon: 3; AmmoType: atShells; Amount: 10; Param: 0),
     (ClassName: 'weapon_machinegun'; Category: icWeapon; Model: 'models/weapons/g_machn/tris.md2'; Icon: 'w_machinegun'; Name: 'Machinegun'; Sound: 'sound/misc/w_pkup.wav'; Weapon: 4; AmmoType: atBullets; Amount: 50; Param: 0),
@@ -790,6 +802,7 @@ const
     (ClassName: 'item_double'; Category: icPowerup; Model: 'models/items/ddamage/tris.md2'; Icon: 'p_double'; Name: 'Double Damage'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: 30; Param: POWERUP_DOUBLE),
     (ClassName: 'item_ir_goggles'; Category: icPowerup; Model: 'models/items/goggles/tris.md2'; Icon: 'p_ir'; Name: 'IR Goggles'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: 60; Param: POWERUP_IR),
     (ClassName: 'item_sphere_defender'; Category: icPowerup; Model: 'models/items/defender/tris.md2'; Icon: 'p_defender'; Name: 'Defender Sphere'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: 30; Param: POWERUP_DEFENDER),
+    (ClassName: 'ammo_tesla'; Category: icAmmo; Model: 'models/ammo/am_tesl/tris.md2'; Icon: 'a_tesla'; Name: 'Tesla'; Sound: 'sound/misc/am_pkup.wav'; Weapon: TeslaSlot; AmmoType: atTesla; Amount: 5; Param: 0),
     (ClassName: 'ammo_prox'; Category: icAmmo; Model: 'models/ammo/am_prox/tris.md2'; Icon: 'a_prox'; Name: 'Prox'; Sound: 'sound/misc/am_pkup.wav'; Weapon: 0; AmmoType: atProx; Amount: 5; Param: 0),
     { What a trap leaves of a monster (SP_item_foodcube): health over the
       maximum, the entity's "count" (a tenth of the monster's mass) }
@@ -820,11 +833,12 @@ const
     (Name: 'Chainfist'; ViewModel: 'models/weapons/v_chainf/tris.md2'; Icon: 'w_chainfist'; AmmoType: atNone; AmmoPerShot: 0; Sound: ''),
     (Name: 'ETF Rifle'; ViewModel: 'models/weapons/v_etf_rifle/tris.md2'; Icon: 'w_etf_rifle'; AmmoType: atFlechettes; AmmoPerShot: 1; Sound: 'sound/weapons/nail1.wav'),
     (Name: 'Prox Launcher'; ViewModel: 'models/weapons/v_plaunch/tris.md2'; Icon: 'w_proxlaunch'; AmmoType: atProx; AmmoPerShot: 1; Sound: 'sound/weapons/grenlf1a.wav'),
-    (Name: 'Plasma Beam'; ViewModel: 'models/weapons/v_beamer/tris.md2'; Icon: 'w_heatbeam'; AmmoType: atCells; AmmoPerShot: 2; Sound: '')
+    (Name: 'Plasma Beam'; ViewModel: 'models/weapons/v_beamer/tris.md2'; Icon: 'w_heatbeam'; AmmoType: atCells; AmmoPerShot: 2; Sound: ''),
+    (Name: 'Tesla'; ViewModel: 'models/weapons/v_tesla/tris.md2'; Icon: 'a_tesla'; AmmoType: atTesla; AmmoPerShot: 1; Sound: '')
   );
 
   AmmoIcons: array[TAmmoType] of String = ('', 'a_shells', 'a_bullets', 'a_grenades',
-    'a_rockets', 'a_cells', 'a_slugs', 'a_mslugs', 'a_trap', 'a_flechettes', 'a_prox');
+    'a_rockets', 'a_cells', 'a_slugs', 'a_mslugs', 'a_trap', 'a_flechettes', 'a_prox', 'a_tesla');
 
   { Built-in monster definitions. At startup data/monsters.castle-transform
     (TQuakeMonsterType components, editable in the CGE editor) overrides
@@ -3985,6 +3999,7 @@ begin
     pkTrap: MdlPath := 'models/weapons/z_trap/tris.md2';
     pkFlechette: MdlPath := 'models/proj/flechette/tris.md2';
     pkProx: MdlPath := 'models/weapons/g_prox/tris.md2';
+    pkTesla: MdlPath := 'models/weapons/g_tesla/tris.md2';
     else MdlPath := '';
   end;
   case AKind of
@@ -3996,6 +4011,11 @@ begin
     pkFlechette: Life := 8000 / 750;
     { A prox mine lives until it went off (its lifetime starts when armed) }
     pkProx: Life := 1000;
+    pkTesla:
+      begin
+        Life := 1000;
+        TeslaFrame := -1;
+      end;
     { fire_trap: 30 s (timestamp), its first think after 1 s }
     pkTrap:
       begin

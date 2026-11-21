@@ -841,6 +841,16 @@ begin
   P.Run(1.5, False);
   Check((P.Count(geGrenadeThrow) = 1) and (P.Gun.Fuse = 0), 'a released trap is thrown at full speed');
   FreeProbe(P);
+  { Ground Zero's tesla (Throw_Generic): held on frame 1, never going off,
+    thrown on release, idle again (9..32) a second later }
+  P := NewProbe(TeslaSlot, 5);
+  P.Run(4.0, True);
+  Check((P.Count(geGrenadeBlowUp) = 0) and (P.Count(geGrenadeThrow) = 0) and (P.Gun.Frame = 1),
+    'a held tesla waits on frame 1');
+  P.Run(1.5, False);
+  Check((P.Count(geGrenadeThrow) = 1) and (P.Gun.Fuse = 0) and (P.Gun.State = gsReady) and (P.Gun.Frame >= 9),
+    'a released tesla is thrown at full speed, then the gun idles');
+  FreeProbe(P);
 end;
 
 procedure TestReckoningItems;
@@ -875,6 +885,9 @@ begin
   Check((FindItemDef('item_double')^.Param = POWERUP_DOUBLE) and (FindItemDef('item_double')^.Amount = 30) and
     (FindItemDef('item_ir_goggles')^.Amount = 60) and (FindItemDef('item_sphere_defender')^.Amount = 30),
     'double damage 30 s, IR goggles 60 s, the defender sphere 30 s');
+  Check((FindItemDef('ammo_tesla')^.Weapon = TeslaSlot) and (FindItemDef('ammo_tesla')^.Amount = 5) and
+    (WeaponDefs[TeslaSlot].AmmoType = atTesla) and (GunFrameDef(TeslaSlot).IdleLast = 32),
+    'ammo_tesla gives the tesla and 5 mines; idle frames 9 .. 32');
 end;
 
 type
@@ -1312,7 +1325,7 @@ var
   Mdl: TQuakeMd2;
 begin
   { Weapon_Generic's frames within each view model }
-  for Slot := ChainfistSlot to PlasmaBeamSlot do
+  for Slot := ChainfistSlot to TeslaSlot do
   begin
     Mdl := Md2Manager.GetModel(WeaponDefs[Slot].ViewModel);
     Check((Mdl <> nil) and (Mdl.FrameCount > GunFrameDef(Slot).DeactivateLast),
