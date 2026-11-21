@@ -8,7 +8,7 @@ interface
 uses
   SysUtils, Classes, Generics.Collections, Math,
   CastleVectors, CastleTransform, CastleScene, CastleColors, CastleUtils, X3DNodes,
-  CastleImages, CastleRenderOptions,
+  CastleImages, CastleRenderOptions, X3DFields,
   QuakePalette, QuakeMd2, QuakeSprite;
 
 type
@@ -16,12 +16,15 @@ type
   TParticleKind = (pkSparks, pkSmoke, pkBlood, pkFireball, pkTeleport, pkTrail);
 
   { Single active particle: plain data, drawn by TQuakeParticleManager as one
-    camera-facing quad in a single batched scene. }
+    camera-facing quad in a single batched scene. Position and Velocity are
+    the ones at SpawnTime: the vertex shader moves it (PositionAt). }
   TQuakeParticle = class
   public
     Position: TVector3;
     Color: TVector3;
     Velocity: TVector3;
+    { TQuakeParticleManager's clock when it was added }
+    SpawnTime: Double;
     Kind: TParticleKind;
     Life: Single;
     MaxLife: Single;
@@ -34,6 +37,9 @@ type
     function Update(const SecondsPassed: Single): Boolean; { returns False when expired }
     function CurrentScale: Single;
     function CurrentAlpha: Single;
+    { Where the particle is Age seconds after it spawned (what the shader
+      draws: velocity plus gravity on Y) }
+    function PositionAt(const Age: Single): TVector3;
   end;
 
   TQuakeParticleList = specialize TObjectList<TQuakeParticle>;
@@ -92,18 +98,34 @@ type
     FGibs: TQuakeGibList;
     FParent: TCastleTransform;
     FCamera: TCastleTransform;
-    { All particles are quads in one shape of one scene }
+    { All particles are quads in one shape of one scene. The mesh holds each
+      particle's spawn data and changes only when particles are added (or
+      many expired); a vertex shader moves, sizes, fades and turns them to
+      the camera from the time. }
     FBatchScene: TCastleScene;
     FBatchCoord: TCoordinateNode;
     FBatchTexCoord: TTextureCoordinateNode;
     FBatchColor: TColorRGBANode;
+    FBatchMotion, FBatchLife, FBatchCorner: TFloatVertexAttributeNode;
     FBatchGeometry: TIndexedTriangleSetNode;
+    FTimeField: TSFFloat;
+    FRightField, FUpField: TSFVec3f;
     FCoords: TVector3List;
     FTexCoords: TVector2List;
     FColors: TVector4List;
+    FMotion, FLifeData, FCorners: TSingleList;
     FIndices: TInt32List;
+    { The particles' clock, and its value when the mesh was built (times in
+      the mesh are relative to it, to keep them small) }
+    FTime, FBatchBase: Double;
+    { Particles in the mesh, those of them expired since, added since }
+    FBatchCount, FBatchExpired: Integer;
+    FBatchDirty: Boolean;
+    FUploads: Int64;
     procedure CreateBatchScene;
     procedure RebuildBatch;
+    procedure UpdateBatchUniforms;
+    procedure AddParticle(const P: TQuakeParticle);
   public
     constructor Create;
     destructor Destroy; override;
@@ -163,6 +185,10 @@ type
   public
     { Gibs flying or lying around }
     function GibCount: Integer;
+    { Live particles }
+    function ParticleCount: Integer;
+    { Times the particle mesh was sent to the GPU }
+    property Uploads: Int64 read FUploads;
   end;
 
 var
@@ -325,11 +351,13 @@ end;
 function TQuakeParticle.Update(const SecondsPassed: Single): Boolean;
 begin
   Life := Life - SecondsPassed;
-  if Life <= 0 then
-    Exit(False);
-  Velocity.Y := Velocity.Y - Gravity * SecondsPassed;
-  Position := Position + Velocity * SecondsPassed;
-  Result := True;
+  Result := Life > 0;
+end;
+
+function TQuakeParticle.PositionAt(const Age: Single): TVector3;
+begin
+  Result := Position + Velocity * Age;
+  Result.Y := Result.Y - 0.5 * Gravity * Sqr(Age);
 end;
 
 function TQuakeParticle.CurrentScale: Single;
@@ -354,6 +382,9 @@ begin
   FCoords := TVector3List.Create;
   FTexCoords := TVector2List.Create;
   FColors := TVector4List.Create;
+  FMotion := TSingleList.Create;
+  FLifeData := TSingleList.Create;
+  FCorners := TSingleList.Create;
   FIndices := TInt32List.Create;
 end;
 
@@ -366,6 +397,9 @@ begin
   FCoords.Free;
   FTexCoords.Free;
   FColors.Free;
+  FMotion.Free;
+  FLifeData.Free;
+  FCorners.Free;
   FIndices.Free;
   inherited Destroy;
 end;
@@ -380,20 +414,63 @@ begin
 end;
 
 procedure TQuakeParticleManager.CreateBatchScene;
+const
+  { Per vertex: q2p_motion = velocity, gravity (Y down); q2p_life = spawn
+    time (from the mesh's base), life, start / end size; q2p_corner = -1 / +1.
+    Expired quads shrink to a point until the mesh is rebuilt. }
+  VertexCode =
+    'attribute vec4 q2p_motion;' + LineEnding +
+    'attribute vec4 q2p_life;' + LineEnding +
+    'attribute vec2 q2p_corner;' + LineEnding +
+    'uniform float q2p_time;' + LineEnding +
+    'uniform vec3 q2p_right;' + LineEnding +
+    'uniform vec3 q2p_up;' + LineEnding +
+    'varying mediump float q2p_alpha;' + LineEnding +
+    'void PLUG_vertex_object_space_change(inout vec4 vertex_object, inout vec3 normal_object)' + LineEnding +
+    '{' + LineEnding +
+    '  float age = max(0.0, q2p_time - q2p_life.x);' + LineEnding +
+    '  float f = age / q2p_life.y;' + LineEnding +
+    '  vec3 p = vertex_object.xyz + q2p_motion.xyz * age;' + LineEnding +
+    '  p.y -= 0.5 * q2p_motion.w * age * age;' + LineEnding +
+    '  float size = f < 1.0 ? mix(q2p_life.z, q2p_life.w, f) : 0.0;' + LineEnding +
+    '  p += (q2p_right * q2p_corner.x + q2p_up * q2p_corner.y) * size;' + LineEnding +
+    '  vertex_object.xyz = p;' + LineEnding +
+    '  q2p_alpha = 0.9 * max(0.0, 1.0 - f);' + LineEnding +
+    '}';
+  FragmentCode =
+    'varying mediump float q2p_alpha;' + LineEnding +
+    'void PLUG_fragment_modify(inout vec4 fragment_color)' + LineEnding +
+    '{' + LineEnding +
+    '  fragment_color.a *= q2p_alpha;' + LineEnding +
+    '}';
 var
   Root: TX3DRootNode;
   Shape: TShapeNode;
   App: TAppearanceNode;
   Mat: TUnlitMaterialNode;
   Tex: TImageTextureNode;
+  Effect: TEffectNode;
+  VertexPart, FragmentPart: TEffectPartNode;
+
+  function NewAttribute(const AName: String; const Components: Integer): TFloatVertexAttributeNode;
+  begin
+    Result := TFloatVertexAttributeNode.Create;
+    Result.NameField := AName;
+    Result.NumComponents := Components;
+  end;
+
 begin
   FBatchCoord := TCoordinateNode.Create;
   FBatchTexCoord := TTextureCoordinateNode.Create;
   FBatchColor := TColorRGBANode.Create;
+  FBatchMotion := NewAttribute('q2p_motion', 4);
+  FBatchLife := NewAttribute('q2p_life', 4);
+  FBatchCorner := NewAttribute('q2p_corner', 2);
   FBatchGeometry := TIndexedTriangleSetNode.Create;
   FBatchGeometry.Coord := FBatchCoord;
   FBatchGeometry.TexCoord := FBatchTexCoord;
   FBatchGeometry.Color := FBatchColor;
+  FBatchGeometry.SetAttrib([FBatchMotion, FBatchLife, FBatchCorner]);
   FBatchGeometry.Solid := False;
 
   Mat := TUnlitMaterialNode.Create;
@@ -406,6 +483,23 @@ begin
   Tex.SetUrl(['quaketex:/' + SoftDotTexture]);
   App.Texture := Tex;
 
+  Effect := TEffectNode.Create;
+  Effect.Language := slGLSL;
+  FTimeField := TSFFloat.Create(Effect, True, 'q2p_time', 0);
+  Effect.AddCustomField(FTimeField);
+  FRightField := TSFVec3f.Create(Effect, True, 'q2p_right', Vector3(1, 0, 0));
+  Effect.AddCustomField(FRightField);
+  FUpField := TSFVec3f.Create(Effect, True, 'q2p_up', Vector3(0, 1, 0));
+  Effect.AddCustomField(FUpField);
+  VertexPart := TEffectPartNode.Create;
+  VertexPart.ShaderType := stVertex;
+  VertexPart.Contents := VertexCode;
+  FragmentPart := TEffectPartNode.Create;
+  FragmentPart.ShaderType := stFragment;
+  FragmentPart.Contents := FragmentCode;
+  Effect.SetParts([VertexPart, FragmentPart]);
+  App.SetEffects([Effect]);
+
   Shape := TShapeNode.Create;
   Shape.Geometry := FBatchGeometry;
   Shape.Appearance := App;
@@ -417,53 +511,66 @@ begin
   FBatchScene.Load(Root, True);
   FBatchScene.Collides := False;
   FBatchScene.Pickable := False;
+  { The shader moves the particles away from the mesh's bounding box }
+  FBatchScene.ShapeFrustumCulling := False;
+  FBatchScene.SceneFrustumCulling := False;
+  FBatchScene.Exists := False;
   FParent.Add(FBatchScene);
+  FBatchCount := 0;
+  FBatchExpired := 0;
+  FBatchDirty := True;
+end;
+
+procedure TQuakeParticleManager.AddParticle(const P: TQuakeParticle);
+begin
+  P.SpawnTime := FTime;
+  FParticles.Insert(FParticles.Count, P);
+  FBatchDirty := True;
+end;
+
+function TQuakeParticleManager.ParticleCount: Integer;
+begin
+  Result := FParticles.Count;
 end;
 
 procedure TQuakeParticleManager.RebuildBatch;
+const
+  CornerX: array [0..3] of Single = (-1, 1, 1, -1);
+  CornerY: array [0..3] of Single = (-1, -1, 1, 1);
 var
-  I, Base: Integer;
+  I, J, Base: Integer;
   P: TQuakeParticle;
-  Right, Up, R, U: TVector3;
-  Size, Alpha: Single;
 begin
   if FBatchScene = nil then
     Exit;
-  if FCamera <> nil then
-  begin
-    Up := FCamera.Up;
-    Right := TVector3.CrossProduct(FCamera.Direction, Up).Normalize;
-    Up := TVector3.CrossProduct(Right, FCamera.Direction).Normalize;
-  end else
-  begin
-    Right := Vector3(1, 0, 0);
-    Up := Vector3(0, 1, 0);
-  end;
-
+  FBatchBase := FTime;
   FCoords.Count := FParticles.Count * 4;
   FTexCoords.Count := FParticles.Count * 4;
   FColors.Count := FParticles.Count * 4;
+  FMotion.Count := FParticles.Count * 16;
+  FLifeData.Count := FParticles.Count * 16;
+  FCorners.Count := FParticles.Count * 8;
   FIndices.Count := FParticles.Count * 6;
   for I := 0 to FParticles.Count - 1 do
   begin
     P := FParticles[I];
-    Size := P.CurrentScale;
-    Alpha := P.CurrentAlpha;
-    R := Right * Size;
-    U := Up * Size;
     Base := I * 4;
-    FCoords.L[Base] := P.Position - R - U;
-    FCoords.L[Base + 1] := P.Position + R - U;
-    FCoords.L[Base + 2] := P.Position + R + U;
-    FCoords.L[Base + 3] := P.Position - R + U;
-    FTexCoords.L[Base] := Vector2(0, 0);
-    FTexCoords.L[Base + 1] := Vector2(1, 0);
-    FTexCoords.L[Base + 2] := Vector2(1, 1);
-    FTexCoords.L[Base + 3] := Vector2(0, 1);
-    FColors.L[Base] := Vector4(P.Color, Alpha);
-    FColors.L[Base + 1] := FColors.L[Base];
-    FColors.L[Base + 2] := FColors.L[Base];
-    FColors.L[Base + 3] := FColors.L[Base];
+    for J := 0 to 3 do
+    begin
+      FCoords.L[Base + J] := P.Position;
+      FTexCoords.L[Base + J] := Vector2((CornerX[J] + 1) / 2, (CornerY[J] + 1) / 2);
+      FColors.L[Base + J] := Vector4(P.Color, 1);
+      FMotion.L[(Base + J) * 4] := P.Velocity.X;
+      FMotion.L[(Base + J) * 4 + 1] := P.Velocity.Y;
+      FMotion.L[(Base + J) * 4 + 2] := P.Velocity.Z;
+      FMotion.L[(Base + J) * 4 + 3] := P.Gravity;
+      FLifeData.L[(Base + J) * 4] := P.SpawnTime - FBatchBase;
+      FLifeData.L[(Base + J) * 4 + 1] := P.MaxLife;
+      FLifeData.L[(Base + J) * 4 + 2] := P.StartScale;
+      FLifeData.L[(Base + J) * 4 + 3] := P.EndScale;
+      FCorners.L[(Base + J) * 2] := CornerX[J];
+      FCorners.L[(Base + J) * 2 + 1] := CornerY[J];
+    end;
     FIndices.L[I * 6] := Base;
     FIndices.L[I * 6 + 1] := Base + 1;
     FIndices.L[I * 6 + 2] := Base + 2;
@@ -474,8 +581,33 @@ begin
   FBatchCoord.SetPoint(FCoords);
   FBatchTexCoord.SetPoint(FTexCoords);
   FBatchColor.SetColor(FColors);
+  FBatchMotion.SetValue(FMotion);
+  FBatchLife.SetValue(FLifeData);
+  FBatchCorner.SetValue(FCorners);
   FBatchGeometry.SetIndex(FIndices);
-  FBatchScene.Exists := FParticles.Count > 0;
+  FBatchCount := FParticles.Count;
+  FBatchExpired := 0;
+  FBatchDirty := False;
+  Inc(FUploads);
+end;
+
+procedure TQuakeParticleManager.UpdateBatchUniforms;
+var
+  Right, Up: TVector3;
+begin
+  if FCamera <> nil then
+  begin
+    Up := FCamera.Up;
+    Right := TVector3.CrossProduct(FCamera.Direction, Up).Normalize;
+    Up := TVector3.CrossProduct(Right, FCamera.Direction).Normalize;
+  end else
+  begin
+    Right := Vector3(1, 0, 0);
+    Up := Vector3(0, 1, 0);
+  end;
+  FTimeField.Send(FTime - FBatchBase);
+  FRightField.Send(Right);
+  FUpField.Send(Up);
 end;
 
 procedure TQuakeParticleManager.Clear;
@@ -483,18 +615,37 @@ begin
   FParticles.Clear;
   FExplosions.Clear;
   FGibs.Clear;
+  FBatchDirty := True;
 end;
 
 procedure TQuakeParticleManager.Update(const SecondsPassed: Single);
 var
   I: Integer;
 begin
+  FTime := FTime + SecondsPassed;
   for I := FParticles.Count - 1 downto 0 do
   begin
     if not FParticles[I].Update(SecondsPassed) then
+    begin
       FParticles.Delete(I);
+      Inc(FBatchExpired);
+    end;
   end;
-  RebuildBatch;
+  if FBatchScene <> nil then
+  begin
+    { Expired particles stay in the mesh (drawn as nothing) until particles
+      are added or most of the mesh has expired }
+    if FParticles.Count = 0 then
+      FBatchDirty := FBatchCount > 0
+    else
+    if FBatchExpired * 2 > FBatchCount then
+      FBatchDirty := True;
+    if FBatchDirty then
+      RebuildBatch;
+    FBatchScene.Exists := FBatchCount > 0;
+    if FBatchCount > 0 then
+      UpdateBatchUniforms;
+  end;
   UpdateGibs(SecondsPassed);
   for I := FExplosions.Count - 1 downto 0 do
   begin
@@ -529,14 +680,14 @@ begin
       Vector3((Random - 0.5) * 100.0, (Random - 0.5) * 100.0, (Random - 0.5) * 100.0);
     P := TQuakeParticle.Create(FParent, Pos, Vel, pkSparks, 0.3 + Random * 0.2, 1.5, 0.5,
       Vector3(1.0, 0.85, 0.3));
-    FParticles.Add(P);
+    AddParticle(P);
   end;
 
   { Smoke puff }
   Vel := Normal * 20.0 + Vector3(0, 30.0, 0);
   P := TQuakeParticle.Create(FParent, Pos, Vel, pkSmoke, 0.5, 2.0, 8.0,
     Vector3(0.5, 0.5, 0.5));
-  FParticles.Add(P);
+  AddParticle(P);
 end;
 
 procedure TQuakeParticleManager.SpawnBlood(const Pos, Normal: TVector3);
@@ -554,7 +705,7 @@ begin
       Vector3((Random - 0.5) * 80.0, (Random - 0.5) * 80.0, (Random - 0.5) * 80.0);
     P := TQuakeParticle.Create(FParent, Pos, Vel, pkBlood, 0.4 + Random * 0.3, 2.0, 0.8,
       Vector3(0.75, 0.05, 0.05));
-    FParticles.Add(P);
+    AddParticle(P);
   end;
 end;
 
@@ -573,7 +724,7 @@ begin
   begin
     P := TQuakeParticle.Create(FParent, Pos, Vector3(0, 20.0, 0), pkFireball, 0.4, 6.0, 24.0,
       Vector3(1.0, 0.5, 0.1));
-    FParticles.Add(P);
+    AddParticle(P);
   end;
 
   { Flying fiery debris }
@@ -582,7 +733,7 @@ begin
     Vel := Vector3((Random - 0.5) * 300.0, (Random * 200.0 + 50.0), (Random - 0.5) * 300.0);
     P := TQuakeParticle.Create(FParent, Pos, Vel, pkSparks, 0.6 + Random * 0.4, 3.0, 0.5,
       Vector3(1.0, 0.6, 0.1));
-    FParticles.Add(P);
+    AddParticle(P);
   end;
 end;
 
@@ -600,7 +751,7 @@ begin
     Vel := Vector3((Random - 0.5) * 80.0, Random * 250.0 + 80.0, (Random - 0.5) * 80.0);
     P := TQuakeParticle.Create(FParent, Pos, Vel, pkTeleport, 0.8 + Random * 0.4, 2.5, 0.5,
       Vector3(0.2, 0.9, 0.95));
-    FParticles.Add(P);
+    AddParticle(P);
   end;
 end;
 
@@ -632,7 +783,7 @@ begin
     P := TQuakeParticle.Create(FParent, Pos, Dir * (80 + Random * 120) +
       Vector3((Random - 0.5) * 120, (Random - 0.5) * 120, (Random - 0.5) * 120),
       PKind, 0.4 + Random * 0.4, 1.0, 0.3, Col);
-    FParticles.Add(P);
+    AddParticle(P);
   end;
 end;
 
@@ -661,12 +812,12 @@ begin
     Offset := (Side * Cos(A) + Up * Sin(A)) * 3;
     P := TQuakeParticle.Create(FParent, FromPos + Dir * D + Offset, Offset * 2, pkTrail,
       0.8, 0.9, 0.3, Vector3(0.3, 0.5, 1.0));
-    FParticles.Add(P);
+    AddParticle(P);
     if Round(D) mod 24 < 8 then
     begin
       P := TQuakeParticle.Create(FParent, FromPos + Dir * D, Vector3(0, 0, 0), pkTrail,
         0.6, 0.7, 0.2, Vector3(0.9, 0.9, 1.0));
-      FParticles.Add(P);
+      AddParticle(P);
     end;
     D := D + 8;
   end;
@@ -684,7 +835,7 @@ begin
     P := TQuakeParticle.Create(FParent, Pos, Normal * (60 + Random * 80) +
       Vector3((Random - 0.5) * 120, (Random - 0.5) * 120, (Random - 0.5) * 120),
       pkSparks, 0.3 + Random * 0.2, 1.5, 0.4, Vector3(1.0, 0.9, 0.2));
-    FParticles.Add(P);
+    AddParticle(P);
   end;
 end;
 
@@ -866,7 +1017,7 @@ begin
   D := 0;
   while D < Len do
   begin
-    FParticles.Add(TQuakeParticle.Create(FParent, FromPos + Dir * D, TVector3.Zero, pkTrail,
+    AddParticle(TQuakeParticle.Create(FParent, FromPos + Dir * D, TVector3.Zero, pkTrail,
       0.1, 1.5, 1.5, Color));
     D := D + 6;
   end;
@@ -884,14 +1035,14 @@ begin
   begin
     P := TQuakeParticle.Create(FParent, Pos, Vector3(0, 0, 0), pkFireball, 0.6, 10, 60,
       Vector3(0.3, 1.0, 0.3));
-    FParticles.Add(P);
+    AddParticle(P);
   end;
   for I := 1 to 30 do
   begin
     P := TQuakeParticle.Create(FParent, Pos, Vector3((Random - 0.5) * 500,
       (Random - 0.5) * 500, (Random - 0.5) * 500), pkTrail, 0.8 + Random * 0.4, 3, 0.5,
       Vector3(0.4, 1.0, 0.4));
-    FParticles.Add(P);
+    AddParticle(P);
   end;
 end;
 

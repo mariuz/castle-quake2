@@ -3197,6 +3197,35 @@ begin
     (Pos('I:21,', BenchmarkScript) > 0), 'benchmark script tours items 0..21 between BS and BE');
 end;
 
+{ Particles are moved by a vertex shader from their spawn data (PositionAt);
+  it must stay where the old per-frame integration put them }
+procedure TestParticleMotion;
+var
+  P: TQuakeParticle;
+  Pos, Vel: TVector3;
+  I: Integer;
+begin
+  P := TQuakeParticle.Create(nil, Vector3(10, 20, 30), Vector3(100, 150, -50), pkSparks,
+    0.5, 1.5, 0.5, Vector3(1, 1, 1));
+  try
+    Check(TVector3.PerfectlyEquals(P.PositionAt(0), P.Position), 'a particle is drawn at its spawn point first');
+    { 30 frames of 1/60 s, integrated like the old RebuildBatch's Update }
+    Pos := P.Position;
+    Vel := P.Velocity;
+    for I := 1 to 30 do
+    begin
+      Vel.Y := Vel.Y - P.Gravity / 60;
+      Pos := Pos + Vel / 60;
+    end;
+    Check(PointsDistance(Pos, P.PositionAt(0.5)) < 2,
+      'the shader''s particle motion matches frame-by-frame integration within 2 units');
+    Check(P.PositionAt(0.5).Y < P.Position.Y + 150 * 0.5, 'sparks fall');
+    Check(P.Update(0.4) and not P.Update(0.2), 'a particle expires after its life');
+  finally
+    P.Free;
+  end;
+end;
+
 procedure TestTick;
 var
   C: TQuakeTickClock;
@@ -3543,6 +3572,7 @@ begin
   TestModSupport;
   TestBenchmark;
   TestTick;
+  TestParticleMotion;
   TestWebParams;
   TestInstalls;
   TestInsane;

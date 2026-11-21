@@ -33,7 +33,7 @@ How Quake 2 game data is parsed and played in the **Castle Game Engine (CGE)**, 
                GameViewPlay (TCastleView)
                ├── TCastleViewport + TCastleWalkNavigation + TCastleBackground (skybox)
                ├── QuakeHud (pics/*.pcx via TDrawableImage)
-               ├── QuakeParticles (one batched scene of camera-facing quads)
+               ├── QuakeParticles (one batched scene of camera-facing quads, moved by a vertex shader)
                └── QuakeConsole / QuakeMenu
 ```
 
