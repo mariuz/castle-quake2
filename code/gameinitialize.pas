@@ -30,6 +30,8 @@ var
   CmdSkill: Integer = -1;
   { --fps (or ?fps=1): show the frame rate from the start }
   CmdShowFps: Boolean;
+  { --render-scale: percent of the window's resolution for the 3D view (0: the option) }
+  CmdRenderScale: Integer;
   { -basedir <dir>; "auto" / "gog" / "steam" find an installation }
   CmdBaseDir: String;
   { --no-detect: don't look for an installed Quake II }
@@ -190,6 +192,7 @@ var
   I: Integer;
   LoadedAny, ModFound: Boolean;
   Roots: TStringList;
+  CmdRenderScaleValue: Single;
 begin
   AddWebAddressParameters;
   I := 1;
@@ -250,6 +253,15 @@ begin
     begin
       LightmapGamma := StrToFloatDef(Parameters[I + 1], LightmapGamma);
       GammaFromCommandLine := True;
+      Inc(I);
+    end else
+    if (Parameters[I] = '--render-scale') and (I + 1 <= Parameters.High) then
+    begin
+      { A percent (50) or a fraction (0.5) }
+      CmdRenderScaleValue := StrToFloatDef(Parameters[I + 1], 100, DefaultFormatSettings);
+      if CmdRenderScaleValue <= 1 then
+        CmdRenderScaleValue := CmdRenderScaleValue * 100;
+      CmdRenderScale := EnsureRange(Round(CmdRenderScaleValue), MinRenderScale, MaxRenderScale);
       Inc(I);
     end else
     if ((Parameters[I] = '-game') or (Parameters[I] = '--game')) and (I + 1 <= Parameters.High) then
@@ -373,6 +385,7 @@ begin
   ViewPlay := TViewPlay.Create(Application);
   {$endregion 'Castle View Creation'}
   ViewPlay.ShowFpsAtStart := CmdShowFps;
+  ViewPlay.RenderScaleOverride := CmdRenderScale;
   ViewPlay.OffscreenScreenshots := CmdOffscreenShots;
 
   if AutoTestMap <> '' then

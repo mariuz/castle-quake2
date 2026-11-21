@@ -19,7 +19,7 @@ type
 
   { Rows of the Options page }
   TOptionItem = (oiCamera, oiSensitivity, oiInvert, oiViewBob, oiFieldOfView, oiWidescreenFov, oiInterfaceSize,
-    oiSmoothTextures, oiBrightness, oiSoundVolume, oiMusicVolume, oiControls, oiBack);
+    oiSmoothTextures, oiBrightness, oiRenderScale, oiSoundVolume, oiMusicVolume, oiControls, oiBack);
 
 const
   { Map name the menu passes for a new random level }
@@ -176,6 +176,8 @@ begin
         { These two apply when a map is loaded (lightmaps and textures are built then) }
         FItems.Add('Smooth Textures: [' + OnOff(Settings.SmoothTextures) + ']');
         FItems.Add(Format('Brightness: [%.1f]', [Settings.Brightness], DefaultFormatSettings));
+        { The 3D view's resolution (applies at once) }
+        FItems.Add(Format('Render Scale: [%d%%]', [Settings.RenderScale]));
         FItems.Add(Format('Sound Volume: [%d%%]', [Settings.SoundVolume]));
         FItems.Add(Format('Music Volume: [%d%%]', [Settings.MusicVolume]));
         FItems.Add('Controls...');
@@ -249,6 +251,10 @@ begin
     oiBrightness:
       Settings.Brightness := EnsureRange(Round((Settings.Brightness + 0.1 * Delta) * 10) / 10,
         MinBrightness, MaxBrightness);
+    oiRenderScale:
+      { 30, 40 .. 100; a value set in the console (25..100) snaps to the tens }
+      Settings.RenderScale := EnsureRange(((Settings.RenderScale + 10 * Delta) div 10) * 10,
+        30, MaxRenderScale);
     oiSoundVolume:
       Settings.SoundVolume := EnsureRange(Settings.SoundVolume + 10 * Delta, 0, 100);
     oiMusicVolume:

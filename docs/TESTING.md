@@ -74,6 +74,7 @@ On Linux without a display, run under `xvfb-run -a -s "-screen 0 1600x900x24"`, 
 | `B:key` | Press and release a key (`B:escape`, `B:down`, `B:enter`... to drive the menu) |
 | `GP:lx ly rx ry lt rt`, `GP:` | Hold a virtual gamepad's sticks and triggers; release them |
 | `GB:button`, `GH:button` | Press a gamepad button; hold / release one (`south`, `east`, `west`, `north`, `lb`, `rb`, `ls`, `rs`, `up`, `down`, `left`, `right`, `menu`, `view`, `share`) |
+| `O:renderscale N` | Draw the 3D view at N % of the window's resolution (`--render-scale N` for a whole run; the log says `Render scale N%: 3D view drawn at WxH`) |
 | `TD:x y finger`, `TM:x y finger`, `TU:finger` | Touch down / move / up (window fractions from the bottom left; run with `--touch` to show the touch controls) |
 | `IN:time yaw pitch forward side buttons [x y z]` | A recorded view and held inputs (see below) |
 | `SY:0` | Don't correct a replay's drift |

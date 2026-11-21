@@ -14,6 +14,9 @@ const
   DefaultBrightness = 1.2;
   MinBrightness = 0.8;
   MaxBrightness = 2.0;
+  { Render scale option range, in percent of the window's pixels }
+  MinRenderScale = 25;
+  MaxRenderScale = 100;
 
 type
   { Actions with a configurable key (weapon number keys stay fixed) }
@@ -50,6 +53,9 @@ type
     { Lightmap brightness: the gamma applied to lightmaps when a map is
       loaded (1.2 by default; -gamma on the command line overrides it) }
     Brightness: Single;
+    { Percent of the window's width and height the 3D view is drawn at
+      (then scaled up to the window); 100 = full resolution }
+    RenderScale: Integer;
     { Percent }
     SoundVolume, MusicVolume: Integer;
     { Size of the menu, console and HUD text: 0 auto (larger on touch
@@ -227,6 +233,7 @@ begin
   WidescreenFov := DefaultWidescreenFov;
   SmoothTextures := False;
   Brightness := DefaultBrightness;
+  RenderScale := MaxRenderScale;
   SoundVolume := 100;
   MusicVolume := 70;
   InterfaceSize := 0;
@@ -268,6 +275,7 @@ begin
   WidescreenFov := C.GetValue('quake2/widescreen_fov', DefaultWidescreenFov);
   SmoothTextures := C.GetValue('quake2/smooth_textures', False);
   Brightness := EnsureRange(C.GetFloat('quake2/brightness', DefaultBrightness), MinBrightness, MaxBrightness);
+  RenderScale := EnsureRange(C.GetValue('quake2/render_scale', MaxRenderScale), MinRenderScale, MaxRenderScale);
   SoundVolume := EnsureRange(C.GetValue('quake2/sound_volume', 100), 0, 100);
   MusicVolume := EnsureRange(C.GetValue('quake2/music_volume', 70), 0, 100);
   InterfaceSize := EnsureRange(C.GetValue('quake2/interface_size', 0), 0, High(InterfaceSizeNames));
@@ -303,6 +311,7 @@ begin
   C.SetDeleteValue('quake2/widescreen_fov', WidescreenFov, DefaultWidescreenFov);
   C.SetDeleteValue('quake2/smooth_textures', SmoothTextures, False);
   C.SetDeleteFloat('quake2/brightness', Brightness, DefaultBrightness);
+  C.SetDeleteValue('quake2/render_scale', RenderScale, MaxRenderScale);
   C.SetDeleteValue('quake2/sound_volume', SoundVolume, 100);
   C.SetDeleteValue('quake2/music_volume', MusicVolume, 70);
   C.SetDeleteValue('quake2/interface_size', InterfaceSize, 0);

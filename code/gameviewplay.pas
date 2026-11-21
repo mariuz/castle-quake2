@@ -48,6 +48,8 @@ type
     FWorld: TQuakeWorld;
     FWaterWarp: TScreenEffectNode;
     FWaterWarpTime: TSFFloat;
+    { The 3D view drawn below full resolution (RenderScale < 100) }
+    FScaledView: TDrawableImage;
     FWaterWarpClock: Single;
     { Quit on the next Update (the map report) }
     FQuitPending: Boolean;
@@ -152,7 +154,17 @@ type
     function SpotStandsOnBrushes(const Eye: TVector3): Boolean;
     procedure QuitNow;
     procedure RunMapReport;
+    { Draw MainViewport and WeaponViewport into FScaledView (at
+      RenderScale percent of their size), then that image over their
+      rectangle }
+    procedure RenderScaled3D(const ViewportRect: TRectangle);
+    { Effective render scale in percent: RenderScaleOverride or the option }
+    function RenderScale: Integer;
+  protected
+    procedure InternalRenderLoop(const ViewportRect: TRectangle); override;
   public
+    { --render-scale: overrides Settings.RenderScale (percent) when > 0 }
+    RenderScaleOverride: Integer;
     { --fps / ?fps=1: show the frame rate counter from the start }
     ShowFpsAtStart: Boolean;
     { --offscreen-shots: autotest screenshots drawn into a framebuffer, so a
@@ -573,6 +585,109 @@ begin
   end;
 end;
 
+function TViewPlay.RenderScale: Integer;
+begin
+  if RenderScaleOverride > 0 then
+    Result := RenderScaleOverride
+  else
+    Result := Settings.RenderScale;
+end;
+
+procedure TViewPlay.InternalRenderLoop(const ViewportRect: TRectangle);
+var
+  I, J: Integer;
+  Group, C: TCastleUserInterface;
+  Full: TFloatRectangle;
+begin
+  { The design's root holds both viewports, the HUD, the console and the
+    menu; only the viewports are drawn at the lower resolution. The root
+    draws nothing itself, so its children are drawn here in its place. }
+  Group := nil;
+  if (RenderScale < MaxRenderScale) and (MainViewport <> nil) and (WeaponViewport <> nil) and
+     (MainViewport.Parent <> nil) and (MainViewport.Parent.Parent = Self) and
+     (WeaponViewport.Parent = MainViewport.Parent) and
+     (not MainViewport.Parent.Border.Exists) then
+  begin
+    Full := MainViewport.RenderRect;
+    { The viewport is drawn at the image's origin }
+    if (Abs(Full.Left) < 0.5) and (Abs(Full.Bottom) < 0.5) and (Full.Width >= 1) and (Full.Height >= 1) then
+      Group := MainViewport.Parent;
+  end;
+  if Group = nil then
+  begin
+    inherited;
+    Exit;
+  end;
+  for I := 0 to ControlsCount - 1 do
+  begin
+    C := Controls[I];
+    if C <> Group then
+      C.InternalRecursiveRender(ViewportRect)
+    else
+    if Group.Exists then
+      for J := 0 to Group.ControlsCount - 1 do
+      begin
+        C := Group.Controls[J];
+        if C = MainViewport then
+          RenderScaled3D(ViewportRect)
+        else
+        if C <> WeaponViewport then
+          C.InternalRecursiveRender(ViewportRect);
+      end;
+  end;
+end;
+
+procedure TViewPlay.RenderScaled3D(const ViewportRect: TRectangle);
+
+  { Shrink both viewports to the bottom-left W x H pixels (their projection
+    keeps the aspect ratio), or give them back their full size }
+  procedure SetShrink(const DX, DY: Single);
+  begin
+    MainViewport.Border.Right := DX;
+    MainViewport.Border.Top := DY;
+    WeaponViewport.Border.Right := DX;
+    WeaponViewport.Border.Top := DY;
+  end;
+
+var
+  Full: TFloatRectangle;
+  W, H: Integer;
+begin
+  if not MainViewport.Exists then
+    Exit;
+  Full := MainViewport.RenderRect;
+  W := Max(1, Round(Full.Width * RenderScale / 100));
+  H := Max(1, Round(Full.Height * RenderScale / 100));
+  if (FScaledView = nil) or (FScaledView.Width <> Cardinal(W)) or (FScaledView.Height <> Cardinal(H)) then
+  begin
+    FreeAndNil(FScaledView);
+    FScaledView := TDrawableImage.Create(TRGBImage.Create(W, H), Settings.SmoothTextures, True);
+    WritelnLog('GameViewPlay', 'Render scale %d%%: 3D view drawn at %dx%d for %dx%d',
+      [RenderScale, W, H, Round(Full.Width), Round(Full.Height)]);
+  end;
+  FScaledView.SmoothScaling := Settings.SmoothTextures;
+
+  SetShrink((Full.Width - W) / UIScale, (Full.Height - H) / UIScale);
+  try
+    FScaledView.RenderToImageBegin;
+    try
+      RenderContext.Clear([cbColor, cbDepth], Black);
+      MainViewport.InternalRecursiveRender(Rectangle(0, 0, W, H));
+      if WeaponViewport.Exists then
+        WeaponViewport.InternalRecursiveRender(Rectangle(0, 0, W, H));
+    finally
+      FScaledView.RenderToImageEnd;
+    end;
+  finally
+    SetShrink(0, 0);
+  end;
+  { What TCastleContainer.RenderControlPrepare sets up for 2D drawing }
+  RenderContext.DepthTest := False;
+  RenderContext.Viewport := ViewportRect;
+  OrthoProjection(FloatRectangle(0, 0, ViewportRect.Width, ViewportRect.Height));
+  FScaledView.Draw(Full);
+end;
+
 procedure TViewPlay.Stop;
 begin
   if FRecorder <> nil then
@@ -582,6 +697,7 @@ begin
   Particles.SetParent(nil);
   { The world references design components, which are freed by inherited Stop }
   FreeAndNil(FWorld);
+  FreeAndNil(FScaledView);
   { Owned by MainViewport's screen effects, freed with the design }
   FWaterWarp := nil;
   FWaterWarpTime := nil;
@@ -2252,6 +2368,18 @@ begin
     finally
       Words.Free;
     end;
+  end else
+  if Cmd = 'renderscale' then
+  begin
+    { renderscale [25..100]: percent of the window's resolution the 3D view
+      is drawn at (Options -> Render Scale) }
+    if Args <> '' then
+    begin
+      Settings.RenderScale := EnsureRange(StrToIntDef(Args, Settings.RenderScale), MinRenderScale, MaxRenderScale);
+      RenderScaleOverride := 0;
+      Settings.Save;
+    end;
+    Hud.ShowMessage(Format('renderscale %d', [RenderScale]), 2);
   end else
   if Cmd = 'horplus' then
   begin

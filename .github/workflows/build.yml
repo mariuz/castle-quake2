@@ -145,7 +145,7 @@ jobs:
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/gamepad --demo "O:notarget,W:1.5,K,C:2,W:0.5,GP:0 1 0.6 0 0 1,W:1.2,GP:,W:0.3,V,GB:menu,W:0.3,S,Q" > test_output/gamepad.log 2>&1
           ! grep -q "Demo: Player at 128 46 320 " test_output/gamepad.log && grep -q "Demo: Player at" test_output/gamepad.log && ! grep -q Exception test_output/gamepad.log || { echo "::error::Virtual gamepad did not move the player"; exit 1; }
           # Gamepad rebinding: Options -> Controls -> Gamepad Buttons, bind Jump to Y with the pad; then A (grenades) selects hand grenades, holding Y jumps
-          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/pad --demo "O:notarget,W:1.5,K,B:escape,B:down,B:down,B:enter,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:enter,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:enter,GB:south,GB:north,W:0.2,S,B:escape,B:escape,B:escape,B:escape,O:padbind,GB:south,W:1.5,V,GH:north,W:0.3,S,GH:north,Q" > test_output/pad.log 2>&1
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/pad --demo "O:notarget,W:1.5,K,B:escape,B:down,B:down,B:enter,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:enter,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:enter,GB:south,GB:north,W:0.2,S,B:escape,B:escape,B:escape,B:escape,O:padbind,GB:south,W:1.5,V,GH:north,W:0.3,S,GH:north,Q" > test_output/pad.log 2>&1
           grep -q "Menu: Gamepad Jump: north" test_output/pad.log && grep -q "Gamepad: grenade: south" test_output/pad.log && grep -q "Gun: weapon 11 " test_output/pad.log && grep "pad_2.png" test_output/pad.log | grep -qv "camera 128 46.03125 320" && ! grep -q Exception test_output/pad.log || { echo "::error::Gamepad button rebinding"; exit 1; }
           # Touch controls (--touch, simulated fingers): the move stick walks, FIRE shoots
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --touch --autotest demo1 test_output/touch --demo "O:notarget,W:1.5,K,C:2,W:0.8,TD:0.2 0.3 0,TM:0.2 0.45 0,W:0.8,TU:0,TD:0.88 0.14 2,W:0.6,TU:2,W:0.2,V,S,Q" > test_output/touch.log 2>&1
@@ -240,6 +240,9 @@ jobs:
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/optbase --demo "O:notarget,W:1,L:demo1,W:2,S,Q" > test_output/optbase.log 2>&1
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/optvideo --demo "O:notarget,W:1,B:escape,B:down,B:down,B:enter,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:enter,B:down,B:right,B:right,B:right,B:right,W:0.2,B:escape,B:escape,L:demo1,W:2,S,Q" > test_output/optvideo.log 2>&1
           tests/castle-quake2-tests --compare test_output/optbase_1.png test_output/optvideo_1.png test_output/optvideo_diff.png 100 2>&1 | grep "mean difference" | awk '{ print; exit !($(NF-2) + 0 > 3) }' && ! grep -q Exception test_output/optvideo.log || { echo "::error::The Smooth Textures / Brightness options did not change the picture (see optvideo.log)"; exit 1; }
+          # Render scale: Options -> Render Scale 50% draws the 3D view at 800x450 and scales it up; the picture keeps its framing (close to optbase's)
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/optscale --demo "O:notarget,W:1,B:escape,B:down,B:down,B:enter,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:down,B:left,B:left,B:left,B:left,B:left,W:0.2,B:escape,B:escape,L:demo1,W:2,S,Q" > test_output/optscale.log 2>&1
+          grep -q "Render scale 50%: 3D view drawn at 800x450 for 1600x900" test_output/optscale.log && tests/castle-quake2-tests --compare test_output/optbase_1.png test_output/optscale_1.png test_output/optscale_diff.png 3 && ! grep -q Exception test_output/optscale.log || { echo "::error::Render scale from the Options menu (see optscale.log)"; exit 1; }
           # Export for other engines: every face on a node, and the exit (rand9 here, a map only this port makes) leads back to the exported map; the saved level keeps rand9
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/export --demo "O:editor generate 8,O:editor save exportci,O:editor export,O:editor close,Q" > test_output/export.log 2>&1
           C="$HOME/.config/castle-quake2"
@@ -410,6 +413,14 @@ jobs:
             echo "$map: $line"
             echo "| $map | ${line#Benchmark: } |" >> test_output/benchmark.md
           done
+          # demo1 with the 3D view drawn at half the resolution (render scale)
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --benchmark demo1 test_output/bench_demo1_50 --render-scale 50 > test_output/bench_demo1_50.log 2>&1
+          line=$(grep -o "Benchmark: .*" test_output/bench_demo1_50.log || true)
+          if [ -z "$line" ] || ! grep -q "Render scale 50%: 3D view drawn at 800x450" test_output/bench_demo1_50.log || grep -q Exception test_output/bench_demo1_50.log; then
+            echo "::error::No render scale 50% benchmark result for demo1 (see bench_demo1_50.log)"; exit 1
+          fi
+          echo "demo1 at 50%: $line"
+          echo "| demo1, render scale 50% | ${line#Benchmark: } |" >> test_output/benchmark.md
           cat test_output/benchmark.md >> "$GITHUB_STEP_SUMMARY"
       - name: Report stuck shutdowns
         if: always()
