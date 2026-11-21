@@ -29,7 +29,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeWebParams, QuakeInstalls, QuakeInsane, QuakeHud, Zipper;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeTick, QuakeWebParams, QuakeInstalls, QuakeInsane, QuakeHud, Zipper;
 
 var
   Passed, Failed: Integer;
@@ -3197,6 +3197,52 @@ begin
     (Pos('I:21,', BenchmarkScript) > 0), 'benchmark script tours items 0..21 between BS and BE');
 end;
 
+procedure TestTick;
+var
+  C: TQuakeTickClock;
+  N, I: Integer;
+  Logical, Prev, Cur, D: TTickPose;
+begin
+  C := TQuakeTickClock.Create;
+  try
+    { 60 frames of 1/60 s: 40 ticks, whatever the frame rate }
+    N := 0;
+    for I := 1 to 60 do
+      N := N + C.AddFrame(1 / 60);
+    Check(N = TicksPerSecond, Format('a second of 60 Hz frames runs %d ticks', [TicksPerSecond]));
+    N := 0;
+    for I := 1 to 144 do
+      N := N + C.AddFrame(1 / 144);
+    Check(N = TicksPerSecond, 'a second of 144 Hz frames runs the same ticks');
+    Check(C.AddFrame(5) = MaxTicksPerFrame, 'a long stall runs at most MaxTicksPerFrame ticks');
+    Check(C.AddFrame(0) = 0, 'and the rest of it is dropped');
+    Check(C.AddFrame(TickSeconds / 2) = 0, 'half a tick runs none');
+    Check(SameValue(C.Alpha, 0.5, 0.01), 'alpha is the part of a tick left over');
+  finally
+    C.Free;
+  end;
+
+  Prev.Translation := Vector3(0, 0, 0);
+  Prev.Rotation := Vector4(0, 1, 0, 0);
+  Cur.Translation := Vector3(10, 0, 0);
+  Cur.Rotation := Vector4(0, 1, 0, 1);
+  Logical := Cur;
+  D := TickDrawnPose(Logical, Prev, Cur, 0.25);
+  Check(TVector3.Equals(D.Translation, Vector3(2.5, 0, 0), 0.001), 'drawn a quarter of the way after the previous tick');
+  Check(SameValue(D.Rotation.W, 0.25, 0.001), 'turned a quarter of the way');
+  D := TickDrawnPose(Logical, Prev, Cur, 1);
+  Check(TVector3.Equals(D.Translation, Cur.Translation, 0.001), 'drawn at the last tick at alpha 1');
+  { Pushed by a lift after the tick: the push is kept }
+  Logical.Translation := Vector3(10, 5, 0);
+  D := TickDrawnPose(Logical, Prev, Cur, 0.5);
+  Check(TVector3.Equals(D.Translation, Vector3(5, 5, 0), 0.001), 'a push after the tick is kept');
+  { A teleport is not drawn halfway }
+  Cur.Translation := Vector3(500, 0, 0);
+  Logical := Cur;
+  D := TickDrawnPose(Logical, Prev, Cur, 0.5);
+  Check(TVector3.Equals(D.Translation, Cur.Translation, 0.001), 'a jump is drawn where it landed');
+end;
+
 procedure TestWebParams;
 var
   Ignored: TStringList;
@@ -3496,6 +3542,7 @@ begin
   TestLevelThemes;
   TestModSupport;
   TestBenchmark;
+  TestTick;
   TestWebParams;
   TestInstalls;
   TestInsane;

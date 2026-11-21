@@ -421,6 +421,15 @@ jobs:
           fi
           echo "demo1 at 50%: $line"
           echo "| demo1, render scale 50% | ${line#Benchmark: } |" >> test_output/benchmark.md
+          # demo1 with smaller / bigger culling regions (culling against draw calls)
+          for size in 512 2048; do
+            timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --benchmark demo1 test_output/bench_demo1_r$size --region-size $size > test_output/bench_demo1_r$size.log 2>&1
+            line=$(grep -o "Benchmark: .*" test_output/bench_demo1_r$size.log || true)
+            if [ -z "$line" ] || grep -q Exception test_output/bench_demo1_r$size.log; then
+              echo "::error::No region size $size benchmark result for demo1 (see bench_demo1_r$size.log)"; exit 1
+            fi
+            echo "| demo1, region size $size | ${line#Benchmark: } |" >> test_output/benchmark.md
+          done
           cat test_output/benchmark.md >> "$GITHUB_STEP_SUMMARY"
       - name: Report stuck shutdowns
         if: always()

@@ -255,6 +255,12 @@ begin
       GammaFromCommandLine := True;
       Inc(I);
     end else
+    if (Parameters[I] = '--region-size') and (I + 1 <= Parameters.High) then
+    begin
+      { World region cell size, to compare culling with draw calls }
+      WorldRegionSize := EnsureRange(StrToIntDef(Parameters[I + 1], 1024), 64, 65536);
+      Inc(I);
+    end else
     if (Parameters[I] = '--render-scale') and (I + 1 <= Parameters.High) then
     begin
       { A percent (50) or a fraction (0.5) }

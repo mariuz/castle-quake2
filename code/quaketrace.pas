@@ -73,6 +73,13 @@ type
 function BoxTraceAgainstBox(const Start, Stop, Mins, Maxs, BoxMins, BoxMaxs: TVector3;
   const BoxContents: Integer): TQuakeTrace;
 
+var
+  { World traces so far (TQuakeWorld.WorldTrace) and their time, for the
+    benchmark; TraceTiming turns the timing on }
+  TraceCount: Int64;
+  TraceSeconds: Double;
+  TraceTiming: Boolean;
+
 implementation
 
 uses

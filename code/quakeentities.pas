@@ -848,6 +848,11 @@ var
     monster boxes, the player's box; Quake coordinates), skipping Ignore.
     Set by TQuakeWorld; without it monsters use CGE collisions. }
   EntityTrace: TEntityTraceFunc;
+  { Can a sight line between two points (CGE space) be clear at all (the
+    PVS); set by TQuakeWorld. Sight traces are skipped when it says no. }
+  EntitySightPossible: function(const FromPos, ToPos: TVector3): Boolean of object;
+  { Sight traces skipped by EntitySightPossible, for the benchmark }
+  SightTracesSkipped: Int64;
 
 { Quake 2 bounding box of a monster class (mins / maxs around its origin),
   moved so the bottom is at -24 like every monster's origin here }
@@ -1523,6 +1528,11 @@ end;
 
 function TQuakeMonster.SightClear(const FromPos, ToPos: TVector3): Boolean;
 begin
+  if Assigned(EntitySightPossible) and not EntitySightPossible(FromPos, ToPos) then
+  begin
+    Inc(SightTracesSkipped);
+    Exit(False);
+  end;
   if Assigned(EntityTrace) then
     Result := EntityTrace(CgeToQuake(FromPos), CgeToQuake(ToPos), TVector3.Zero, TVector3.Zero,
       MASK_OPAQUE, Self).Fraction >= 1

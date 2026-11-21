@@ -58,7 +58,7 @@ On Linux without a display, run under `xvfb-run -a -s "-screen 0 1600x900x24"`, 
 | `S` | Screenshot (logs the FPS and the camera too) |
 | `V` | Log the state: movers (trains: position, running / waiting), props, lasers, monsters, the gun, the player (health, position, `player stuck`) |
 | `Q` | Quit |
-| `BS`, `BE` | Start / end a benchmark: logs frame time percentiles, game logic time and shapes drawn |
+| `BS`, `BE` | Start / end a benchmark: logs frame time percentiles, game logic time, shapes drawn and world traces |
 | `X`, `H` | Fire once; toggle holding fire |
 | `U`, `F`, `J` | Use; toggle the help computer; jump |
 | `C:slot` | Select a weapon (1 Blaster .. 10 BFG, 11 hand grenades, 12 ion ripper, 13 phalanx, 14 traps); wait about 1 s before firing it |
@@ -106,12 +106,15 @@ Add `S` (screenshot) or `V` (state log) lines anywhere to turn the recording int
 plays a fixed tour of the map (stands near items 0, 3, 6 … 21 and turns around at each, about 15 s) and logs one line:
 
 ```
-Benchmark: 477 frames in 17.4 s, frame ms p50 35.9 p95 50.5 p99 58.7 max 65.1 mean 36.5, logic ms 3.86, shapes 29
+Benchmark: 1042 frames in 16.1 s, frame ms p50 15.6 p95 20.7 p99 23.6 max 25.1 mean 15.5, logic ms 1.76, shapes 67, traces 77 (0.33 ms)
 ```
 
 - `frame ms`: wall time per frame (rendering included), as percentiles: p50 is the typical frame, p95 / p99 the slow ones you feel as stutter.
 - `logic ms`: the game's own update per frame (movement, monsters, triggers, culling, sounds).
 - `shapes`: shapes drawn per frame (about the number of draw calls).
+- `traces`: world traces per frame (`TQuakeWorld.WorldTrace`: player movement, monster moves and sight, shots) and the time they took.
+
+`--region-size <units>` (default 1024) changes the size of the world's culling regions: smaller ones cull more faces but split the texture batches into more shapes. CI's table has demo1 at 512 and 2048 too.
 
 The demo script actions `BS` and `BE` measure any part of a script the same way. CI benchmarks the three demo maps after the autotests and shows the table in the run's summary (and `benchmark.md` in the artifact). CI draws in software, so compare its numbers only with other CI runs; on a real GPU the frame times are far lower.
 

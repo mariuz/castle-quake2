@@ -16,7 +16,7 @@ uses
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound,
   QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad, QuakeTouch, QuakeExitWatchdog, QuakeBenchmark, CastleTimeUtils,
   X3DNodes, X3DFields, CastleRenderOptions,
-  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevel, QuakeLevelGen, QuakeLevelEditor, QuakeBspBuilder, QuakeTrace, fpjson, jsonparser, CastleDownload, CastleUriUtils;
+  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevel, QuakeLevelGen, QuakeLevelEditor, QuakeBspBuilder, QuakeTrace, QuakeTick, fpjson, jsonparser, CastleDownload, CastleUriUtils;
 
 type
   TCameraMode = (cmFirstPerson, cmNoclip);
@@ -50,6 +50,9 @@ type
     FWaterWarpTime: TSFFloat;
     { The 3D view drawn below full resolution (RenderScale < 100) }
     FScaledView: TDrawableImage;
+    { The fixed game tick, and the transforms it moves (drawn between ticks) }
+    FTickClock: TQuakeTickClock;
+    FTickList: TCastleTransformList;
     FWaterWarpClock: Single;
     { Quit on the next Update (the map report) }
     FQuitPending: Boolean;
@@ -158,6 +161,9 @@ type
       RenderScale percent of their size), then that image over their
       rectangle }
     procedure RenderScaled3D(const ViewportRect: TRectangle);
+    procedure RenderLoopScaled(const ViewportRect: TRectangle);
+    { Run the world's ticks for this frame }
+    procedure RunTicks(const SecondsPassed: Single);
     { Effective render scale in percent: RenderScaleOverride or the option }
     function RenderScale: Integer;
   protected
@@ -514,6 +520,8 @@ end;
 procedure TViewPlay.Start;
 begin
   inherited Start;
+  FTickClock := TQuakeTickClock.Create;
+  FTickList := TCastleTransformList.Create(False);
   if ShowFpsAtStart then
     LabelFps.Exists := True;
 
@@ -594,6 +602,23 @@ begin
 end;
 
 procedure TViewPlay.InternalRenderLoop(const ViewportRect: TRectangle);
+begin
+  { Monsters, items, props and projectiles drawn between their last two
+    ticks, back at their simulated poses right after drawing }
+  if (FWorld <> nil) and (FTickClock <> nil) and not EditorOpen then
+  begin
+    FWorld.CollectMovingTransforms(FTickList);
+    FTickClock.Apply(FTickList);
+  end;
+  try
+    RenderLoopScaled(ViewportRect);
+  finally
+    if FTickClock <> nil then
+      FTickClock.Restore;
+  end;
+end;
+
+procedure TViewPlay.RenderLoopScaled(const ViewportRect: TRectangle);
 var
   I, J: Integer;
   Group, C: TCastleUserInterface;
@@ -615,7 +640,7 @@ begin
   end;
   if Group = nil then
   begin
-    inherited;
+    inherited InternalRenderLoop(ViewportRect);
     Exit;
   end;
   for I := 0 to ControlsCount - 1 do
@@ -698,6 +723,8 @@ begin
   { The world references design components, which are freed by inherited Stop }
   FreeAndNil(FWorld);
   FreeAndNil(FScaledView);
+  FreeAndNil(FTickClock);
+  FreeAndNil(FTickList);
   { Owned by MainViewport's screen effects, freed with the design }
   FWaterWarp := nil;
   FWaterWarpTime := nil;
@@ -795,6 +822,8 @@ procedure TViewPlay.LoadLevel(const AMapName: String);
 var
   LevelName: String;
 begin
+  if FTickClock <> nil then
+    FTickClock.Reset;
   { "random" (the menus' Random Level): a new random level }
   LevelName := AMapName;
   if LevelName = RandomGameMap then
@@ -1398,7 +1427,7 @@ begin
           end;
         end;
       end;
-    WritelnLog('Demo', 'Monsters: %d alerted of %d alive, %d in solid', [P, Round(Val), SolidCount]);
+    WritelnLog('Demo', 'Monsters: %d alerted of %d alive, %d in solid, sight traces skipped by the PVS %d', [P, Round(Val), SolidCount, SightTracesSkipped]);
     for J := 0 to FWorld.Monsters.Count - 1 do
       if FWorld.Monsters[J].Alerted and FWorld.Monsters[J].IsAlive then
         WritelnLog('Demo', 'Hunting monster %d sees player %s dist %.0f', [J,
@@ -1623,6 +1652,8 @@ var
   Arr: TJSONArray;
   Dir: TVector3;
 begin
+  if FTickClock <> nil then
+    FTickClock.Reset;
   try
     Stream := Download(SaveUrl(SaveName));
     try
@@ -1983,7 +2014,13 @@ var
   Firing: Boolean;
   FrameStart: TTimerResult;
   FrameSeconds: Double;
+  TraceCount0: Int64;
+  TraceSeconds0: Double;
 begin
+  { Traces of this frame, player movement (in inherited Update) included }
+  TraceTiming := FBenchmark.Running;
+  TraceCount0 := TraceCount;
+  TraceSeconds0 := TraceSeconds;
   inherited Update(SecondsPassed, HandleInput);
   { Benchmark: wall time since the previous frame (rendering included) }
   FrameStart := Timer;
@@ -2033,7 +2070,8 @@ begin
   end;
 
   UpdateMovementInput(SecondsPassed);
-  FWorld.Update(SecondsPassed, PlayerMovement.AimPosition, PlayerMovement.AimDirection);
+  FWorld.UpdateFrame(SecondsPassed);
+  RunTicks(SecondsPassed);
   FWorld.SetGunAngles(PlayerMovement.GunAngles);
   FWorld.Geometry.UpdateVisibility(CgeToQuake(MainViewport.Camera.Translation));
   FWorld.CullEntities;
@@ -2044,7 +2082,7 @@ begin
     { The first frame after BS also holds the time before it }
     if not FBenchSkip then
       FBenchmark.AddFrame(FrameSeconds, TimerSeconds(Timer, FrameStart),
-        MainViewport.Statistics.ShapesRendered);
+        MainViewport.Statistics.ShapesRendered, TraceCount - TraceCount0, TraceSeconds - TraceSeconds0);
     FBenchSkip := False;
   end;
   Sounds.UpdateMixer(SecondsPassed, Settings.SoundVolume / 100);
@@ -2075,6 +2113,24 @@ begin
     FWorld.FireWeapon(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
   if FRecorder <> nil then
     SampleRecording(Firing);
+end;
+
+procedure TViewPlay.RunTicks(const SecondsPassed: Single);
+var
+  I, Count: Integer;
+begin
+  Count := FTickClock.AddFrame(SecondsPassed);
+  for I := 1 to Count do
+  begin
+    FWorld.CollectMovingTransforms(FTickList);
+    FTickClock.BeforeTick(FTickList);
+    FWorld.Update(TickSeconds, PlayerMovement.AimPosition, PlayerMovement.AimDirection);
+    FWorld.CollectMovingTransforms(FTickList);
+    FTickClock.AfterTick(FTickList);
+    { The frame acts on these first (a new map, a teleport, the intermission) }
+    if FWorld.RestartPending or FWorld.TeleportPending or FWorld.LevelExited then
+      Break;
+  end;
 end;
 
 function TViewPlay.Press(const Event: TInputPressRelease): Boolean;

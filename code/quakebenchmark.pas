@@ -21,17 +21,20 @@ type
     LogicMs: Double;
     { Mean shapes drawn per frame }
     Shapes: Double;
+    { Mean world traces per frame (TQuakeWorld.WorldTrace) and their time }
+    Traces, TraceMs: Double;
   end;
 
   TQuakeBenchmark = class
   private
-    FFrameMs, FLogicMs, FShapes: specialize TList<Double>;
+    FFrameMs, FLogicMs, FShapes, FTraces, FTraceMs: specialize TList<Double>;
     FRunning: Boolean;
   public
     constructor Create;
     destructor Destroy; override;
     procedure Start;
-    procedure AddFrame(const FrameSeconds, LogicSeconds: Double; const ShapesRendered: Cardinal);
+    procedure AddFrame(const FrameSeconds, LogicSeconds: Double; const ShapesRendered: Cardinal;
+      const Traces: Integer = 0; const TraceSeconds: Double = 0);
     function Stop: TBenchmarkResult;
     property Running: Boolean read FRunning;
   end;
@@ -46,7 +49,7 @@ function BenchmarkScript: String;
 function Percentile(const Values: array of Double; const P: Double): Double;
 
 { One log line: "Benchmark: N frames in S s, frame ms p50 ... p95 ... p99 ...
-  max ..., mean ..., logic ms ..., shapes ..." }
+  max ..., mean ..., logic ms ..., shapes ..., traces ... (... ms)" }
 function BenchmarkText(const R: TBenchmarkResult): String;
 
 implementation
@@ -98,8 +101,8 @@ end;
 
 function BenchmarkText(const R: TBenchmarkResult): String;
 begin
-  Result := Format('Benchmark: %d frames in %.1f s, frame ms p50 %.1f p95 %.1f p99 %.1f max %.1f mean %.1f, logic ms %.2f, shapes %.0f',
-    [R.Frames, R.Seconds, R.P50, R.P95, R.P99, R.MaxMs, R.MeanMs, R.LogicMs, R.Shapes],
+  Result := Format('Benchmark: %d frames in %.1f s, frame ms p50 %.1f p95 %.1f p99 %.1f max %.1f mean %.1f, logic ms %.2f, shapes %.0f, traces %.0f (%.2f ms)',
+    [R.Frames, R.Seconds, R.P50, R.P95, R.P99, R.MaxMs, R.MeanMs, R.LogicMs, R.Shapes, R.Traces, R.TraceMs],
     DefaultFormatSettings);
 end;
 
@@ -111,6 +114,8 @@ begin
   FFrameMs := specialize TList<Double>.Create;
   FLogicMs := specialize TList<Double>.Create;
   FShapes := specialize TList<Double>.Create;
+  FTraces := specialize TList<Double>.Create;
+  FTraceMs := specialize TList<Double>.Create;
 end;
 
 destructor TQuakeBenchmark.Destroy;
@@ -118,6 +123,8 @@ begin
   FFrameMs.Free;
   FLogicMs.Free;
   FShapes.Free;
+  FTraces.Free;
+  FTraceMs.Free;
   inherited Destroy;
 end;
 
@@ -126,23 +133,28 @@ begin
   FFrameMs.Clear;
   FLogicMs.Clear;
   FShapes.Clear;
+  FTraces.Clear;
+  FTraceMs.Clear;
   FRunning := True;
 end;
 
-procedure TQuakeBenchmark.AddFrame(const FrameSeconds, LogicSeconds: Double; const ShapesRendered: Cardinal);
+procedure TQuakeBenchmark.AddFrame(const FrameSeconds, LogicSeconds: Double; const ShapesRendered: Cardinal;
+  const Traces: Integer; const TraceSeconds: Double);
 begin
   if not FRunning then
     Exit;
   FFrameMs.Add(FrameSeconds * 1000);
   FLogicMs.Add(LogicSeconds * 1000);
   FShapes.Add(ShapesRendered);
+  FTraces.Add(Traces);
+  FTraceMs.Add(TraceSeconds * 1000);
 end;
 
 function TQuakeBenchmark.Stop: TBenchmarkResult;
 var
   Arr: array of Double;
   I: Integer;
-  Sum, LogicSum, ShapeSum: Double;
+  Sum, LogicSum, ShapeSum, TraceSum, TraceMsSum: Double;
 begin
   FRunning := False;
   Result := Default(TBenchmarkResult);
@@ -153,18 +165,24 @@ begin
   Sum := 0;
   LogicSum := 0;
   ShapeSum := 0;
+  TraceSum := 0;
+  TraceMsSum := 0;
   for I := 0 to FFrameMs.Count - 1 do
   begin
     Arr[I] := FFrameMs[I];
     Sum := Sum + FFrameMs[I];
     LogicSum := LogicSum + FLogicMs[I];
     ShapeSum := ShapeSum + FShapes[I];
+    TraceSum := TraceSum + FTraces[I];
+    TraceMsSum := TraceMsSum + FTraceMs[I];
     Result.MaxMs := Max(Result.MaxMs, FFrameMs[I]);
   end;
   Result.Seconds := Sum / 1000;
   Result.MeanMs := Sum / Result.Frames;
   Result.LogicMs := LogicSum / Result.Frames;
   Result.Shapes := ShapeSum / Result.Frames;
+  Result.Traces := TraceSum / Result.Frames;
+  Result.TraceMs := TraceMsSum / Result.Frames;
   Result.P50 := Percentile(Arr, 50);
   Result.P95 := Percentile(Arr, 95);
   Result.P99 := Percentile(Arr, 99);

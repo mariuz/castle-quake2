@@ -8,7 +8,7 @@ interface
 
 uses
   SysUtils, Classes, Math, Generics.Collections, fpjson, jsonparser,
-  CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions,
+  CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions, CastleTimeUtils,
   QuakePak, QuakeBsp, QuakeGeometry, QuakeMap, QuakeMd2, QuakePlayer, QuakeLight, QuakeSound, QuakeHud, QuakeSettings,
   QuakeParticles, QuakeEntities, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTurret, QuakeInsane;
 
@@ -243,6 +243,11 @@ type
     { Movers carry the player standing on them and push him when they
       move into him (Quake 2 SV_Push) }
     procedure PushPlayerByMovers;
+    { EntitySightPossible: the PVS, unless novis }
+    function SightPossible(const FromPos, ToPos: TVector3): Boolean;
+    { WorldTrace without counting it }
+    function DoWorldTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer;
+      const Ignore: TObject): TQuakeTrace;
     procedure UpdateGun(const SecondsPassed: Single);
     { Triggers that act on monsters (trigger_monsterjump) }
     procedure CheckMonsterTriggers;
@@ -340,7 +345,13 @@ type
     procedure UpdateDynamicLights;
 
     { Advance world simulation. PlayerPos is the camera (eye) position. }
+    { One game tick (QuakeTick.TickSeconds): the simulation }
     procedure Update(const SecondsPassed: Single; const PlayerPos, PlayerDir: TVector3);
+    { Every frame, before the ticks: movers (they carry the player, who moves
+      every frame), surface animation and particles }
+    procedure UpdateFrame(const SecondsPassed: Single);
+    { The transforms a tick may move, drawn between ticks (TQuakeTickClock) }
+    procedure CollectMovingTransforms(const List: TCastleTransformList);
     { Hide (Visible := False, still colliding) movers, monsters, items, props
       and lasers outside the PVS / connected areas of the geometry's last
       UpdateVisibility. }
@@ -545,6 +556,7 @@ begin
   FMoverPoses := specialize TDictionary<TQuakeMover, TMatrix4>.Create;
   PlayerBlockBox := TBox3D.Empty;
   EntityTrace := @WorldTrace;
+  EntitySightPossible := @SightPossible;
   FGun := TQuakeGun.Create;
   FGun.OnEvent := @GunEvent;
   FGun.OnAmmo := @GunAmmo;
@@ -578,6 +590,7 @@ begin
   FreeAndNil(FGun);
   FreeAndNil(FMoverPoses);
   EntityTrace := nil;
+  EntitySightPossible := nil;
   FreeAndNil(FCollision);
   FPickups.Free;
   FMonsters.Free;
@@ -4425,8 +4438,6 @@ begin
     end;
   end;
 
-  FGeometry.Update(SecondsPassed);
-
   { Delayed target firing }
   for I := FDelayed.Count - 1 downto 0 do
     if FDelayed[I].Time <= FTime then
@@ -4493,7 +4504,6 @@ begin
   FMap.UpdateSkyRotation(FStats.LevelTime);
   UpdateEarthquakes;
   AddProjectileLights;
-  Particles.Update(SecondsPassed);
   Lighting.Update(SecondsPassed);
   SetSurfaceLights;
 
@@ -4523,6 +4533,36 @@ begin
   A := WeaponDefs[FStats.CurrentWeapon].AmmoType;
   if FHud <> nil then
     FHud.Update(SecondsPassed, FStats, WeaponDefs[FStats.CurrentWeapon].Icon, AmmoIcons[A], FKeyIcons);
+end;
+
+procedure TQuakeWorld.UpdateFrame(const SecondsPassed: Single);
+begin
+  if FBsp = nil then
+    Exit;
+  FGeometry.Update(SecondsPassed);
+  Particles.Update(SecondsPassed);
+end;
+
+procedure TQuakeWorld.CollectMovingTransforms(const List: TCastleTransformList);
+var
+  M: TQuakeMonster;
+  Pickup: TQuakePickup;
+  Prop: TQuakeProp;
+  I: Integer;
+begin
+  List.Clear;
+  for M in FMonsters do
+    if (M.Transform <> nil) and not M.Dormant then
+      List.Add(M.Transform);
+  for Pickup in FPickups do
+    if (Pickup.Transform <> nil) and not Pickup.Collected then
+      List.Add(Pickup.Transform);
+  for Prop in FProps do
+    if Prop.Transform <> nil then
+      List.Add(Prop.Transform);
+  for I := 0 to FProjectiles.Count - 1 do
+    if FProjectiles[I].Transform <> nil then
+      List.Add(FProjectiles[I].Transform);
 end;
 
 function TQuakeWorld.ChainedWeapon(const Slot: Integer): Integer;
@@ -5504,6 +5544,24 @@ begin
 end;
 
 function TQuakeWorld.WorldTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer;
+  const Ignore: TObject): TQuakeTrace;
+var
+  T0: TTimerResult;
+begin
+  Inc(TraceCount);
+  if not TraceTiming then
+    Exit(DoWorldTrace(Start, Stop, Mins, Maxs, Mask, Ignore));
+  T0 := Timer;
+  Result := DoWorldTrace(Start, Stop, Mins, Maxs, Mask, Ignore);
+  TraceSeconds := TraceSeconds + TimerSeconds(Timer, T0);
+end;
+
+function TQuakeWorld.SightPossible(const FromPos, ToPos: TVector3): Boolean;
+begin
+  Result := (FGeometry = nil) or FGeometry.NoVis or FGeometry.MaybeVisible(FromPos, ToPos);
+end;
+
+function TQuakeWorld.DoWorldTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer;
   const Ignore: TObject): TQuakeTrace;
 var
   Mover: TQuakeMover;

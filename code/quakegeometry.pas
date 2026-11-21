@@ -311,6 +311,8 @@ type
     { CanHear cache: PHS row of FHearCluster }
     FHearPhs, FHearAreas: TBytes;
     FHearCluster: Integer;
+    { CanSeeCluster cache: PVS rows by cluster (nil = not decompressed yet) }
+    FSeePvs: array of TBytes;
     FAreaPortals: TQuakeAreaPortalList;
     procedure BuildVisRegions;
     procedure BuildAreaPortals;
@@ -350,6 +352,11 @@ type
       the PHS of FromPos's cluster and in an area connected to it through
       open portals (Quake 2 gi.inPHS + gi.AreasConnected) }
     function CanHear(const FromPos, ToPos: TVector3): Boolean;
+    { Can a line from FromPos to ToPos (map / CGE space) be clear at all:
+      ToPos's cluster in the PVS of FromPos's (gi.inPVS). False only when
+      no line between them can be clear, so a sight trace can be skipped.
+      Rows are decompressed once per cluster and kept. }
+    function MaybeVisible(const FromPos, ToPos: TVector3): Boolean;
     function VisRegionCount: Integer;
 
     { func_areaportal used by a trigger (not a door): toggle it }
@@ -398,6 +405,9 @@ var
   LightmapGamma: Single = 1.2;
   { -gamma was given: it wins over the Brightness option }
   GammaFromCommandLine: Boolean = False;
+  { World region grid cell size (Quake units, --region-size). Smaller cells
+    cull more, but split the texture batches into more shapes. }
+  WorldRegionSize: Integer = 1024;
 
 implementation
 
@@ -2055,11 +2065,9 @@ end;
 
 procedure TQuakeGeometry.BuildVisRegions;
 const
-  { Grid cell size (Quake units). Smaller cells cull more, but split the
-    texture batches into more shapes. }
-  RegionSize = 1024;
   CellBias = 1 shl 15;
 var
+  RegionSize: Integer;
   Mdl: TBSPModel;
   Cells: specialize TDictionary<Int64, Integer>;
   FaceIdx, V, Leaf, I, F, Cluster, Area, Region: Integer;
@@ -2067,6 +2075,7 @@ var
   Center: TVector3;
   Key: Int64;
 begin
+  RegionSize := Max(64, WorldRegionSize);
   FVisRegions.Clear;
   FFaceRegion := nil;
   FVisCluster := -1;
@@ -2291,6 +2300,24 @@ begin
   { Portal states as of the last UpdateVisibility (updated every frame) }
   FBsp.FloodAreas(FromArea, FPortalOpen, FHearAreas);
   Result := (FHearAreas[ToArea shr 3] and (1 shl (ToArea and 7))) <> 0;
+end;
+
+function TQuakeGeometry.MaybeVisible(const FromPos, ToPos: TVector3): Boolean;
+var
+  FromCluster, ToCluster: Integer;
+begin
+  if (FBsp = nil) or (FBsp.ClusterCount = 0) then
+    Exit(True);
+  FromCluster := FBsp.PointCluster(CgeToQuake(FromPos));
+  ToCluster := FBsp.PointCluster(CgeToQuake(ToPos));
+  { In a wall or outside the map: let the trace decide }
+  if (FromCluster < 0) or (ToCluster < 0) or (FromCluster = ToCluster) then
+    Exit(True);
+  if Length(FSeePvs) <> FBsp.ClusterCount then
+    SetLength(FSeePvs, FBsp.ClusterCount);
+  if FSeePvs[FromCluster] = nil then
+    FBsp.ClusterPVS(FromCluster, FSeePvs[FromCluster]);
+  Result := (FSeePvs[FromCluster][ToCluster shr 3] and (1 shl (ToCluster and 7))) <> 0;
 end;
 
 procedure TQuakeGeometry.SetNoVis(const Value: Boolean);
