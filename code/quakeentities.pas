@@ -455,7 +455,8 @@ type
 
   TPropKind = (pkExplobox, pkBanner, pkDeadSoldier, pkSatelliteDish, pkStroggShip, pkGibHead,
     pkViper, pkBigViper, pkViperBomb, pkBlackHole, pkEasterTank, pkEasterChick, pkEasterChick2,
-    pkTeleporter, pkCommanderBody, pkBoss3Stand, pkMineLight1, pkMineLight2);
+    pkTeleporter, pkCommanderBody, pkBoss3Stand, pkMineLight1, pkMineLight2,
+    pkRotatingLight, pkTransport);
 
   { misc_* decorations: exploding barrels, banners, corpses, the satellite dish,
     flying Strogg ships and vipers (follow path_corners when triggered), gib
@@ -488,6 +489,11 @@ type
     ThudPlayed: Boolean;
     { Re-light the model 10 times a second (light styles flicker) }
     LightTimer: Single;
+    { The Reckoning's rotating_light: spinning (EF_SPINNINGLIGHTS) while
+      LightOn, SpinAngle degrees past its yaw; with ALARM, misc/alarm.wav
+      every second once used (AlarmActive, AlarmTimer) }
+    LightOn, Alarm, AlarmActive: Boolean;
+    SpinAngle, AlarmTimer: Single;
     constructor CreateProp(const AParent: TCastleTransform; const AKind: TPropKind;
       const AEntity: TQuakeEntity);
     destructor Destroy; override;
@@ -513,6 +519,12 @@ type
     Entity: TQuakeEntity;
     Transform: TCastleTransform;
     Beam: TCastleBox;
+    { The Reckoning's target_mal_laser: drawn while on, it hurts only in
+      pulses, every Wait + 0.1 s (the first Wait + Delay after it is turned
+      on), with sparks where it stops from the second pulse on }
+    Mal: Boolean;
+    Wait, Delay, PulseTimer: Single;
+    Pulses: Integer;
     Origin, Direction: TVector3;
     Length: Single;
     constructor CreateLaser(const AParent: TCastleTransform; const AEntity: TQuakeEntity;
@@ -1456,7 +1468,8 @@ end;
 
 procedure TQuakeMonster.Spawn;
 begin
-  if not Dormant then
+  { Gibbed while dormant: removed for good (misc_nuke) }
+  if (not Dormant) or Gibbed then
     Exit;
   SetDormant(False);
   WritelnLog('QuakeEntities', 'Monster %s spawned (trigger_spawn)', [Transform.Name]);
@@ -3072,7 +3085,8 @@ const
     'models/monsters/tank/tris.md2', 'models/monsters/bitch/tris.md2',
     'models/monsters/bitch/tris.md2', 'models/objects/dmspot/tris.md2',
     'models/monsters/commandr/tris.md2', 'models/monsters/boss3/rider/tris.md2',
-    'models/objects/minelite/light1/tris.md2', 'models/objects/minelite/light2/tris.md2');
+    'models/objects/minelite/light1/tris.md2', 'models/objects/minelite/light2/tris.md2',
+    'models/objects/light/tris.md2', 'models/objects/ship/tris.md2');
 var
   Pos: TVector3;
   Flags, Frame: Integer;
@@ -3130,6 +3144,19 @@ begin
     pkViperBomb:
       { Invisible until triggered (misc_viper_bomb_use) }
       Transform.Exists := False;
+    pkRotatingLight:
+      begin
+        { SP_rotating_light: "health" 10, START_OFF 1, ALARM 2 }
+        Health := AEntity.GetInt('health', 10);
+        LightOn := (Flags and 1) = 0;
+        Alarm := (Flags and 2) <> 0;
+      end;
+    pkTransport:
+      begin
+        { SP_misc_transport: a train (TRAIN_START_ON forced) hidden until used }
+        Transform.Exists := False;
+        FlySpeed := AEntity.Speed(300);
+      end;
   end;
   { SP_misc_blackhole / eastertank / easterchick(2): frame ranges }
   AnimFirst := -1;
@@ -3186,6 +3213,23 @@ begin
   end;
   if (Model <> nil) and (Kind in [pkBanner, pkSatelliteDish]) then
     Model.Update(SecondsPassed);
+  if (Kind = pkRotatingLight) and LightOn then
+  begin
+    { EF_SPINNINGLIGHTS: the model and its light turn half a degree a
+      millisecond }
+    SpinAngle := FMod(SpinAngle + 500 * SecondsPassed, 360);
+    Transform.Rotation := Vector4(0, 1, 0, DegToRad(Entity.Angle + SpinAngle));
+    if AlarmActive then
+    begin
+      { rotating_light_alarm: misc/alarm.wav every second, ATTN_STATIC }
+      AlarmTimer := AlarmTimer - SecondsPassed;
+      if AlarmTimer <= 0 then
+      begin
+        AlarmTimer := AlarmTimer + 1;
+        Sounds.PlayAt('sound/misc/alarm.wav', Transform, 1, ATTN_STATIC, chVoice);
+      end;
+    end;
+  end;
   if (Model <> nil) and AnimOnce then
   begin
     { commander_body_think: frames 1..24 once, 10 a second; the thud on 22 }
@@ -3237,7 +3281,14 @@ begin
   Entity := AEntity;
   Origin := QuakeToCge(AEntity.Origin);
   Direction := ADirection;
-  FDamage := AEntity.GetInt('dmg', 100);
+  Mal := AEntity.ClassName = 'target_mal_laser';
+  FDamage := AEntity.GetInt('dmg', IfThen(Mal, 5, 100));
+  Wait := AEntity.GetFloat('wait', 0.1);
+  if Wait <= 0 then
+    Wait := 0.1;
+  Delay := AEntity.GetFloat('delay', 0.1);
+  if Delay <= 0 then
+    Delay := 0.1;
   Flags := AEntity.SpawnFlags;
   { spawnflags: 2 red, 4 green, 8 blue, 16 yellow, 32 orange }
   if (Flags and 2) <> 0 then Col := Vector4(1, 0.1, 0.1, 1)
@@ -3274,14 +3325,27 @@ begin
 end;
 
 procedure TQuakeLaser.SetLength(const Len: Single);
+var
+  Width: Single;
 begin
   Length := Max(1, Len);
-  Beam.Size := Vector3(Length, 1.5, 1.5);
+  { target_mal_laser: FAT (64) is 16 units wide, else 4 }
+  if Mal and ((Entity.SpawnFlags and 64) <> 0) then
+    Width := 6
+  else
+    Width := 1.5;
+  Beam.Size := Vector3(Length, Width, Width);
   Beam.Translation := Vector3(Length / 2, 0, 0);
 end;
 
 procedure TQuakeLaser.SetOn(const Value: Boolean);
 begin
+  if Value and not FOn then
+  begin
+    { target_mal_laser_on: the first pulse Wait + Delay later }
+    PulseTimer := Wait + Delay;
+    Pulses := 0;
+  end;
   FOn := Value;
   Transform.Exists := Value;
 end;

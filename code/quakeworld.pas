@@ -85,6 +85,9 @@ type
     FTimers: specialize TDictionary<TQuakeEntity, Single>; { func_timer -> next fire time (<0: off) }
     FDelayed: specialize TList<TDelayedTarget>;
     FCounters: specialize TDictionary<TQuakeEntity, Integer>;
+    { The Reckoning's func_object_repair (welding sparks) and misc_amb4
+      (world/amb4.wav): entity -> next time }
+    FPeriodic: specialize TDictionary<TQuakeEntity, Single>;
     { Quake II Remastered dynamic_light entities (not owned; on / off in
       FCounters: 1 / 0) }
     FDynamicLights: TQuakeEntityList;
@@ -321,6 +324,14 @@ type
     function EntityMoveDir(const Ent: TQuakeEntity): TVector3;
     { A transform at the entity origin, for positional one-shot sounds }
     procedure ActivateProp(const Prop: TQuakeProp);
+    { A ship / viper / transport starts towards the path_corner its target
+      names; False when there is none }
+    function StartPropFlight(const Prop: TQuakeProp): Boolean;
+    { The Reckoning's misc_viper_missile and misc_nuke, used }
+    procedure ViperMissileUse(const Ent: TQuakeEntity);
+    procedure NukeUse(const Ent: TQuakeEntity);
+    { The Reckoning's target_mal_laser, while on }
+    procedure UpdateMalLaser(const Laser: TQuakeLaser; const SecondsPassed: Single);
     { A Quake 2 temp entity (TE_*) at a CGE point: target_temp_entity, Use_Boss3 }
     procedure TempEntity(const Style: Integer; const Pos: TVector3);
     procedure DamageProp(const Prop: TQuakeProp; const Damage: Integer);
@@ -567,6 +578,7 @@ begin
   FProps := TQuakePropList.Create(True);
   FLasers := TQuakeLaserList.Create(True);
   FTimers := specialize TDictionary<TQuakeEntity, Single>.Create;
+  FPeriodic := specialize TDictionary<TQuakeEntity, Single>.Create;
   FDelayed := specialize TList<TDelayedTarget>.Create;
   FCounters := specialize TDictionary<TQuakeEntity, Integer>.Create;
   FDynamicLights := TQuakeEntityList.Create(False);
@@ -606,6 +618,7 @@ begin
   FTimers.Free;
   FDelayed.Free;
   FCounters.Free;
+  FPeriodic.Free;
   FDynamicLights.Free;
   FKeyIcons.Free;
   FLevelStates.Free;
@@ -646,6 +659,7 @@ begin
   FProps.Clear;
   FLasers.Clear;
   FTimers.Clear;
+  FPeriodic.Clear;
   FDelayed.Clear;
   FCounters.Clear;
   FDynamicLights.Clear;
@@ -1004,6 +1018,33 @@ begin
   else
   if CName = 'misc_easterchick2' then
     FProps.Add(TQuakeProp.CreateProp(FMap, pkEasterChick2, Ent))
+  else
+  if CName = 'rotating_light' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkRotatingLight, Ent))
+  else
+  if CName = 'misc_transport' then
+  begin
+    { SP_misc_transport: needs a target; it starts along its path at once
+      (TRAIN_START_ON), hidden, and the first use shows it }
+    if Ent.Target = '' then
+      WritelnLog('QuakeWorld', 'misc_transport without a target: removed')
+    else
+    begin
+      Prop := TQuakeProp.CreateProp(FMap, pkTransport, Ent);
+      FProps.Add(Prop);
+      StartPropFlight(Prop);
+    end;
+  end else
+  if CName = 'func_object_repair' then
+    { SP_object_repair: welding sparks every "delay" (1) seconds }
+    FPeriodic.AddOrSetValue(Ent, FTime + Ent.GetFloat('delay', 1))
+  else
+  if CName = 'misc_amb4' then
+    { SP_misc_amb4: world/amb4.wav 1 s after spawning, then every 2 s }
+    FPeriodic.AddOrSetValue(Ent, FTime + 1)
+  else
+  if CName = 'target_mal_laser' then
+    FLasers.Add(TQuakeLaser.CreateLaser(FMap, Ent, EntityMoveDir(Ent)))
   else
   if CName = 'target_laser' then
     FLasers.Add(TQuakeLaser.CreateLaser(FMap, Ent, EntityMoveDir(Ent)))
@@ -1704,7 +1745,20 @@ begin
       if Laser.Entity = Ent then
         Laser.IsOn := not Laser.IsOn;
   end else
-  if (Copy(CName, 1, 5) = 'misc_') or (CName = 'monster_commander_body') or (CName = 'monster_boss3_stand') then
+  if CName = 'target_mal_laser' then
+  begin
+    for Laser in FLasers do
+      if Laser.Entity = Ent then
+        Laser.IsOn := not Laser.IsOn;
+  end else
+  if CName = 'misc_viper_missile' then
+    ViperMissileUse(Ent)
+  else
+  if CName = 'misc_nuke' then
+    NukeUse(Ent)
+  else
+  if (Copy(CName, 1, 5) = 'misc_') or (CName = 'monster_commander_body') or (CName = 'monster_boss3_stand') or
+     (CName = 'rotating_light') then
   begin
     for Prop in FProps do
       if Prop.Entity = Ent then
@@ -2371,7 +2425,6 @@ end;
 
 procedure TQuakeWorld.ActivateProp(const Prop: TQuakeProp);
 var
-  List: TQuakeEntityList;
   Other: TQuakeProp;
 begin
   case Prop.Kind of
@@ -2418,29 +2471,117 @@ begin
           end;
       end;
     pkStroggShip, pkViper:
+      if StartPropFlight(Prop) then
+        Prop.Transform.Exists := True;
+    pkTransport:
+      { misc_strogg_ship_use: shown; train_use ignores the use (START_ON) }
+      Prop.Transform.Exists := True;
+    pkRotatingLight:
+      if not Prop.Destroyed then
       begin
-        List := FBsp.FindByTargetName(Prop.Entity.Target);
-        try
-          if List.Count > 0 then
-          begin
-            Prop.Transform.Exists := True;
-            Prop.FlyCorner := List[0];
-            Prop.FlyTarget := QuakeToCge(List[0].Origin);
-            Prop.Flying := True;
-          end;
-        finally
-          List.Free;
-        end;
+        { rotating_light_use: toggles the light; turning it on starts the
+          alarm (0.1 s later) when it has one }
+        Prop.LightOn := not Prop.LightOn;
+        Prop.AlarmActive := Prop.LightOn and Prop.Alarm;
+        Prop.AlarmTimer := 0.1;
       end;
     pkExplobox:
       DamageProp(Prop, 1000);
   end;
 end;
 
+function TQuakeWorld.StartPropFlight(const Prop: TQuakeProp): Boolean;
+var
+  List: TQuakeEntityList;
+begin
+  List := FBsp.FindByTargetName(Prop.Entity.Target);
+  try
+    Result := List.Count > 0;
+    if Result then
+    begin
+      Prop.FlyCorner := List[0];
+      Prop.FlyTarget := QuakeToCge(List[0].Origin);
+      Prop.Flying := True;
+    end;
+  finally
+    List.Free;
+  end;
+end;
+
+procedure TQuakeWorld.ViperMissileUse(const Ent: TQuakeEntity);
+var
+  Target: TQuakeEntity;
+  Start, Dir: TVector3;
+begin
+  { misc_viper_missile_use: one rocket ("dmg" 250, speed 500) at the entity
+    its target names, then it is gone }
+  if FCounters.ContainsKey(Ent) then
+    Exit;
+  FCounters.AddOrSetValue(Ent, 1);
+  Target := PickTarget(Ent.Target);
+  if Target = nil then
+  begin
+    WritelnLog('QuakeWorld', 'misc_viper_missile: no target "%s"', [Ent.Target]);
+    Exit;
+  end;
+  Start := QuakeToCge(Ent.Origin);
+  Dir := QuakeToCge(Target.Origin) - Start;
+  if Dir.IsZero then
+    Exit;
+  SpawnProjectile(pkRocket, Start, Dir.Normalize, 500, Ent.GetInt('dmg', 250), False);
+  { MZ2_CHICK_ROCKET_1's flash }
+  Sounds.PlayAtPoint('sound/chick/chkatck2.wav', Start);
+  Lighting.AddLight(Start, 200, Vector3(1, 0.5, 0.2), 0.1);
+  WritelnLog('QuakeWorld', 'misc_viper_missile fired at "%s"', [Ent.Target]);
+end;
+
+procedure TQuakeWorld.NukeUse(const Ent: TQuakeEntity);
+var
+  M: TQuakeMonster;
+  Prop: TQuakeProp;
+  Count: Integer;
+begin
+  { use_nuke, once: 100000 damage to the player, and every monster entity
+    (alive or dead, and the dead soldiers and gib heads) removed }
+  if FCounters.ContainsKey(Ent) then
+    Exit;
+  FCounters.AddOrSetValue(Ent, 1);
+  Count := 0;
+  for M in FMonsters do
+    if not (M.Dormant and M.Gibbed) then
+    begin
+      M.Gibbed := True;
+      M.SetDormant(True);
+      Inc(Count);
+    end;
+  for Prop in FProps do
+    if (Prop.Kind in [pkDeadSoldier, pkGibHead]) and not Prop.Destroyed then
+    begin
+      Prop.Destroyed := True;
+      Prop.Transform.Exists := False;
+    end;
+  WritelnLog('QuakeWorld', 'misc_nuke: %d monsters removed', [Count]);
+  DamagePlayer(100000, QuakeToCge(Ent.Origin), True);
+end;
+
 procedure TQuakeWorld.DamageProp(const Prop: TQuakeProp; const Damage: Integer);
 var
   Dmg: Integer;
 begin
+  if (Prop.Kind = pkRotatingLight) and not Prop.Destroyed then
+  begin
+    { rotating_light_killed: welding sparks, the light goes out, gone }
+    Prop.Health := Prop.Health - Damage;
+    if Prop.Health > 0 then
+      Exit;
+    TempEntity(TE_WELDING_SPARKS, Prop.Transform.Translation);
+    Prop.Destroyed := True;
+    Prop.LightOn := False;
+    Prop.AlarmActive := False;
+    Prop.Transform.Exists := False;
+    WritelnLog('QuakeWorld', 'rotating_light destroyed');
+    Exit;
+  end;
   if (Prop.Kind <> pkExplobox) or Prop.Destroyed then
     Exit;
   Prop.Health := Prop.Health - Damage;
@@ -2481,11 +2622,37 @@ begin
     Fire.Free;
   end;
 
+  { func_object_repair: welding sparks every "delay" seconds; misc_amb4:
+    world/amb4.wav everywhere every 2 s }
+  Fire := TQuakeEntityList.Create(False);
+  try
+    for Pair in FPeriodic do
+      if Pair.Value <= FTime then
+        Fire.Add(Pair.Key);
+    for Ent in Fire do
+      if Ent.ClassName = 'misc_amb4' then
+      begin
+        FPeriodic[Ent] := FTime + 2;
+        Sounds.PlayAtPoint('sound/world/amb4.wav', QuakeToCge(Ent.Origin), 1, ATTN_NONE);
+      end else
+      begin
+        FPeriodic[Ent] := FTime + Max(0.1, Ent.GetFloat('delay', 1));
+        TempEntity(TE_WELDING_SPARKS, QuakeToCge(Ent.Origin));
+      end;
+  finally
+    Fire.Free;
+  end;
+
   { target_laser: beam until the first wall, damages the player in it }
   for Laser in FLasers do
   begin
     if not Laser.IsOn then
       Continue;
+    if Laser.Mal then
+    begin
+      UpdateMalLaser(Laser, SecondsPassed);
+      Continue;
+    end;
     { target_laser_think: a MASK_SHOT trace; it hurts what it stops on }
     LaserTrace := WorldTrace(CgeToQuake(Laser.Origin), CgeToQuake(Laser.Origin + Laser.Direction * 2048),
       TVector3.Zero, TVector3.Zero, MASK_SHOT, nil);
@@ -2519,13 +2686,59 @@ begin
           Prop.FlyTarget := QuakeToCge(List[0].Origin);
         end else
         begin
+          { The ships vanish at the end of their path; misc_transport is a
+            train and stays at its last corner }
           Prop.Flying := False;
-          Prop.Transform.Exists := False;
+          if Prop.Kind <> pkTransport then
+            Prop.Transform.Exists := False;
         end;
       finally
         List.Free;
       end;
     end;
+  end;
+end;
+
+procedure TQuakeWorld.UpdateMalLaser(const Laser: TQuakeLaser; const SecondsPassed: Single);
+var
+  T: TQuakeTrace;
+  From, Stop: TVector3;
+  Ignore: TObject;
+  I: Integer;
+  Pulse: Boolean;
+begin
+  { mal_laser_think: the beam goes through monsters and the player (each
+    hit takes "dmg" on a pulse) and stops at anything else }
+  Laser.PulseTimer := Laser.PulseTimer - SecondsPassed;
+  Pulse := Laser.PulseTimer <= 0;
+  if Pulse then
+    Laser.PulseTimer := Laser.PulseTimer + Laser.Wait + 0.1;
+  From := CgeToQuake(Laser.Origin);
+  Stop := CgeToQuake(Laser.Origin + Laser.Direction * 2048);
+  Ignore := nil;
+  for I := 1 to 16 do
+  begin
+    T := WorldTrace(From, Stop, TVector3.Zero, TVector3.Zero, MASK_SHOT, Ignore);
+    if T.Ent is TQuakeMonster then
+    begin
+      if Pulse then
+        TQuakeMonster(T.Ent).TakeDamage(Laser.Damage);
+    end else
+    if T.Ent = FPlayer then
+    begin
+      if Pulse then
+        DamagePlayer(Laser.Damage, Laser.Origin);
+    end else
+      Break;
+    Ignore := T.Ent;
+    From := T.EndPos;
+  end;
+  Laser.SetLength(PointsDistance(Laser.Origin, QuakeToCge(T.EndPos)));
+  if Pulse then
+  begin
+    if (Laser.Pulses > 0) and (T.Fraction < 1) then
+      TempEntity(TE_LASER_SPARKS, QuakeToCge(T.EndPos));
+    Inc(Laser.Pulses);
   end;
 end;
 
@@ -2609,11 +2822,19 @@ end;
   ("shadowlightstyle", or the style of the "shadowlightstyletarget" light) }
 procedure TQuakeWorld.UpdateDynamicLights;
 var
+  Prop: TQuakeProp;
   Ent, StyleEnt: TQuakeEntity;
   OnOff, Style: Integer;
   Brightness: Single;
   List: TQuakeEntityList;
 begin
+  { EF_SPINNINGLIGHTS (CL_AddPacketEntities): a red light of radius 100 going
+    round the rotating_light 64 units out, at its height }
+  for Prop in FProps do
+    if (Prop.Kind = pkRotatingLight) and Prop.LightOn and not Prop.Destroyed and
+       Prop.Transform.Exists then
+      Lighting.AddLight(Prop.Transform.Translation +
+        YawToCgeDir(Prop.Entity.Angle + Prop.SpinAngle) * 64, 100, Vector3(1, 0, 0));
   for Ent in FDynamicLights do
   begin
     if (not FCounters.TryGetValue(Ent, OnOff)) or (OnOff = 0) then
@@ -3435,7 +3656,7 @@ begin
            (PointsDistance(Mover.Center, Pos) < Radius + 32) then
           DamageMover(Mover, Damage div 2);
       for Prop in FProps do
-        if (Prop.Kind = pkExplobox) and not Prop.Destroyed and
+        if (Prop.Kind in [pkExplobox, pkRotatingLight]) and not Prop.Destroyed and
            (PointsDistance(Prop.Transform.Translation, Pos) < Radius) then
           DamageProp(Prop, Damage div 2);
     finally
@@ -4914,6 +5135,11 @@ begin
     O.Add('destroyed', FProps[I].Destroyed);
     O.Add('exists', FProps[I].Transform.Exists);
     O.Add('flying', FProps[I].Flying);
+    if FProps[I].Kind = pkRotatingLight then
+    begin
+      O.Add('lightOn', FProps[I].LightOn);
+      O.Add('alarm', FProps[I].AlarmActive);
+    end;
     O.Add('pos', VecToJson(FProps[I].Transform.Translation));
     O.Add('flyTarget', VecToJson(FProps[I].FlyTarget));
     if FProps[I].FlyCorner <> nil then
@@ -5154,6 +5380,11 @@ begin
       Prop.Destroyed := O.Get('destroyed', False);
       Prop.Transform.Exists := O.Get('exists', True);
       Prop.Flying := O.Get('flying', False);
+      if Prop.Kind = pkRotatingLight then
+      begin
+        Prop.LightOn := O.Get('lightOn', Prop.LightOn);
+        Prop.AlarmActive := O.Get('alarm', False);
+      end;
       Prop.Transform.Translation := JsonToVec(O.Find('pos'));
       Prop.FlyTarget := JsonToVec(O.Find('flyTarget'));
       Idx := O.Get('flyCorner', -1);
@@ -5623,7 +5854,8 @@ begin
   begin
     if (Prop = Ignore) or Prop.Destroyed or (Prop.Transform = nil) or (not Prop.Transform.Exists) then
       Continue;
-    if Prop.Kind = pkExplobox then
+    { rotating_light: SOLID_BBOX, shootable }
+    if Prop.Kind in [pkExplobox, pkRotatingLight] then
       PropContents := CONTENTS_MONSTER
     else
     if Prop.Kind = pkDeadSoldier then

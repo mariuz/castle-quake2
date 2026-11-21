@@ -79,7 +79,7 @@ On Linux without a display, run under `xvfb-run -a -s "-screen 0 1600x900x24"`, 
 | `IN:time yaw pitch forward side buttons [x y z]` | A recorded view and held inputs (see below) |
 | `SY:0` | Don't correct a replay's drift |
 
-The `spawn <classname> [key "value"]...` console command adds any entity in front of the player (or at `origin`), which is how entities the demo maps lack get tested; brush entities take a box from `mins` / `maxs`.
+The `spawn <classname> [key "value"]...` console command adds any entity in front of the player (or at `origin`), which is how entities the demo maps lack get tested; brush entities take a box from `mins` / `maxs`. CI's `ents` script spawns full-game entities this way and `xprops` The Reckoning's props (the pulsing laser, the rotating light, the viper missile, the transport, the welding sparks, the nuke).
 
 ### Recording a playthrough as a test
 

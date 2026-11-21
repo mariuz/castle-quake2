@@ -1377,10 +1377,14 @@ begin
         FWorld.Turrets[J].MovePitch, FWorld.Turrets[J].MoveYaw, Length(FWorld.Turrets[J].Bases),
         BoolToStr(FWorld.Turrets[J].Driver <> nil, True), FWorld.Turrets[J].Shots]);
     for J := 0 to FWorld.Props.Count - 1 do
-      WritelnLog('Demo', 'Prop %d %s health %d destroyed %s flying %s exists %s', [J,
+      WritelnLog('Demo', 'Prop %d %s health %d destroyed %s flying %s exists %s light %s', [J,
         FWorld.Props[J].Entity.ClassName, FWorld.Props[J].Health,
         BoolToStr(FWorld.Props[J].Destroyed, True), BoolToStr(FWorld.Props[J].Flying, True),
-        BoolToStr(FWorld.Props[J].Transform.Exists, True)]);
+        BoolToStr(FWorld.Props[J].Transform.Exists, True), BoolToStr(FWorld.Props[J].LightOn, True)]);
+    for J := 0 to FWorld.Lasers.Count - 1 do
+      WritelnLog('Demo', 'Laser %d on %s length %.0f %s pulses %d', [J,
+        BoolToStr(FWorld.Lasers[J].IsOn, True), FWorld.Lasers[J].Length,
+        FWorld.Lasers[J].Entity.ClassName, FWorld.Lasers[J].Pulses]);
     for J := 0 to FWorld.Monsters.Count - 1 do
       if (J = FWatchedMonster) or FWorld.Monsters[J].IsAlive and (FWorld.Monsters[J].Alerted or
          (FWorld.Monsters[J].MoveTarget <> nil) or (FWorld.Monsters[J].GoalEntity <> nil) or
@@ -1447,9 +1451,6 @@ begin
       FWorld.Stats.Ammo[atBullets], FWorld.Stats.Ammo[atGrenades], FWorld.Stats.Ammo[atCells],
       FWorld.Stats.Ammo[atSlugs], FWorld.Stats.Ammo[atMagSlugs], FWorld.Stats.Ammo[atTraps],
       DualFireText(FWorld.Stats.QuadFireTime)]);
-    for J := 0 to FWorld.Lasers.Count - 1 do
-      WritelnLog('Demo', 'Laser %d on %s length %.0f', [J,
-        BoolToStr(FWorld.Lasers[J].IsOn, True), FWorld.Lasers[J].Length]);
   end else
   if Action = 'G' then { Go to "x y z" (Quake coordinates) }
   begin

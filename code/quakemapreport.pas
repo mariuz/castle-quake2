@@ -66,7 +66,7 @@ uses
 
 const
   { Spawned, used by targets, drawn or used as markers by the game code }
-  SupportedClasses: array[0..93] of String = (
+  SupportedClasses: array[0..100] of String = (
     { func_group: brushes the map compiler merged into the world }
     'func_group', 'worldspawn', 'info_player_start', 'info_player_deathmatch', 'info_player_coop',
     'info_player_intermission', 'info_null', 'info_notnull', 'misc_teleporter',
@@ -92,6 +92,11 @@ const
     'light_mine1', 'light_mine2', 'func_object',
     { the remaster's bodiless turret driver }
     'turret_invisible_brain',
+    { The Reckoning's props: the spinning alarm light, the pulsing laser, the
+      viper's missile, the transport ship, the nuke, the welding sparks and
+      Mal's ambient loop }
+    'rotating_light', 'target_mal_laser', 'misc_viper_missile', 'misc_transport', 'misc_nuke',
+    'func_object_repair', 'misc_amb4',
     { the remaster's points of interest (the compass) and level transition landmarks }
     'target_poi', 'info_landmark',
     { clocks and displays (target_character frames) }
