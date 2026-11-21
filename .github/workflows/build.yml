@@ -176,6 +176,10 @@ jobs:
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/fixbot --demo 'O:notarget,W:1.5,G:128 -320 46,O:spawn func_object_repair targetname rep target fixed origin "128 -100 40",O:spawn target_explosion targetname fixed origin "128 -100 40",O:spawn monster_fixbot origin "128 -250 80" angle 90,W:12,V,O:spawn monster_soldier origin "60 -250 24" angle 90,W:0.3,O:hurt last 30,W:2,O:spawn monster_fixbot origin "60 -330 80" angle 90,W:6,V,Q' > test_output/fixbot.log 2>&1
           L=test_output/fixbot.log
           grep -q "monster_fixbot welds func_object_repair" $L && grep -q "monster_fixbot finished welding" $L && grep -q 'func_object_repair repaired: fires "fixed"' $L && grep -q "monster_fixbot goes to revive" $L && grep -q "monster_soldier revived" $L && ! grep -q Exception $L || { echo "::error::The fixbot did not weld / revive (see fixbot.log)"; exit 1; }
+          # Fixbots placed to roam (spawnflags 4), land (16) and take off (8)
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/fixroam --demo 'O:notarget,W:1.5,G:128 -320 46,O:spawn monster_fixbot origin "128 -250 120" angle 90 spawnflags 4,W:10,V,O:spawn monster_fixbot origin "60 -330 140" angle 90 spawnflags 16,W:8,V,O:spawn monster_fixbot origin "128 -280 60" angle 90 spawnflags 8,W:6,V,Q' > test_output/fixroam.log 2>&1
+          L=test_output/fixroam.log
+          grep -q "monster_fixbot roams to" $L && grep -q "monster_fixbot landed at" $L && grep -q "monster_fixbot took off at" $L && ! grep -q Exception $L || { echo "::error::The fixbot did not roam / land / take off (see fixroam.log)"; exit 1; }
           # Brush entity texture frames (R_TextureAnimation + EF_ANIM*): demo3's alarm button shows frame 0 until
           # pressed, then cycles frames 2 / 3; the ANIMATED key door cycles all its frames
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo3 test_output/btntex --demo "O:notarget,W:1,V,E:lita,W:1.3,V,Q" > test_output/btntex.log 2>&1

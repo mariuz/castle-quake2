@@ -1213,7 +1213,12 @@ var
   Seqs: TMonsterAttackSeqs;
   A: TMonsterAttack;
   D0, D1, D2, D3: Integer;
+  BMins, BMaxs: TVector3;
 begin
+  { SP_monster_gekk: 48 x 48 x 48 (land_to_water lowers the top by 8) }
+  MonsterBoxSize('monster_gekk', BMins, BMaxs);
+  Check(TVector3.Equals(BMins, Vector3(-24, -24, -24)) and TVector3.Equals(BMaxs, Vector3(24, 24, 24)),
+    'the gekk''s box is 48 x 48 x 48');
   Seqs := MonsterWaterAttackSeqs('monster_gekk');
   Check((Length(Seqs) = 1) and (Length(MonsterWaterAttackSeqs('monster_soldier')) = 0),
     'the gekk has one water attack, land monsters none');

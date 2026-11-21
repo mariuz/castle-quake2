@@ -150,6 +150,13 @@ type
     FWeldPhase: Integer;
     FWeldClock, FWeldApproach: Single;
     FWeldFrame: Integer;
+    { The fixbot's roaming (change_to_roam): its spawnflags 4 / 8 / 16 (roam,
+      take off, land; 0 stays put), 0 stand, 1 flying to the goal, 2
+      landing, 3 taking off; the goal (Quake), clocks, the take-off frame
+      that made puffs }
+    FRoamFlags, FRoamPhase, FRoamFrame: Integer;
+    FRoamGoal, FRoamOld: TVector3;
+    FRoamClock, FRoamStuck: Single;
     FMove: TMonsterMoveAnim;
     FMoveFirst: Integer;
     FMoveRun: Boolean;
@@ -322,6 +329,8 @@ type
     procedure UpdateSwimming(const SecondsPassed: Single; const PlayerPos: TVector3);
     { The fixbot welding (True while it does only that) }
     function UpdateWeld(const SecondsPassed: Single): Boolean;
+    { The fixbot roaming, landing or taking off while idle (True: it did) }
+    function UpdateRoam(const SecondsPassed: Single): Boolean;
     function IsFixbot: Boolean;
     { Origin in Quake coordinates }
     function Origin: TVector3;
@@ -1144,8 +1153,8 @@ begin
   begin
     Mins := Vector3(-30, -30, 0); Maxs := Vector3(30, 30, 90);
   end else
-  { The Reckoning: the variants have their base's box; the gekk 36 x 36 x 48,
-    the fixbot 64 x 64 x 48 }
+  { The Reckoning: the variants have their base's box; the gekk 48 x 48 x 48
+    (40 high while it swims: SetSwimming), the fixbot 64 x 64 x 48 }
   if XatrixBaseClass(MonsterClass) <> '' then
   begin
     MonsterBoxSize(XatrixBaseClass(MonsterClass), Mins, Maxs);
@@ -1153,7 +1162,7 @@ begin
   end else
   if MonsterClass = 'monster_gekk' then
   begin
-    Mins := Vector3(-18, -18, -24); Maxs := Vector3(18, 18, 24);
+    Mins := Vector3(-24, -24, -24); Maxs := Vector3(24, 24, 24);
   end else
   if MonsterClass = 'monster_fixbot' then
   begin
@@ -1489,6 +1498,8 @@ begin
   end;
   SetState(msIdle);
   Ambush := (AEntity.SpawnFlags and 1) <> 0;
+  if IsFixbot then
+    FRoamFlags := AEntity.SpawnFlags and (4 or 8 or 16);
   Transform.AddBehavior(Self);
   AParent.Add(Transform);
   if ((AEntity.SpawnFlags and 2) <> 0) and (AEntity.TargetName <> '') then
@@ -2024,6 +2035,8 @@ begin
     FRunSeq := FSwimSeq;
     if Length(FWaterAttackSeqs) > 0 then
       FAttackSeqs := FWaterAttackSeqs;
+    { land_to_water: the box's top 8 lower (maxs 16) }
+    BoxMaxs.Z := BoxMaxs.Z - 8;
     FSwimTimer := 0.4;
     WritelnLog('QuakeEntities', '%s swims at %s', [Transform.Name, Origin.ToString]);
   end else
@@ -2031,6 +2044,8 @@ begin
     FWalkSeq := FLandWalkSeq;
     FRunSeq := FLandRunSeq;
     FAttackSeqs := FLandAttackSeqs;
+    { water_to_land: the land box back }
+    BoxMaxs.Z := BoxMaxs.Z + 8;
     WritelnLog('QuakeEntities', '%s leaves the water at %s', [Transform.Name, Origin.ToString]);
   end;
   FMove.Stop;
@@ -2183,6 +2198,170 @@ begin
           FWeldPhase := 0;
           SetState(msIdle);
           Exit(False);
+        end;
+      end;
+  end;
+end;
+
+function TQuakeMonster.UpdateRoam(const SecondsPassed: Single): Boolean;
+const
+  { fixbot_move_forward: M_MoveToGoal 5 a frame }
+  RoamSpeed = 50;
+  { Our choice: the landing and take-off frames don't move the fixbot in
+    Quake 2 (ai_move 0 / 0.01); here it goes down to its goal at the flying
+    speed and up its 128 units over the 16 take-off frames }
+  TakeoffSpeed = 128 / 1.6;
+var
+  I, Frame: Integer;
+  Yaw, Best, Dist, Spread: Single;
+  Dir, Delta, Flat, Down: TVector3;
+  T: TQuakeTrace;
+
+  procedure ShowAnim(const Name: String; const Loop: Boolean);
+  begin
+    if Model <> nil then
+      Model.PlayAnim(Name, Loop, 10);
+    { Not the stand frames: SetWalking(False) shows them again }
+    FWalking := True;
+  end;
+
+  procedure Stand;
+  begin
+    FRoamPhase := 0;
+    FRoamClock := 0;
+    SetWalking(False);
+  end;
+
+  { Seconds without moving give up (FIXBOT_MAX_STUCK_FRAMES) }
+  procedure CheckStuck;
+  begin
+    if PointsDistance(Origin, FRoamOld) < 0.01 then
+      FRoamStuck := FRoamStuck + SecondsPassed
+    else
+      FRoamStuck := 0;
+    FRoamOld := Origin;
+  end;
+
+begin
+  Result := False;
+  if (FRoamFlags = 0) or Dormant or not Assigned(EntityTrace) then
+    Exit;
+  Result := True;
+  FRoamClock := FRoamClock + SecondsPassed;
+  case FRoamPhase of
+    0:
+      begin
+        { fixbot_move_stand: ambient_01 .. 19, then change_to_roam }
+        SetWalking(False);
+        if FRoamClock < 1.9 then
+          Exit;
+        FRoamClock := 0;
+        FRoamStuck := 0;
+        FRoamFrame := -1;
+        FRoamOld := Origin;
+        if (FRoamFlags and 16) <> 0 then
+        begin
+          { landing_goal: its box traced 8096 down }
+          T := MTrace(Origin, Origin - Vector3(0, 0, 8096), BoxMins, BoxMaxs);
+          FRoamGoal := T.EndPos;
+          FRoamPhase := 2;
+          ShowAnim('landing', True);
+          WritelnLog('QuakeEntities', '%s lands at %s', [Transform.Name, FRoamGoal.ToString]);
+        end else
+        if (FRoamFlags and 8) <> 0 then
+        begin
+          { takeoff_goal: its box traced 128 up }
+          T := MTrace(Origin, Origin + Vector3(0, 0, 128), BoxMins, BoxMaxs);
+          FRoamGoal := T.EndPos;
+          FRoamPhase := 3;
+          ShowAnim('takeoff', False);
+          WritelnLog('QuakeEntities', '%s takes off to %s', [Transform.Name, FRoamGoal.ToString]);
+        end else
+        begin
+          { roam_goal: 12 shot traces of 8192 from +150 to -150 degrees
+            around its yaw, the farthest end is the goal }
+          Best := -1;
+          for I := 0 to 11 do
+          begin
+            if I < 6 then
+              Yaw := FacingAngle + 30 * I
+            else
+              Yaw := FacingAngle - 30 * (I - 6);
+            Dir := Vector3(Cos(DegToRad(Yaw)), Sin(DegToRad(Yaw)), 0);
+            T := MTrace(Origin, Origin + Dir * 8192, TVector3.Zero, TVector3.Zero, MASK_SHOT);
+            Dist := PointsDistance(T.EndPos, Origin);
+            if Dist > Best then
+            begin
+              Best := Dist;
+              FRoamGoal := T.EndPos;
+            end;
+          end;
+          FRoamPhase := 1;
+          WritelnLog('QuakeEntities', '%s roams to %s', [Transform.Name, FRoamGoal.ToString]);
+        end;
+        { The spawnflags are read once (change_to_roam sets them to 32);
+          afterwards it roams }
+        FRoamFlags := 4;
+      end;
+    1:
+      begin
+        { fixbot_move_turn until the goal is in front, then forward;
+          use_scanner gives up after 15 s, within 32 or stuck }
+        Delta := QuakeToCge(FRoamGoal) - Transform.Translation;
+        if (FRoamClock > 15) or (Delta.Length < 32) or (FRoamStuck > 1) then
+        begin
+          Stand;
+          Exit;
+        end;
+        Flat := Vector3(Delta.X, 0, Delta.Z);
+        FaceTowards(Flat, SecondsPassed);
+        if Flat.IsZero or (TVector3.DotProduct(YawToCgeDir(FacingAngle), Flat.Normalize) > 0.3) then
+        begin
+          ShowAnim(AnimNames('walk,run'), True);
+          { M_MoveToGoal: with detours when blocked }
+          Steer(Delta.Normalize, SecondsPassed, RoamSpeed / Max(1, Def^.Speed));
+          CheckStuck;
+        end else
+          FRoamOld := Origin;
+      end;
+    2:
+      begin
+        { landing_01 .. 58 (fly_vertical2): down to the goal, done within 32 }
+        Dist := PointsDistance(Origin, FRoamGoal);
+        if (Dist < 32) or (FRoamStuck > 1) then
+        begin
+          WritelnLog('QuakeEntities', '%s landed at %s', [Transform.Name, Origin.ToString]);
+          Stand;
+          Exit;
+        end;
+        StepMove((FRoamGoal - Origin).Normalize * Min(RoamSpeed * SecondsPassed, Dist));
+        CheckStuck;
+      end;
+    3:
+      begin
+        { takeoff_01 .. 16 (fly_vertical): each frame blastoff puffs 10
+          shotgun pellets downwards, spreading wider frame by frame (no
+          damage here) }
+        Frame := Trunc(FRoamClock * 10);
+        if (Frame <> FRoamFrame) and (Frame < 16) then
+        begin
+          FRoamFrame := Frame;
+          Spread := 0.05 * (Frame + 1);
+          for I := 1 to 10 do
+          begin
+            Down := Vector3((Random * 2 - 1) * Spread, (Random * 2 - 1) * Spread, -1).Normalize;
+            T := MTrace(Origin, Origin + Down * 8192, TVector3.Zero, TVector3.Zero, MASK_SHOT);
+            if T.Fraction < 1 then
+              Particles.SpawnImpact(QuakeToCge(T.EndPos), Vector3(T.Normal.X, T.Normal.Z, -T.Normal.Y));
+          end;
+        end;
+        Dist := PointsDistance(Origin, FRoamGoal);
+        if Dist > 0.01 then
+          StepMove((FRoamGoal - Origin).Normalize * Min(TakeoffSpeed * SecondsPassed, Dist));
+        if FRoamClock >= 1.6 then
+        begin
+          WritelnLog('QuakeEntities', '%s took off at %s', [Transform.Name, Origin.ToString]);
+          Stand;
         end;
       end;
   end;
@@ -2525,12 +2704,14 @@ begin
     Exit;
   end;
 
-  { A medic on its way to a corpse (AI_MEDIC) does only that }
-  if UpdateMedic(SecondsPassed) then
+  { A medic on its way to a corpse (AI_MEDIC) does only that; a fixbot
+    going to weld, or welding, too }
+  if UpdateMedic(SecondsPassed) or UpdateWeld(SecondsPassed) then
+  begin
+    FRoamPhase := 0;
+    FRoamClock := 0;
     Exit;
-  { A fixbot going to weld, or welding }
-  if UpdateWeld(SecondsPassed) then
-    Exit;
+  end;
 
   Delta := PlayerPos - Transform.Translation;
   Dist := Delta.Length;
@@ -2579,11 +2760,14 @@ begin
     if MoveTarget <> nil then
       Patrol(SecondsPassed)
     else
+    if not (IsFixbot and UpdateRoam(SecondsPassed)) then
       SetWalking(False);
     StickToFloor(SecondsPassed);
     Exit;
   end;
   FWalking := False;
+  FRoamPhase := 0;
+  FRoamClock := 0;
 
   if State = msChase then
     AdvanceMove(True, SecondsPassed);
