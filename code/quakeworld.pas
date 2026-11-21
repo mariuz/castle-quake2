@@ -91,6 +91,9 @@ type
     { func_object_repair's health (100; fixbots weld 10 off a cycle, below
       0 it is repaired: its targets fire, in FCounters, and it heals back) }
     FRepairHealth: specialize TDictionary<TQuakeEntity, Integer>;
+    { target_steam's sustained effects: until (level time) and the next puff }
+    FSteam: specialize TDictionary<TQuakeEntity, TVector2>;
+    FHintPaths: TQuakeHintPaths;
     { Quake II Remastered dynamic_light entities (not owned; on / off in
       FCounters: 1 / 0) }
     FDynamicLights: TQuakeEntityList;
@@ -336,6 +339,15 @@ type
     procedure NukeUse(const Ent: TQuakeEntity);
     { The Reckoning's target_mal_laser, while on }
     procedure UpdateMalLaser(const Laser: TQuakeLaser; const SecondsPassed: Single);
+    { Ground Zero's targets }
+    procedure SteamUse(const Ent, Activator: TQuakeEntity);
+    procedure SteamPuff(const Ent: TQuakeEntity);
+    procedure UpdateSteam;
+    procedure AngerUse(const Ent: TQuakeEntity);
+    { InitHintPaths: the hint_path chains of the level, for monsters }
+    procedure BuildHintPaths;
+    function HintPointsVisible(const FromPos, ToPos: TVector3): Boolean;
+    procedure KillPlayersUse(const Ent: TQuakeEntity);
     { func_object_repair: its health, think (sparks, repaired) and a fixbot's
       weld cycle on it (True: repaired) }
     function RepairHealth(const Ent: TQuakeEntity): Integer;
@@ -579,6 +591,7 @@ begin
   EntityTrace := @WorldTrace;
   EntitySightPossible := @SightPossible;
   EntityPointContents := @MonsterPointContents;
+  HintSight := @HintPointsVisible;
   MonsterWeldCycle := @WeldCycle;
   FGun := TQuakeGun.Create;
   FGun.OnEvent := @GunEvent;
@@ -592,6 +605,7 @@ begin
   FTimers := specialize TDictionary<TQuakeEntity, Single>.Create;
   FPeriodic := specialize TDictionary<TQuakeEntity, Single>.Create;
   FRepairHealth := specialize TDictionary<TQuakeEntity, Integer>.Create;
+  FSteam := specialize TDictionary<TQuakeEntity, TVector2>.Create;
   FDelayed := specialize TList<TDelayedTarget>.Create;
   FCounters := specialize TDictionary<TQuakeEntity, Integer>.Create;
   FDynamicLights := TQuakeEntityList.Create(False);
@@ -617,6 +631,7 @@ begin
   EntityTrace := nil;
   EntitySightPossible := nil;
   EntityPointContents := nil;
+  HintSight := nil;
   MonsterWeldCycle := nil;
   FreeAndNil(FCollision);
   FPickups.Free;
@@ -635,6 +650,10 @@ begin
   FCounters.Free;
   FPeriodic.Free;
   FRepairHealth.Free;
+  FSteam.Free;
+  if HintPaths = FHintPaths then
+    HintPaths := nil;
+  FreeAndNil(FHintPaths);
   FDynamicLights.Free;
   FKeyIcons.Free;
   FLevelStates.Free;
@@ -677,6 +696,8 @@ begin
   FTimers.Clear;
   FPeriodic.Clear;
   FRepairHealth.Clear;
+  FSteam.Clear;
+  PlayerDisguised := False;
   FDelayed.Clear;
   FCounters.Clear;
   FDynamicLights.Clear;
@@ -951,6 +972,10 @@ begin
         to be used, unless START_ON (8) }
       Trig.Enabled := (Ent.TargetName = '') or ((SpawnFlags and 8) <> 0)
     else
+    if CName = 'trigger_disguise' then
+      { SP_trigger_disguise: touchable only with START_ON (2) }
+      Trig.Enabled := (SpawnFlags and 2) <> 0
+    else
     if ((SpawnFlags and TRIGGER_TRIGGERED) <> 0) and (Ent.TargetName <> '') then
       Trig.Enabled := False;
     FTriggers.Add(Trig);
@@ -1038,6 +1063,15 @@ begin
   else
   if CName = 'rotating_light' then
     FProps.Add(TQuakeProp.CreateProp(FMap, pkRotatingLight, Ent))
+  else
+  if CName = 'misc_nuke_core' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkNukeCore, Ent))
+  else
+  if CName = 'target_blacklight' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkBlacklight, Ent))
+  else
+  if CName = 'target_orb' then
+    FProps.Add(TQuakeProp.CreateProp(FMap, pkOrb, Ent))
   else
   if CName = 'misc_transport' then
   begin
@@ -1234,6 +1268,7 @@ begin
   FPoiStage := 0;
   for Ent in FBsp.Entities do
     SpawnEntity(Ent);
+  BuildHintPaths;
   ApplyLandmark;
   { Pickups after these are drops (DropMonsterItem), saved by class }
   FMapPickupCount := FPickups.Count;
@@ -1774,6 +1809,15 @@ begin
   if CName = 'misc_nuke' then
     NukeUse(Ent)
   else
+  if CName = 'target_steam' then
+    SteamUse(Ent, FUseSource)
+  else
+  if CName = 'target_anger' then
+    AngerUse(Ent)
+  else
+  if CName = 'target_killplayers' then
+    KillPlayersUse(Ent)
+  else
   if (Copy(CName, 1, 5) = 'misc_') or (CName = 'monster_commander_body') or (CName = 'monster_boss3_stand') or
      (CName = 'rotating_light') then
   begin
@@ -1913,9 +1957,9 @@ begin
           M.Alert;
       end;
   end else
-  if CName = 'trigger_teleport' then
+  if (CName = 'trigger_teleport') or (CName = 'trigger_disguise') then
   begin
-    { trigger_teleport_use: on / off each time }
+    { trigger_teleport_use / trigger_disguise_use: on / off each time }
     for Trig in FTriggers do
       if Trig.Entity = Ent then
         Trig.Enabled := not Trig.Enabled;
@@ -2517,6 +2561,9 @@ begin
     pkTransport:
       { misc_strogg_ship_use: shown; train_use ignores the use (START_ON) }
       Prop.Transform.Exists := True;
+    pkNukeCore:
+      { misc_nuke_core_use: shown / hidden }
+      Prop.Transform.Exists := not Prop.Transform.Exists;
     pkRotatingLight:
       if not Prop.Destroyed then
       begin
@@ -2681,6 +2728,7 @@ begin
     Fire.Free;
   end;
 
+  UpdateSteam;
   { target_laser: beam until the first wall, damages the player in it }
   for Laser in FLasers do
   begin
@@ -2735,6 +2783,215 @@ begin
       end;
     end;
   end;
+end;
+
+procedure TQuakeWorld.SteamPuff(const Ent: TQuakeEntity);
+var
+  Dir, Pos: TVector3;
+  Speed: Single;
+  List: TQuakeEntityList;
+begin
+  { use_target_steam: towards the target's centre (else its angles), from
+    half the speed out along it }
+  Speed := Ent.GetFloat('speed', 75);
+  Dir := EntityMoveDir(Ent);
+  if Ent.Target <> '' then
+  begin
+    List := FBsp.FindByTargetName(Ent.Target);
+    try
+      if (List.Count > 0) and not (List[0].Origin - Ent.Origin).IsZero then
+        Dir := QuakeToCge(List[0].Origin) - QuakeToCge(Ent.Origin);
+    finally
+      List.Free;
+    end;
+  end;
+  if Dir.IsZero then
+    Dir := Vector3(0, 1, 0)
+  else
+    Dir := Dir.Normalize;
+  Pos := QuakeToCge(Ent.Origin) + Dir * (Speed * 0.5);
+  Particles.SpawnSteam(Pos, Dir, Ent.GetInt('count', 32), Speed, Ent.GetInt('sounds', 8));
+end;
+
+procedure TQuakeWorld.SteamUse(const Ent, Activator: TQuakeEntity);
+var
+  Wait: Single;
+begin
+  { "wait" seconds of steam (else the using func_timer's, else 1): more
+    than 0.1 s is a sustained effect, puffing every 0.1 s }
+  if Ent.HasField('wait') then
+    Wait := Ent.GetFloat('wait', 1)
+  else
+  if (Activator <> nil) and (Activator.ClassName = 'func_timer') then
+    Wait := Activator.GetFloat('wait', 1)
+  else
+    Wait := 1;
+  WritelnLog('QuakeWorld', 'target_steam puffs for %.1f s', [Wait]);
+  SteamPuff(Ent);
+  if Wait > 0.1 then
+    FSteam.AddOrSetValue(Ent, Vector2(FTime + Wait, FTime + 0.1));
+end;
+
+procedure TQuakeWorld.UpdateSteam;
+var
+  Pair: specialize TPair<TQuakeEntity, TVector2>;
+  Done: TQuakeEntityList;
+  E: TQuakeEntity;
+begin
+  if FSteam.Count = 0 then
+    Exit;
+  Done := TQuakeEntityList.Create(False);
+  try
+    for Pair in FSteam do
+      if FTime >= Pair.Value.X then
+        Done.Add(Pair.Key)
+      else
+      if FTime >= Pair.Value.Y then
+        Done.Add(Pair.Key);
+    for E in Done do
+      if FTime >= FSteam[E].X then
+        FSteam.Remove(E)
+      else
+      begin
+        SteamPuff(E);
+        FSteam[E] := Vector2(FSteam[E].X, FTime + 0.1);
+      end;
+  finally
+    Done.Free;
+  end;
+end;
+
+procedure TQuakeWorld.BuildHintPaths;
+const
+  HINT_ENDPOINT = 1;
+var
+  Hints: TQuakeEntityList;
+  Ent, Node: TQuakeEntity;
+  Chain: array of Integer;
+  Seen: specialize TDictionary<TQuakeEntity, Integer>;
+  I, C, Idx: Integer;
+
+  function HintNamed(const Name: String): TQuakeEntity;
+  var
+    E: TQuakeEntity;
+  begin
+    Result := nil;
+    if Name = '' then
+      Exit;
+    for E in Hints do
+      if E.TargetName = Name then
+        Exit(E);
+  end;
+
+begin
+  if HintPaths = FHintPaths then
+    HintPaths := nil;
+  FreeAndNil(FHintPaths);
+  Hints := TQuakeEntityList.Create(False);
+  Seen := specialize TDictionary<TQuakeEntity, Integer>.Create;
+  try
+    for Ent in FBsp.Entities do
+      if Ent.ClassName = 'hint_path' then
+        Hints.Add(Ent);
+    if Hints.Count = 0 then
+      Exit;
+    FHintPaths := TQuakeHintPaths.Create;
+    SetLength(FHintPaths.Nodes, Hints.Count);
+    for I := 0 to Hints.Count - 1 do
+    begin
+      FHintPaths.Nodes[I].Pos := QuakeToCge(Hints[I].Origin);
+      FHintPaths.Nodes[I].Chain := -1;
+      Seen.Add(Hints[I], I);
+    end;
+    { Chain starts: END, a target, no targetname (at most 100) }
+    for Ent in Hints do
+      if ((Ent.SpawnFlags and HINT_ENDPOINT) <> 0) and (Ent.Target <> '') and (Ent.TargetName = '') and
+         (Length(FHintPaths.Chains) < 100) then
+      begin
+        C := Length(FHintPaths.Chains);
+        SetLength(Chain, 0);
+        Node := Ent;
+        while Node <> nil do
+        begin
+          Idx := Seen[Node];
+          { A fork or a loop cuts the chain }
+          if FHintPaths.Nodes[Idx].Chain >= 0 then
+            Break;
+          FHintPaths.Nodes[Idx].Chain := C;
+          FHintPaths.Nodes[Idx].Order := Length(Chain);
+          SetLength(Chain, Length(Chain) + 1);
+          Chain[High(Chain)] := Idx;
+          Node := HintNamed(Node.Target);
+        end;
+        if Length(Chain) > 1 then
+        begin
+          SetLength(FHintPaths.Chains, C + 1);
+          FHintPaths.Chains[C] := Copy(Chain);
+        end else
+          for Idx in Chain do
+            FHintPaths.Nodes[Idx].Chain := -1;
+      end;
+    WritelnLog('QuakeWorld', 'Hint paths: %d chains of %d nodes', [Length(FHintPaths.Chains), Hints.Count]);
+  finally
+    Seen.Free;
+    Hints.Free;
+  end;
+  HintPaths := FHintPaths;
+end;
+
+function TQuakeWorld.HintPointsVisible(const FromPos, ToPos: TVector3): Boolean;
+begin
+  Result := WorldTrace(CgeToQuake(FromPos), CgeToQuake(ToPos), TVector3.Zero, TVector3.Zero,
+    MASK_OPAQUE, nil).Fraction >= 1;
+end;
+
+procedure TQuakeWorld.AngerUse(const Ent: TQuakeEntity);
+var
+  Victims: TQuakeEntityList;
+  M: TQuakeMonster;
+  Pos: TVector3;
+begin
+  { target_anger_use: the monsters named by "target" go after the entity
+    named by "killtarget" (an info_notnull in the game's maps: they shoot
+    at a spot) }
+  if (Ent.Target = '') or (Ent.GetField('killtarget') = '') then
+    Exit;
+  Victims := FBsp.FindByTargetName(Ent.GetField('killtarget'));
+  try
+    if Victims.Count = 0 then
+      Exit;
+    Pos := QuakeToCge(Victims[0].Origin);
+  finally
+    Victims.Free;
+  end;
+  for M in FMonsters do
+    if M.IsAlive and SameText(M.Entity.TargetName, Ent.Target) then
+    begin
+      if M.Dormant then
+        M.Spawn;
+      M.AngerActive := True;
+      M.AngerPos := Pos;
+      M.Alert;
+      WritelnLog('QuakeWorld', '%s angered at %s', [M.Transform.Name, Ent.GetField('killtarget')]);
+    end;
+end;
+
+procedure TQuakeWorld.KillPlayersUse(const Ent: TQuakeEntity);
+var
+  M: TQuakeMonster;
+  Count: Integer;
+begin
+  { target_killplayers_use: the player dies, and so does every monster the
+    player can see }
+  Count := 0;
+  for M in FMonsters do
+    if M.IsAlive and (not M.Dormant) and M.HasLineOfSight(FPlayerPos) then
+    begin
+      M.TakeDamage(M.Health);
+      Inc(Count);
+    end;
+  WritelnLog('QuakeWorld', 'target_killplayers: the player and %d monsters killed', [Count]);
+  DamagePlayer(100000, QuakeToCge(Ent.Origin), True);
 end;
 
 function TQuakeWorld.RepairHealth(const Ent: TQuakeEntity): Integer;
@@ -3070,6 +3327,12 @@ begin
       else
         Trig.Cooldown := Max(0.2, Trig.Entity.GetFloat('wait', 0.2));
     end else
+    if CName = 'trigger_disguise' then
+    begin
+      { trigger_disguise_touch: disguised (REMOVE, 4: no longer) }
+      PlayerDisguised := (Trig.Entity.SpawnFlags and 4) = 0;
+      Continue;
+    end else
     if CName = 'trigger_gravity' then
     begin
       { trigger_gravity_touch: the toucher keeps this gravity multiplier }
@@ -3122,6 +3385,7 @@ const
 var
   Mover: TQuakeMover;
   Box, PBox: TBox3D;
+  M: TQuakeMonster;
 
   { touch_DoorTrigger: monsters open doors too (not DOOR_NOMONSTER ones) }
   function MonsterInField(const Field: TBox3D): Boolean;
@@ -3139,6 +3403,8 @@ var
 
 begin
   PBox := PlayerBox;
+  { func_plat2's use: the activator is the player }
+  FGeometry.PlayerOriginZ := FPlayerPos.Y - (PlayerEyeHeight - 24);
   for Mover in FGeometry.Movers do
   begin
     if not Mover.Transform.Exists then
@@ -3170,6 +3436,17 @@ begin
                (Mover.TriggerField.Collision(PBox) or MonsterInField(Mover.TriggerField)) then
               Mover.StateTimer := Mover.WaitTime;
           end;
+        end;
+      mkPlat2:
+        { Touch_Plat_Center2: live players and monsters in its field }
+        if Mover.Plat2Active then
+        begin
+          if (not FDead) and Mover.TriggerField.Collision(PBox) then
+            Mover.Plat2Operate(FPlayerPos.Y - (PlayerEyeHeight - 24));
+          for M in FMonsters do
+            if M.IsAlive and (not M.Dormant) and M.Transform.Exists and
+               Mover.TriggerField.Collision(QuakeBoxToCge(M.Origin + M.BoxMins, M.Origin + M.BoxMaxs)) then
+              Mover.Plat2Operate(M.Origin.Z);
         end;
       mkPlat:
         if (FPlayerPos.X >= Box.Data[0].X) and (FPlayerPos.X <= Box.Data[1].X) and
@@ -4366,6 +4643,25 @@ begin
   Inc(FMonsterShots);
   Eye := Monster.EyePos;
   Target := FPlayerPos - Vector3(0, 12, 0);
+  if Monster.AngerActive then
+  begin
+    { target_anger: shooting at a spot; hitscans make impacts there,
+      projectiles fly to it, nothing reaches the player }
+    Target := Monster.AngerPos;
+    Dir := (Target - Eye).Normalize;
+    if Monster.AttackKind in [akMelee, akLeap, akLaser] then
+      Exit;
+    if Monster.AttackKind in [akHitscan, akPellets, akRail] then
+    begin
+      Lighting.TriggerMuzzleFlash(Eye);
+      if Monster.AttackKind = akRail then
+        Particles.SpawnRailTrail(Eye, Target)
+      else
+        Particles.SpawnImpact(Target + Vector3((Random - 0.5) * 24, (Random - 0.5) * 24,
+          (Random - 0.5) * 24), -Dir);
+      Exit;
+    end;
+  end;
   Dir := (Target - Eye).Normalize;
   Dist := PointsDistance(Eye, Target);
   if not (Monster.AttackKind in [akMelee, akLeap]) then
@@ -4773,7 +5069,10 @@ begin
   FGeometry.ScenePlayerClip.Collides := False;
   for M in FMonsters do
   begin
-    M.UpdateAI(SecondsPassed, FPlayerPos);
+    if M.AngerActive then
+      M.UpdateAI(SecondsPassed, M.AngerPos)
+    else
+      M.UpdateAI(SecondsPassed, FPlayerPos);
     if (not M.IsAlive) and not M.KillCounted then
     begin
       M.KillCounted := True;
@@ -5160,6 +5459,12 @@ begin
     O.Add('turretYaw', FGeometry.Movers[I].TurretYaw);
     O.Add('trainRunning', FGeometry.Movers[I].TrainRunning);
     O.Add('trainWaiting', FGeometry.Movers[I].TrainWaiting);
+    if FGeometry.Movers[I].Kind = mkPlat2 then
+    begin
+      O.Add('plat2Flags', FGeometry.Movers[I].Plat2Flags);
+      O.Add('plat2Timer', FGeometry.Movers[I].Plat2Timer);
+      O.Add('plat2Active', FGeometry.Movers[I].Plat2Active);
+    end;
     O.Add('pos', VecToJson(FGeometry.Movers[I].Transform.Translation));
     O.Add('trainFrom', VecToJson(FGeometry.Movers[I].TrainFrom));
     O.Add('trainTo', VecToJson(FGeometry.Movers[I].TrainTo));
@@ -5388,6 +5693,12 @@ begin
       Mover.TurretYaw := O.Get('turretYaw', Mover.TurretYaw);
       Mover.TrainRunning := O.Get('trainRunning', Mover.TrainRunning);
       Mover.TrainWaiting := O.Get('trainWaiting', False);
+      if Mover.Kind = mkPlat2 then
+      begin
+        Mover.Plat2Flags := O.Get('plat2Flags', 0);
+        Mover.Plat2Timer := O.Get('plat2Timer', 0.0);
+        Mover.Plat2Active := O.Get('plat2Active', Mover.Plat2Active);
+      end;
       Mover.MoveLength := O.Get('moveLength', Mover.MoveLength);
       Mover.TrainFrom := JsonToVec(O.Find('trainFrom'));
       Mover.TrainTo := JsonToVec(O.Find('trainTo'));

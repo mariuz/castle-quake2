@@ -152,6 +152,12 @@ type
     { target_splash: Kind 1 sparks, 2 blue water, 3 brown water, 4 slime, 5 lava, 6 blood }
     procedure SpawnSplash(const Pos, Dir: TVector3; const Kind, Count: Integer);
 
+    { target_steam (TE_STEAM): Count puffs from Pos along Dir at Speed,
+      spreading a third of it sideways, palette colours ColorIndex .. +7,
+      sinking slowly }
+    procedure SpawnSteam(const Pos, Dir: TVector3; const Count: Integer; const Speed: Single;
+      const ColorIndex: Integer);
+
     { Railgun: blue spiral + white core between two points }
     procedure SpawnRailTrail(const FromPos, ToPos: TVector3);
 
@@ -783,6 +789,35 @@ begin
     P := TQuakeParticle.Create(FParent, Pos, Dir * (80 + Random * 120) +
       Vector3((Random - 0.5) * 120, (Random - 0.5) * 120, (Random - 0.5) * 120),
       PKind, 0.4 + Random * 0.4, 1.0, 0.3, Col);
+    AddParticle(P);
+  end;
+end;
+
+procedure TQuakeParticleManager.SpawnSteam(const Pos, Dir: TVector3; const Count: Integer;
+  const Speed: Single; const ColorIndex: Integer);
+var
+  I: Integer;
+  Right, Up: TVector3;
+  C: TVector4Byte;
+  P: TQuakeParticle;
+begin
+  if FParent = nil then
+    Exit;
+  Right := TVector3.CrossProduct(Dir, Vector3(0, 1, 0));
+  if Right.IsZero then
+    Right := Vector3(1, 0, 0)
+  else
+    Right := Right.Normalize;
+  Up := TVector3.CrossProduct(Right, Dir).Normalize;
+  { Fewer, bigger puffs than Quake 2's (CL_ParticleSteamEffect) }
+  for I := 1 to Max(2, Min(Count, 64) div 4) do
+  begin
+    C := Palette.Color(Byte((ColorIndex + Random(8)) and 255), 255);
+    P := TQuakeParticle.Create(FParent, Pos, Dir * Speed +
+      Right * ((Random * 2 - 1) * Speed / 3) + Up * ((Random * 2 - 1) * Speed / 3),
+      pkSmoke, 0.5 + Random * 0.3, 1.2, 2.0, Vector3(C.X / 255, C.Y / 255, C.Z / 255));
+    { accel -PARTICLE_GRAVITY / 2: it sinks a little }
+    P.Gravity := 20;
     AddParticle(P);
   end;
 end;

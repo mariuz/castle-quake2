@@ -98,6 +98,19 @@ type
     const Ignore: TObject): TQuakeTrace of object;
   TMonsterAttackEvent = procedure(const Monster: TQuakeMonster) of object;
 
+  { Ground Zero's hint_path chains (g_newai.c): built by the world from
+    the chain starts (END, a target, no targetname) along target ->
+    targetname; Chains[c] lists node indices in order }
+  THintNode = record
+    Pos: TVector3; { CGE }
+    Chain, Order: Integer;
+  end;
+
+  TQuakeHintPaths = class
+    Nodes: array of THintNode;
+    Chains: array of array of Integer;
+  end;
+
   { Quake 2 p_trail.c: up to 8 spots the player passed, a new one each time
     the newest went out of the player's sight. Monsters that lost sight of
     the player follow it (oldest first), which takes them around corners. }
@@ -175,6 +188,11 @@ type
       last seen, then along the player trail }
     FLastSighting: TVector3;
     FHasLastSighting: Boolean;
+    { Following a hint_path chain (AI_HINT_PATH): its chain, the order of
+      the node it goes to and of the goal; tried once each time the player
+      is lost }
+    FOnHint, FHintTried: Boolean;
+    FHintChain, FHintOrder, FHintGoal: Integer;
     FTrailTime: Single;
     FTrailGoal: TVector3;
     FHasTrailGoal: Boolean;
@@ -236,7 +254,10 @@ type
     function GetEntityClass: String;
     procedure SetState(const NewState: TMonsterState);
     { Where to run when the player can't be seen; False: towards him }
-    function PursuitGoal(out Goal: TVector3): Boolean;
+    function PursuitGoal(const PlayerPos: TVector3; out Goal: TVector3): Boolean;
+    { monsterlost_checkhint: a hint_path chain from near here to near the
+      player (True: following it) }
+    function CheckHint(const PlayerPos: TVector3): Boolean;
     procedure StickToFloor(const SecondsPassed: Single);
   public
     Def: PQuakeMonsterDef;
@@ -320,6 +341,10 @@ type
       another (FIXBOT_WELD_GOAL_TIMEOUT) }
     WeldTarget: TQuakeEntity;
     WeldCooldown: Single;
+    { target_anger (Ground Zero): it attacks this point (CGE) instead of
+      the player until it is hurt }
+    AngerActive: Boolean;
+    AngerPos: TVector3;
     { Flying, or swimming }
     function Flies: Boolean;
     { Is a Quake point in water, slime or lava }
@@ -493,7 +518,7 @@ type
   TPropKind = (pkExplobox, pkBanner, pkDeadSoldier, pkSatelliteDish, pkStroggShip, pkGibHead,
     pkViper, pkBigViper, pkViperBomb, pkBlackHole, pkEasterTank, pkEasterChick, pkEasterChick2,
     pkTeleporter, pkCommanderBody, pkBoss3Stand, pkMineLight1, pkMineLight2,
-    pkRotatingLight, pkTransport);
+    pkRotatingLight, pkTransport, pkNukeCore, pkBlacklight, pkOrb);
 
   { misc_* decorations: exploding barrels, banners, corpses, the satellite dish,
     flying Strogg ships and vipers (follow path_corners when triggered), gib
@@ -888,8 +913,15 @@ var
   { The player fired in the last second (Quake 2 show_hostile): monsters
     nearby notice him even when he's not in front of them }
   PlayerShowHostile: Boolean = False;
+  { trigger_disguise (Ground Zero, FL_DISGUISED): monsters don't notice the
+    player by sight }
+  PlayerDisguised: Boolean = False;
   { The player's trail (created and fed by TQuakeWorld) }
   PlayerTrail: TQuakePlayerTrail;
+  { The level's hint_path chains (nil without any; owned by the world) and
+    a sight test between two points (CGE, MASK_OPAQUE) for them }
+  HintPaths: TQuakeHintPaths;
+  HintSight: function(const FromPos, ToPos: TVector3): Boolean of object;
   { The player's box (CGE space), set by the world each frame: monsters
     don't walk into it (only used without EntityTrace) }
   PlayerBlockBox: TBox3D;
@@ -1570,6 +1602,8 @@ var
   InFront: Boolean;
 begin
   Dist := Delta.Length;
+  if PlayerDisguised then
+    Exit(False);
   if Dist > 1000 then
     Exit(False); { RANGE_FAR }
   if Dist < 80 then
@@ -2489,6 +2523,8 @@ procedure TQuakeMonster.TakeDamage(const Dmg: Integer);
 begin
   if Dormant then
     Exit;
+  { Hurt: back to the player (M_ReactToDamage) }
+  AngerActive := False;
   if not IsAlive then
   begin
     { Shooting corpses gibs them }
@@ -2728,6 +2764,8 @@ begin
       FLostSightTime := 0;
       FLastSighting := PlayerPos;
       FHasLastSighting := True;
+      FHintTried := False;
+      FOnHint := False;
       FHasTrailGoal := False;
       if PlayerTrail <> nil then
         FTrailTime := PlayerTrail.Now;
@@ -2847,7 +2885,7 @@ begin
   begin
     MoveVec := Delta;
     { Out of sight: last sighting, then the player trail (ai_run) }
-    if (not CanSeePlayer) and PursuitGoal(Goal) then
+    if (not CanSeePlayer) and PursuitGoal(PlayerPos, Goal) then
       MoveVec := Goal - Transform.Translation;
     if Swimming then
       { The gekk swims at the player's middle }
@@ -3265,7 +3303,66 @@ begin
   Result := Transform.Move(Dir * MoveSpeed * SecondsPassed, False, True);
 end;
 
-function TQuakeMonster.PursuitGoal(out Goal: TVector3): Boolean;
+function TQuakeMonster.CheckHint(const PlayerPos: TVector3): Boolean;
+const
+  Radius = 512;
+var
+  C, I, BestChain, StartOrder, GoalOrder, S, G: Integer;
+  Pos: TVector3;
+  D, SD, GD, BestDist: Single;
+begin
+  Result := False;
+  if (HintPaths = nil) or (Length(HintPaths.Chains) = 0) or (Def^.ClassName = 'monster_turret') then
+    Exit;
+  { Nodes within 512 of the monster it can see, and within 512 of the
+    player that the player can see, on one chain; it goes to the first,
+    then along the chain to the second }
+  BestChain := -1;
+  BestDist := MaxSingle;
+  StartOrder := 0;
+  GoalOrder := 0;
+  for C := 0 to High(HintPaths.Chains) do
+  begin
+    S := -1;
+    G := -1;
+    SD := MaxSingle;
+    GD := MaxSingle;
+    for I := 0 to High(HintPaths.Chains[C]) do
+    begin
+      Pos := HintPaths.Nodes[HintPaths.Chains[C][I]].Pos;
+      D := PointsDistance(Pos, Transform.Translation);
+      if (D < Radius) and (D < SD) and HasLineOfSight(Pos) then
+      begin
+        S := I;
+        SD := D;
+      end;
+      D := PointsDistance(Pos, PlayerPos);
+      if (D < Radius) and (D < GD) and Assigned(HintSight) and HintSight(PlayerPos, Pos) then
+      begin
+        G := I;
+        GD := D;
+      end;
+    end;
+    if (S >= 0) and (G >= 0) and (SD < BestDist) then
+    begin
+      BestChain := C;
+      BestDist := SD;
+      StartOrder := S;
+      GoalOrder := G;
+    end;
+  end;
+  if BestChain < 0 then
+    Exit;
+  FOnHint := True;
+  FHintChain := BestChain;
+  FHintOrder := StartOrder;
+  FHintGoal := GoalOrder;
+  WritelnLog('QuakeEntities', '%s follows hint path %d from node %d to %d', [Transform.Name, BestChain,
+    StartOrder, GoalOrder]);
+  Result := True;
+end;
+
+function TQuakeMonster.PursuitGoal(const PlayerPos: TVector3; out Goal: TVector3): Boolean;
 const
   Reached = 40;
 var
@@ -3285,6 +3382,28 @@ begin
   Result := False;
   if Flies then
     Exit; { flyers keep heading for the player }
+  { Along a hint_path chain (hint_path_touch: the next node towards the
+    goal; at the goal hintpath_stop) }
+  if FOnHint and (HintPaths <> nil) then
+  begin
+    if Near(HintPaths.Nodes[HintPaths.Chains[FHintChain][FHintOrder]].Pos) then
+    begin
+      if FHintOrder = FHintGoal then
+      begin
+        FOnHint := False;
+        WritelnLog('QuakeEntities', '%s reached the end of its hint path', [Transform.Name]);
+      end else
+      if FHintGoal > FHintOrder then
+        Inc(FHintOrder)
+      else
+        Dec(FHintOrder);
+    end;
+    if FOnHint then
+    begin
+      Goal := HintPaths.Nodes[HintPaths.Chains[FHintChain][FHintOrder]].Pos;
+      Exit(True);
+    end;
+  end;
   { First where the player was last seen }
   if FHasLastSighting then
   begin
@@ -3294,6 +3413,13 @@ begin
       Exit(True);
     end;
     FHasLastSighting := False;
+    { Lost there: a hint path, once }
+    if not FHintTried then
+    begin
+      FHintTried := True;
+      if CheckHint(PlayerPos) then
+        Exit(PursuitGoal(PlayerPos, Goal));
+    end;
   end;
   if PlayerTrail = nil then
     Exit;
@@ -3552,7 +3678,9 @@ const
     'models/monsters/bitch/tris.md2', 'models/objects/dmspot/tris.md2',
     'models/monsters/commandr/tris.md2', 'models/monsters/boss3/rider/tris.md2',
     'models/objects/minelite/light1/tris.md2', 'models/objects/minelite/light2/tris.md2',
-    'models/objects/light/tris.md2', 'models/objects/ship/tris.md2');
+    'models/objects/light/tris.md2', 'models/objects/ship/tris.md2',
+    'models/objects/core/tris.md2', 'models/items/spawngro2/tris.md2',
+    'models/items/spawngro2/tris.md2');
 var
   Pos: TVector3;
   Flags, Frame: Integer;
@@ -3623,6 +3751,13 @@ begin
         Transform.Exists := False;
         FlySpeed := AEntity.Speed(300);
       end;
+    { Ground Zero's target_blacklight / target_orb: spawngro2 frames 1 / 2 }
+    pkBlacklight:
+      if Model <> nil then
+        Model.SetFrame(1);
+    pkOrb:
+      if Model <> nil then
+        Model.SetFrame(2);
   end;
   { SP_misc_blackhole / eastertank / easterchick(2): frame ranges }
   AnimFirst := -1;
@@ -3679,6 +3814,17 @@ begin
   end;
   if (Model <> nil) and (Kind in [pkBanner, pkSatelliteDish]) then
     Model.Update(SecondsPassed);
+  if Kind in [pkBlacklight, pkOrb] then
+  begin
+    { blacklight_think / orb_think: new random angles every 0.1 s }
+    AlarmTimer := AlarmTimer - SecondsPassed;
+    if AlarmTimer <= 0 then
+    begin
+      AlarmTimer := 0.1;
+      Transform.Rotation := Vector4(Vector3(Random - 0.5, Random - 0.5, Random - 0.5).Normalize,
+        Random * 2 * Pi);
+    end;
+  end;
   if (Kind = pkRotatingLight) and LightOn then
   begin
     { EF_SPINNINGLIGHTS: the model and its light turn half a degree a

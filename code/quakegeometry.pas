@@ -133,7 +133,7 @@ type
     property Height: Integer read FHeight;
   end;
 
-  TQuakeMoverKind = (mkStatic, mkDoor, mkDoorRotating, mkPlat, mkButton, mkRotating, mkTrain, mkTurret, mkSecretDoor);
+  TQuakeMoverKind = (mkStatic, mkDoor, mkDoorRotating, mkPlat, mkButton, mkRotating, mkTrain, mkTurret, mkSecretDoor, mkPlat2);
   TQuakeMoverState = (msAtStart, msToEnd, msAtEnd, msToStart);
 
   TQuakeGeometry = class;
@@ -202,6 +202,16 @@ type
       second, down) until it lands (TQuakeWorld.UpdateFallingObjects) }
     Tossing: Boolean;
     TossSpeed: Single;
+    { func_plat2 (Ground Zero): touched (its TriggerField, built once from
+      the top position) or used, it goes to the other end; Plat2Flags are
+      PLAT2_CALLED / MOVING / WAITING, Plat2Timer the pause before it
+      moves, Plat2Since the seconds since it was last operated (2 s
+      apart), Plat2Active False while a targeted one waits for its first
+      use (plat2_activate); the trigger's top and middle (Quake Z) }
+    Plat2Flags: Integer;
+    Plat2Timer, Plat2Since: Single;
+    Plat2Active: Boolean;
+    Plat2TrigTop, Plat2TrigMid: Single;
     constructor CreateMover(const AGeometry: TQuakeGeometry; const AEntity: TQuakeEntity;
       const AModelIndex: Integer);
     destructor Destroy; override;
@@ -236,6 +246,10 @@ type
     function SecretOffset: TVector3;
     procedure UpdateMoveSound(const Moving: Boolean);
     procedure PlayMoverSound(const APath: String);
+    { plat2_operate: something with its origin at OtherZ (Quake) touched
+      the trigger or used the plat }
+    procedure Plat2Operate(const OtherZ: Single);
+    procedure UpdatePlat2(const SecondsPassed: Single);
   published
     property EntityClass: String read GetEntityClass;
     property EntityTargetName: String read TargetName;
@@ -384,6 +398,10 @@ type
     property ScenePlayerClip: TCastleScene read FScenePlayerClip;
     property WorldTransform: TCastleTransform read FWorldTransform;
     property Movers: TQuakeMoverList read FMovers;
+  public
+    { The player's origin Z (Quake), set by the world: func_plat2's
+      activator when it is used }
+    PlayerOriginZ: Single;
     { Worldspawn "sky" key, e.g. "unit1_" (env/unit1_rt.pcx ...) }
     property SkyName: String read FSkyName;
     { Draw all world faces, ignoring the PVS (Quake 2 r_novis) }
@@ -440,6 +458,14 @@ const
   ROTATING_Y_AXIS   = 8;
   TRAIN_START_ON  = 1;
   TRAIN_TOGGLE    = 2;
+  { func_plat2 (g_func.c) spawnflags and plat2flags }
+  PLAT_LOW_TRIGGER = 1;
+  PLAT2_TOGGLE    = 2;
+  PLAT2_TOP       = 4;
+  PLAT2_BOX_LIFT  = 32;
+  PLAT2_CALLED    = 1;
+  PLAT2_MOVING    = 2;
+  PLAT2_WAITING   = 4;
 
 function IsVisibleBrushClass(const CName: String): Boolean;
 begin
@@ -932,6 +958,7 @@ var
   SpawnFlags: Integer;
   SecretYaw, SecretWidth, SecretLength: Single;
   SecretFwd, SecretRight, SecretSize, SecretP1, SecretSide, SecretBack: TVector3;
+  TMins, TMaxs: TVector3;
 begin
   inherited Create(nil);
   TriggerField := TBox3D.Empty;
@@ -1129,6 +1156,55 @@ begin
       Pos2 := Vector3(0, 0, 0);
     end;
   end else
+  if CName = 'func_plat2' then
+  begin
+    Kind := mkPlat2;
+    Lip := AEntity.GetFloat('lip', 0);
+    H := AEntity.GetFloat('height', 0);
+    if H > 0 then
+      H := H - Lip
+    else
+      H := Size.Y - Lip;
+    { Built at the top; pos2 is the bottom. Progress 0 = top }
+    Pos1 := Vector3(0, 0, 0);
+    Pos2 := Vector3(0, -H, 0);
+    MoveLength := H;
+    Speed := AEntity.Speed(200);
+    WaitTime := 0;
+    StartSound := 'sound/plats/pt1_strt.wav';
+    EndSound := 'sound/plats/pt1_end.wav';
+    MoveSound := 'sound/plats/pt1_mid.wav';
+    { A targeted plat2 waits at the top for its first use; others start at
+      the bottom unless PLAT2_TOP }
+    Plat2Active := TargetName = '';
+    Plat2Since := 2;
+    if Plat2Active and ((SpawnFlags and PLAT2_TOP) = 0) then
+    begin
+      State := msAtEnd;
+      Progress := 1;
+    end;
+    { plat_spawn_inside_trigger, then 10 wider on each side }
+    Mdl := AGeometry.Bsp.Models[AModelIndex];
+    TMins := Mdl.Mins + Vector3(15, 15, 0);
+    TMaxs := Mdl.Maxs - Vector3(15, 15, 0);
+    TMaxs.Z := Mdl.Maxs.Z + 8;
+    TMins.Z := TMaxs.Z - (H + Lip);
+    if (SpawnFlags and PLAT_LOW_TRIGGER) <> 0 then
+      TMaxs.Z := TMins.Z + 8;
+    if TMaxs.X <= TMins.X then
+    begin
+      TMins.X := (Mdl.Mins.X + Mdl.Maxs.X) * 0.5;
+      TMaxs.X := TMins.X + 1;
+    end;
+    if TMaxs.Y <= TMins.Y then
+    begin
+      TMins.Y := (Mdl.Mins.Y + Mdl.Maxs.Y) * 0.5;
+      TMaxs.Y := TMins.Y + 1;
+    end;
+    Plat2TrigTop := TMaxs.Z;
+    Plat2TrigMid := (TMins.Z + TMaxs.Z) * 0.5;
+    TriggerField := Box3D(Vector3(TMins.X, TMins.Z, -TMaxs.Y), Vector3(TMaxs.X, TMaxs.Z, -TMins.Y));
+  end else
   if CName = 'func_button' then
   begin
     Kind := mkButton;
@@ -1179,6 +1255,8 @@ begin
   else
   if Kind = mkTurret then
     Transform.Rotation := TurretRotation(TurretPitch, TurretYaw);
+  if Kind = mkPlat2 then
+    ApplyPose;
   { SP_func_wall: TRIGGER_SPAWN (TOGGLE and START_ON imply it) without
     START_ON starts absent: not drawn, not solid }
   if (CName = 'func_wall') and ((SpawnFlags and 7) <> 0) and ((SpawnFlags and 4) = 0) then
@@ -1190,6 +1268,107 @@ begin
   if CName = 'func_object' then
     { func_object_release, two frames after spawning: falls }
     Tossing := True;
+end;
+
+procedure TQuakeMover.Plat2Operate(const OtherZ: Single);
+var
+  ToBottom: Boolean;
+begin
+  if (not Plat2Active) or ((Plat2Flags and PLAT2_MOVING) <> 0) or (Plat2Since < 2) or
+     not (State in [msAtStart, msAtEnd]) then
+    Exit;
+  { plat2_operate: at the top it is called down by something below the
+    trigger's top (its middle with BOX_LIFT), at the bottom up by
+    something above the trigger's middle; it goes to the other end either
+    way, sooner when called }
+  if State = msAtStart then
+  begin
+    if (Entity.SpawnFlags and PLAT2_BOX_LIFT) <> 0 then
+      ToBottom := Plat2TrigMid > OtherZ
+    else
+      ToBottom := Plat2TrigTop > OtherZ;
+  end else
+    ToBottom := not (OtherZ > Plat2TrigMid);
+  Plat2Flags := PLAT2_MOVING;
+  Plat2Since := 0;
+  Plat2Timer := 0.5;
+  if ToBottom <> (State = msAtEnd) then
+  begin
+    Plat2Flags := Plat2Flags or PLAT2_CALLED;
+    Plat2Timer := 0.1;
+  end;
+end;
+
+procedure TQuakeMover.UpdatePlat2(const SecondsPassed: Single);
+var
+  Step: Single;
+  Toggle: Boolean;
+
+  procedure Arrived(const AtTop: Boolean);
+  begin
+    PlayMoverSound(EndSound);
+    Toggle := (Entity.SpawnFlags and PLAT2_TOGGLE) <> 0;
+    { plat2_hit_top / plat2_hit_bottom: called, it waits 5 s (stays with
+      TOGGLE); else it goes back after 2 s if that end isn't its rest }
+    if (Plat2Flags and PLAT2_CALLED) <> 0 then
+    begin
+      Plat2Flags := PLAT2_WAITING;
+      if not Toggle then
+        Plat2Timer := 5;
+    end else
+    begin
+      Plat2Flags := 0;
+      if (not Toggle) and (AtTop = ((Entity.SpawnFlags and PLAT2_TOP) = 0)) then
+        Plat2Timer := 2;
+    end;
+    Geometry.FireTargets(Target, Entity);
+  end;
+
+begin
+  Plat2Since := Plat2Since + SecondsPassed;
+  if Plat2Timer > 0 then
+  begin
+    Plat2Timer := Plat2Timer - SecondsPassed;
+    if Plat2Timer <= 0 then
+    begin
+      Plat2Timer := 0;
+      if State = msAtStart then
+        State := msToEnd
+      else
+      if State = msAtEnd then
+        State := msToStart;
+      Plat2Flags := Plat2Flags or PLAT2_MOVING;
+      PlayMoverSound(StartSound);
+    end;
+  end;
+  UpdateMoveSound(State in [msToEnd, msToStart]);
+  if MoveLength <= 0 then
+    Step := 1
+  else
+    Step := Speed * SecondsPassed / MoveLength;
+  case State of
+    msToEnd:
+      begin
+        Progress := Min(1, Progress + Step);
+        ApplyPose;
+        if Progress >= 1 then
+        begin
+          State := msAtEnd;
+          Arrived(False);
+        end;
+      end;
+    msToStart:
+      begin
+        Progress := Max(0, Progress - Step);
+        ApplyPose;
+        if Progress <= 0 then
+        begin
+          State := msAtStart;
+          Arrived(True);
+        end;
+      end;
+    else ;
+  end;
 end;
 
 procedure TQuakeMover.UpdateMoveSound(const Moving: Boolean);
@@ -1267,6 +1446,8 @@ begin
 end;
 
 function TQuakeMover.Use: Boolean;
+var
+  Before: Single;
 begin
   Result := False;
   case Kind of
@@ -1300,6 +1481,23 @@ begin
         { Buttons fire their targets when pressed }
         if Result and (Kind = mkButton) and (State = msToEnd) then
           Geometry.FireTargets(Target, Entity);
+      end;
+    mkPlat2:
+      if not Plat2Active then
+      begin
+        { plat2_activate: its trigger from now on, and down it goes }
+        Plat2Active := True;
+        Plat2Flags := PLAT2_MOVING;
+        State := msToEnd;
+        PlayMoverSound(StartSound);
+        Result := True;
+      end else
+      if State in [msAtStart, msAtEnd] then
+      begin
+        { Use_Plat2: operated by the activator (the player) }
+        Before := Plat2Timer;
+        Plat2Operate(Geometry.PlayerOriginZ);
+        Result := Plat2Timer <> Before;
       end;
     mkRotating:
       begin
@@ -1359,7 +1557,7 @@ begin
             else ;
           end;
       end;
-    mkPlat:
+    mkPlat, mkPlat2:
       begin
         Result := Entity.GetInt('dmg', 2);
         case State of
@@ -1573,6 +1771,8 @@ begin
       end;
     mkSecretDoor:
       UpdateSecretDoor(SecondsPassed);
+    mkPlat2:
+      UpdatePlat2(SecondsPassed);
     else
       begin
         UpdateMoveSound(State in [msToEnd, msToStart]);

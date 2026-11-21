@@ -625,6 +625,8 @@ begin
   Check(ClassSupport('monster_soldier', NoteText) = csSupported, 'soldiers are fully supported');
   Check(ClassSupport('weapon_railgun', NoteText) = csSupported, 'items are supported');
   Check(ClassSupport('func_group', NoteText) = csSupported, 'func_group is merged into the world');
+  Check((ClassSupport('func_plat2', NoteText) = csSupported) and (ClassSupport('hint_path', NoteText) = csSupported) and
+    (ClassSupport('target_anger', NoteText) = csSupported), 'Ground Zero''s plat2, hint paths and targets are supported');
   Check(ClassSupport('monster_medic', NoteText) = csSupported, 'the medic is supported (revive, attack and move tables)');
   Check(ClassSupport('monster_jorg', NoteText) = csSupported, 'Jorg is supported');
   Check(ClassSupport('func_force_wall', NoteText) = csPartial, 'unknown func_ brushes are drawn (partial)');

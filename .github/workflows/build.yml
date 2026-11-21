@@ -180,6 +180,10 @@ jobs:
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/fixroam --demo 'O:notarget,W:1.5,G:128 -320 46,O:spawn monster_fixbot origin "128 -250 120" angle 90 spawnflags 4,W:10,V,O:spawn monster_fixbot origin "60 -330 140" angle 90 spawnflags 16,W:8,V,O:spawn monster_fixbot origin "128 -280 60" angle 90 spawnflags 8,W:6,V,Q' > test_output/fixroam.log 2>&1
           L=test_output/fixroam.log
           grep -q "monster_fixbot roams to" $L && grep -q "monster_fixbot landed at" $L && grep -q "monster_fixbot took off at" $L && ! grep -q Exception $L || { echo "::error::The fixbot did not roam / land / take off (see fixroam.log)"; exit 1; }
+          # Ground Zero's targets: a soldier angered at a spot (target_anger), steam, target_killplayers
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/gzents --demo 'Y,W:1.5,G:128 -320 46,O:spawn info_notnull targetname rock origin "128 100 40",O:spawn monster_soldier targetname grp origin "128 -150 24" angle 90,O:spawn target_anger targetname ang target grp killtarget rock,O:spawn target_steam targetname st wait 2 count 32 speed 100 angle -1 origin "60 -300 30",W:0.5,E:ang,E:st,W:1,V,W:2,Y,O:spawn target_killplayers targetname kp,E:kp,W:0.5,V,Q' > test_output/gzents.log 2>&1
+          L=test_output/gzents.log
+          grep -q "monster_soldier angered at rock" $L && grep -q "monster_soldier attacks:" $L && grep -q "target_steam puffs for 2.0 s" $L && grep -q "target_killplayers: the player and" $L && grep -qE "Player (died|gibbed)" $L && ! grep -q Exception $L || { echo "::error::Ground Zero's targets misbehaved (see gzents.log)"; exit 1; }
           # Brush entity texture frames (R_TextureAnimation + EF_ANIM*): demo3's alarm button shows frame 0 until
           # pressed, then cycles frames 2 / 3; the ANIMATED key door cycles all its frames
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo3 test_output/btntex --demo "O:notarget,W:1,V,E:lita,W:1.3,V,Q" > test_output/btntex.log 2>&1

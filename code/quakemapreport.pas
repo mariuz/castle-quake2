@@ -66,7 +66,7 @@ uses
 
 const
   { Spawned, used by targets, drawn or used as markers by the game code }
-  SupportedClasses: array[0..100] of String = (
+  SupportedClasses: array[0..111] of String = (
     { func_group: brushes the map compiler merged into the world }
     'func_group', 'worldspawn', 'info_player_start', 'info_player_deathmatch', 'info_player_coop',
     'info_player_intermission', 'info_null', 'info_notnull', 'misc_teleporter',
@@ -77,7 +77,7 @@ const
     'trigger_always', 'trigger_counter', 'trigger_hurt', 'trigger_key', 'trigger_multiple',
     'trigger_once', 'trigger_push', 'trigger_relay', 'trigger_monsterjump',
     'func_areaportal', 'func_button', 'func_door', 'func_door_rotating', 'func_door_secret', 'func_door_secret2',
-    'func_explosive', 'func_plat', 'func_rotating', 'func_timer', 'func_train', 'func_water',
+    'func_explosive', 'func_plat', 'func_plat2', 'func_rotating', 'func_timer', 'func_train', 'func_water',
     'misc_banner', 'misc_deadsoldier', 'misc_explobox', 'misc_gib_head',
     'misc_satellite_dish', 'misc_strogg_ship',
     'misc_viper', 'misc_bigviper', 'misc_viper_bomb', 'misc_blackhole', 'misc_eastertank',
@@ -97,6 +97,12 @@ const
       Mal's ambient loop }
     'rotating_light', 'target_mal_laser', 'misc_viper_missile', 'misc_transport', 'misc_nuke',
     'func_object_repair', 'misc_amb4',
+    { Ground Zero's targets and props; its lava-level coop starts; the
+      deathmatch tag token (not spawned in single player) }
+    'target_steam', 'target_anger', 'target_killplayers', 'trigger_disguise',
+    'misc_nuke_core', 'target_blacklight', 'target_orb', 'info_player_coop_lava', 'dm_tag_token',
+    { monsters that lost the player follow its chains }
+    'hint_path',
     { the remaster's points of interest (the compass) and level transition landmarks }
     'target_poi', 'info_landmark',
     { clocks and displays (target_character frames) }
