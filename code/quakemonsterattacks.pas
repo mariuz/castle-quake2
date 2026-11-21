@@ -101,6 +101,10 @@ type
     YawCenter: Integer;
     { akLeap: forward and upward speed (0: the mutant's 600 / 250) }
     LeapForward, LeapUp: Single;
+    { From shot ClawFrom on (0: never) the hits do ClawDamage plus 0 ..
+      ClawRandom - 1 with the kick, the earlier ones Damage and no kick
+      (the gekk's bites, then its claws) }
+    ClawFrom, ClawDamage, ClawRandom: Integer;
   end;
   PMonsterAttackSeq = ^TMonsterAttackSeq;
 
@@ -164,6 +168,10 @@ function XatrixBaseClass(const MonsterClass: String): String;
 
 { Attack sequences of a monster class (empty: no table, generic attack) }
 function MonsterAttackSeqs(const MonsterClass: String): TMonsterAttackSeqs;
+
+{ Its attack sequences while swimming (the gekk's gekk_move_attack; empty:
+  the same as on land) }
+function MonsterWaterAttackSeqs(const MonsterClass: String): TMonsterAttackSeqs;
 
 { Yaw offset in degrees of the Makron's sweeping hyperblaster on frame F }
 function SweepYaw(const F: Integer): Single;
@@ -673,6 +681,23 @@ begin
     Result := Q1MonsterAttackSeqs(MonsterClass);
 end;
 
+function MonsterWaterAttackSeqs(const MonsterClass: String): TMonsterAttackSeqs;
+begin
+  Result := nil;
+  { gekk_move_attack, in melee range: bites of 5 on attack_05 and 10, claws
+    of 15 .. 19 (kick 100) on attack_14 and 19; as one sequence the hits
+    are 5, 5, then 15 .. 19 twice }
+  if MonsterClass = 'monster_gekk' then
+  begin
+    SetLength(Result, 1);
+    Result[0] := MeleeSeq('attack_01', 21, [4, 9, 13, 18], 5, 0, 100, 'gk_atck1');
+    Result[0].RepeatDamage := 0;
+    Result[0].ClawFrom := 2;
+    Result[0].ClawDamage := 15;
+    Result[0].ClawRandom := 5;
+  end;
+end;
+
 function ChooseAttackSeq(const Seqs: TMonsterAttackSeqs; const Dist, R: Single): Integer;
 var
   I, N: Integer;
@@ -770,6 +795,8 @@ end;
 
 function TMonsterAttack.ShotDamage(const ShotIndex: Integer): Integer;
 begin
+  if (FSeq.ClawFrom > 0) and (ShotIndex >= FSeq.ClawFrom) then
+    Exit(FSeq.ClawDamage + Random(Max(1, FSeq.ClawRandom)));
   if (ShotIndex > 0) and (FSeq.RepeatDamage > 0) then
     Result := FSeq.RepeatDamage
   else

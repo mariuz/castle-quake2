@@ -49,6 +49,10 @@ type
 { The walk (Run = False) or run loop of a monster class (no Dists: none) }
 function MonsterMoveSeq(const MonsterClass: String; const Run: Boolean): TMonsterMoveSeq;
 
+{ The swim loop of a monster that swims in water and walks on land (the
+  gekk's gekk_move_swim_loop; no Dists: none) }
+function MonsterSwimSeq(const MonsterClass: String): TMonsterMoveSeq;
+
 { Average units a second over the loop (0 when empty) }
 function MoveSeqSpeed(const Seq: TMonsterMoveSeq): Single;
 
@@ -75,6 +79,14 @@ begin
   SetLength(Result.Dists, Count);
   for I := 0 to Count - 1 do
     Result.Dists[I] := Dist;
+end;
+
+function MonsterSwimSeq(const MonsterClass: String): TMonsterMoveSeq;
+begin
+  Result := Default(TMonsterMoveSeq);
+  { gekk_move_swim_loop: amb_01 .. 04, ai_run 16 }
+  if MonsterClass = 'monster_gekk' then
+    Result := Even('amb_01', 4, 16);
 end;
 
 function MonsterMoveSeq(const MonsterClass: String; const Run: Boolean): TMonsterMoveSeq;

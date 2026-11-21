@@ -140,6 +140,16 @@ type
     FAttackFirst: Integer;
     { Quake 2 walk / run loops (QuakeMonsterMoves) and the one playing }
     FWalkSeq, FRunSeq: TMonsterMoveSeq;
+    { The gekk: its swim loop and water attacks, and the land ones while it
+      swims (SetSwimming swaps them) }
+    FSwimSeq, FLandWalkSeq, FLandRunSeq: TMonsterMoveSeq;
+    FWaterAttackSeqs, FLandAttackSeqs: TMonsterAttackSeqs;
+    FSwimTimer, FLeaveWaterTimer: Single;
+    { The fixbot's weld: 0 going there, 1 weldstart, 2 weldmiddle, 3 weldend;
+      clock of the phase, frame of the weld loop that made sparks }
+    FWeldPhase: Integer;
+    FWeldClock, FWeldApproach: Single;
+    FWeldFrame: Integer;
     FMove: TMonsterMoveAnim;
     FMoveFirst: Integer;
     FMoveRun: Boolean;
@@ -295,6 +305,24 @@ type
     HealTime: Single;
     { Called on the medic when its patient got up (the world counts it) }
     OnRevived: TMonsterAttackEvent;
+    { The gekk in water (FL_SWIM): it moves in three dimensions and stays in
+      the water, with its swim frames and water attacks }
+    Swimming: Boolean;
+    { The fixbot (m_xatrix_fixbot): the func_object_repair it goes to weld
+      (set by the world's use_scanner), and seconds before it looks for
+      another (FIXBOT_WELD_GOAL_TIMEOUT) }
+    WeldTarget: TQuakeEntity;
+    WeldCooldown: Single;
+    { Flying, or swimming }
+    function Flies: Boolean;
+    { Is a Quake point in water, slime or lava }
+    function WaterAt(const QuakePos: TVector3): Boolean;
+    procedure SetSwimming(const Value: Boolean);
+    { The gekk: into the water, out after the player }
+    procedure UpdateSwimming(const SecondsPassed: Single; const PlayerPos: TVector3);
+    { The fixbot welding (True while it does only that) }
+    function UpdateWeld(const SecondsPassed: Single): Boolean;
+    function IsFixbot: Boolean;
     { Origin in Quake coordinates }
     function Origin: TVector3;
     { The box shots and players collide with (shorter while ducking) }
@@ -865,6 +893,12 @@ var
   EntitySightPossible: function(const FromPos, ToPos: TVector3): Boolean of object;
   { Sight traces skipped by EntitySightPossible, for the benchmark }
   SightTracesSkipped: Int64;
+  { Contents of the map's brushes at a Quake point (swimming monsters);
+    set by TQuakeWorld }
+  EntityPointContents: function(const QuakePos: TVector3): Integer of object;
+  { A fixbot finished a weld cycle (7 frames) on a func_object_repair;
+    returns True when the repair is done (TQuakeWorld) }
+  MonsterWeldCycle: function(const Target: TQuakeEntity): Boolean of object;
 
 { Quake 2 bounding box of a monster class (mins / maxs around its origin),
   moved so the bottom is at -24 like every monster's origin here }
@@ -1389,6 +1423,8 @@ begin
   FMove := TMonsterMoveAnim.Create;
   FWalkSeq := MonsterMoveSeq(Def^.ClassName, False);
   FRunSeq := MonsterMoveSeq(Def^.ClassName, True);
+  FSwimSeq := MonsterSwimSeq(Def^.ClassName);
+  FWaterAttackSeqs := MonsterWaterAttackSeqs(Def^.ClassName);
   MonsterBoxSize(Def^.ClassName, BoxMins, BoxMaxs);
   Skin := Def^.Skin;
   if Def^.ClassName = 'misc_insane' then
@@ -1624,11 +1660,14 @@ var
   T: TQuakeTrace;
 begin
   Org := Origin;
-  if Def^.Flying then
+  if Flies then
   begin
     { Flyers: the whole move must be free }
     T := MTrace(Org, Org + Move, BoxMins, BoxMaxs);
     if T.AllSolid or T.StartSolid or (T.Fraction < 1) or not ClearToMoveTo(Org, T.EndPos) then
+      Exit(False);
+    { SV_movestep with FL_SWIM: the bottom stays in the water }
+    if Swimming and not WaterAt(T.EndPos + Vector3(0, 0, BoxMins.Z + 1)) then
       Exit(False);
     SetOrigin(T.EndPos);
     Exit(True);
@@ -1855,7 +1894,7 @@ end;
 function TQuakeMonster.DistanceTo(const Ent: TQuakeEntity; out Delta: TVector3): Single;
 begin
   Delta := QuakeToCge(Ent.Origin) - Transform.Translation;
-  if not Def^.Flying then
+  if not Flies then
     Delta.Y := 0;
   Result := Delta.Length;
 end;
@@ -1949,7 +1988,204 @@ end;
 
 function TQuakeMonster.IsMedic: Boolean;
 begin
-  Result := Def^.ClassName = 'monster_medic';
+  { The fixbot revives the dead too (fixbot_search, AI_MEDIC) }
+  Result := (Def^.ClassName = 'monster_medic') or IsFixbot;
+end;
+
+function TQuakeMonster.IsFixbot: Boolean;
+begin
+  Result := Def^.ClassName = 'monster_fixbot';
+end;
+
+function TQuakeMonster.Flies: Boolean;
+begin
+  Result := Def^.Flying or Swimming;
+end;
+
+function TQuakeMonster.WaterAt(const QuakePos: TVector3): Boolean;
+const
+  MASK_WATER = 8 or 16 or 32; { CONTENTS_LAVA | SLIME | WATER }
+begin
+  Result := Assigned(EntityPointContents) and ((EntityPointContents(QuakePos) and MASK_WATER) <> 0);
+end;
+
+procedure TQuakeMonster.SetSwimming(const Value: Boolean);
+begin
+  if Swimming = Value then
+    Exit;
+  Swimming := Value;
+  if Value then
+  begin
+    { land_to_water: the swim loop and the water attacks }
+    FLandWalkSeq := FWalkSeq;
+    FLandRunSeq := FRunSeq;
+    FLandAttackSeqs := FAttackSeqs;
+    FWalkSeq := FSwimSeq;
+    FRunSeq := FSwimSeq;
+    if Length(FWaterAttackSeqs) > 0 then
+      FAttackSeqs := FWaterAttackSeqs;
+    FSwimTimer := 0.4;
+    WritelnLog('QuakeEntities', '%s swims at %s', [Transform.Name, Origin.ToString]);
+  end else
+  begin
+    FWalkSeq := FLandWalkSeq;
+    FRunSeq := FLandRunSeq;
+    FAttackSeqs := FLandAttackSeqs;
+    WritelnLog('QuakeEntities', '%s leaves the water at %s', [Transform.Name, Origin.ToString]);
+  end;
+  FMove.Stop;
+  if (State in [msIdle, msChase]) and (Model <> nil) then
+    SetState(State);
+end;
+
+procedure TQuakeMonster.UpdateSwimming(const SecondsPassed: Single; const PlayerPos: TVector3);
+var
+  Dir, Feet, Up: TVector3;
+begin
+  if (Length(FSwimSeq.Dists) = 0) or Dormant or not IsAlive or not Assigned(EntityPointContents) then
+    Exit;
+  FLeaveWaterTimer := Max(0, FLeaveWaterTimer - SecondsPassed);
+  if not Swimming then
+  begin
+    { gekk_check_underwater: any water at its feet -> land_to_water }
+    if (FLeaveWaterTimer = 0) and (not FJumping) and WaterAt(Origin + Vector3(0, 0, BoxMins.Z + 1)) then
+      SetSwimming(True);
+    Exit;
+  end;
+  { gekk_swim at the end of each swim loop (4 frames): after an enemy whose
+    feet are out of the water, 30 % of the time, water_to_land }
+  FSwimTimer := FSwimTimer - SecondsPassed;
+  if FSwimTimer > 0 then
+    Exit;
+  FSwimTimer := FSwimTimer + 0.4;
+  if (not Alerted) or (State <> msChase) then
+    Exit;
+  Feet := CgeToQuake(PlayerPos) - Vector3(0, 0, 45);
+  if WaterAt(Feet) or (Random <= 0.7) then
+    Exit;
+  SetSwimming(False);
+  FLeaveWaterTimer := 2;
+  { gekk_jump_takeoff2: up to the player's height first (where its box
+    fits), then forward 300, up 250, at the player; its touch hurts 10 .. 19 }
+  Up := Origin;
+  Up.Z := Max(Up.Z, CgeToQuake(PlayerPos).Z - 22);
+  if (Up.Z > Origin.Z) and Assigned(EntityTrace) and not MTrace(Up, Up, BoxMins, BoxMaxs).StartSolid then
+    SetOrigin(Up);
+  Dir := PlayerPos - Transform.Translation;
+  Dir.Y := 0;
+  if Dir.IsZero then
+    Dir := YawToCgeDir(FacingAngle)
+  else
+    Dir := Dir.Normalize;
+  FJumpVel := Dir * 300;
+  FJumpVel.Y := 250;
+  FJumping := True;
+  LeapDamage := 10 + Random(10);
+  if Model <> nil then
+    Model.PlayAnim('leapatk', False, 10);
+end;
+
+function TQuakeMonster.UpdateWeld(const SecondsPassed: Single): Boolean;
+var
+  Target, Delta, Fwd, Spark: TVector3;
+  Frame: Integer;
+begin
+  Result := False;
+  WeldCooldown := Max(0, WeldCooldown - SecondsPassed);
+  if WeldTarget = nil then
+    Exit;
+  if Alerted or not IsAlive or (HealTarget <> nil) then
+  begin
+    WeldTarget := nil;
+    FWeldPhase := 0;
+    Exit;
+  end;
+  Result := True;
+  Target := QuakeToCge(WeldTarget.Origin);
+  Delta := Target - Transform.Translation;
+  case FWeldPhase of
+    0:
+      begin
+        { fixbot_move_forward: use_scanner welds within 56 units; stuck
+          for 15 s: given up }
+        FWeldApproach := FWeldApproach + SecondsPassed;
+        if FWeldApproach > 15 then
+        begin
+          WeldTarget := nil;
+          WeldCooldown := 15;
+          Exit(False);
+        end;
+        if Delta.Length > 56 then
+        begin
+          FaceTowards(Vector3(Delta.X, 0, Delta.Z), SecondsPassed);
+          Steer(Delta.Normalize, SecondsPassed);
+          Exit;
+        end;
+        FWeldPhase := 1;
+        FWeldClock := 0;
+        SetWalking(False);
+        if Model <> nil then
+          Model.PlayAnim('weldstart', False, 10);
+        WritelnLog('QuakeEntities', '%s welds %s', [Transform.Name, WeldTarget.ClassName]);
+      end;
+    1:
+      begin
+        { weldstart_01 .. 10, then the weld loop }
+        FWeldClock := FWeldClock + SecondsPassed;
+        if FWeldClock >= 1 then
+        begin
+          FWeldPhase := 2;
+          FWeldClock := 0;
+          FWeldFrame := -1;
+          if Model <> nil then
+            Model.PlayAnim('weldmiddle', True, 10);
+        end;
+      end;
+    2:
+      begin
+        { weldmiddle_01 .. 07: fixbot_fire_welder on 01 .. 06 (welding
+          sparks 24 ahead, 10 down; a welder sound 20 % of the time), 10 off
+          the repair's health on 07 (weldstate) }
+        FWeldClock := FWeldClock + SecondsPassed;
+        Frame := Trunc(FWeldClock * 10);
+        if (Frame <> FWeldFrame) and (Frame < 6) then
+        begin
+          FWeldFrame := Frame;
+          Fwd := YawToCgeDir(FacingAngle);
+          Spark := Transform.Translation + Fwd * 24 + Vector3(0, -10, 0);
+          Particles.SpawnImpact(Spark, Vector3(0, 1, 0));
+          if Random < 0.2 then
+            Sounds.PlayAt('sound/misc/welder' + IntToStr(1 + Random(3)) + '.wav', Transform, 1, 2, chWeapon);
+        end;
+        if FWeldClock >= 0.7 then
+        begin
+          FWeldClock := FWeldClock - 0.7;
+          FWeldFrame := -1;
+          if Assigned(MonsterWeldCycle) and MonsterWeldCycle(WeldTarget) then
+          begin
+            FWeldPhase := 3;
+            FWeldClock := 0;
+            if Model <> nil then
+              Model.PlayAnim('weldend', False, 10);
+          end;
+        end;
+      end;
+    3:
+      begin
+        { weldend_01 .. 07, backing off 2 a frame; then it looks again in
+          15 s }
+        FWeldClock := FWeldClock + SecondsPassed;
+        if FWeldClock >= 0.7 then
+        begin
+          WritelnLog('QuakeEntities', '%s finished welding', [Transform.Name]);
+          WeldTarget := nil;
+          WeldCooldown := 15;
+          FWeldPhase := 0;
+          SetState(msIdle);
+          Exit(False);
+        end;
+      end;
+  end;
 end;
 
 procedure TQuakeMonster.Revive;
@@ -1986,12 +2222,16 @@ begin
   Result := True;
   CorpsePos := HealTarget.Transform.Translation;
   Delta := CorpsePos - Transform.Translation;
-  Delta.Y := 0;
+  if IsFixbot then
+    { It flies to a little above the corpse }
+    Delta.Y := Delta.Y + 40
+  else
+    Delta.Y := 0;
   Dist := Delta.Length;
-  FaceTowards(Delta, SecondsPassed);
+  FaceTowards(Vector3(Delta.X, 0, Delta.Z), SecondsPassed);
   { medic_cable_attack reaches MEDIC_MAX_HEAL_DISTANCE (400); get well inside
-    it, in sight of the corpse }
-  if (Dist > 250) or not SightClear(EyePos, CorpsePos + Vector3(0, 8, 0)) then
+    it, in sight of the corpse; the fixbot's laser within 128 }
+  if (Dist > IfThen(IsFixbot, 120, 250)) or not SightClear(EyePos, CorpsePos + Vector3(0, 8, 0)) then
   begin
     HealTime := 0;
     if Dist > 1 then
@@ -2000,6 +2240,26 @@ begin
     Exit;
   end;
   SetWalking(False);
+  if IsFixbot then
+  begin
+    { fixbot_fire_laser on shoot_01 .. 06: a beam to the corpse each frame
+      (dmg -1: a point of health each); it gets up past a tenth of its
+      mass (fixbot_fire_laser's revive) }
+    if (HealTime = 0) and (Model <> nil) then
+      Model.PlayAnim('shoot', True, 10);
+    if Trunc((HealTime + SecondsPassed) * 10) <> Trunc(HealTime * 10) then
+      Particles.SpawnBeam(Transform.Translation, CorpsePos + Vector3(0, 8, 0), Vector3(1, 0.5, 0.1));
+    HealTime := HealTime + SecondsPassed;
+    if HealTime < Max(1, (MonsterMass(HealTarget.Def^.ClassName) / 10 - HealTarget.Health + 1) / 10) then
+      Exit;
+    HealTarget.Revive;
+    if Assigned(OnRevived) then
+      OnRevived(HealTarget);
+    HealTarget := nil;
+    HealTime := 0;
+    SetState(msIdle);
+    Exit;
+  end;
   if HealTime = 0 then
     Sounds.PlayAt(MonsterSound(Def, 'medatck2'), Transform, 1, 1, chWeapon);
   HealTime := HealTime + SecondsPassed;
@@ -2119,7 +2379,7 @@ var
   P: TVector3;
   T: TQuakeTrace;
 begin
-  if Def^.Flying then
+  if Flies then
     Exit;
   { A crucified misc_insane hangs where it is }
   if GoodGuy and ((Entity.SpawnFlags and INSANE_CRUCIFIED) <> 0) then
@@ -2217,6 +2477,8 @@ begin
   if (not FDropped) and Assigned(EntityTrace) and IsAlive then
     DropToFloor;
 
+  UpdateSwimming(SecondsPassed, PlayerPos);
+
   if FJumping and IsAlive then
   begin
     UpdateJump(SecondsPassed);
@@ -2265,6 +2527,9 @@ begin
 
   { A medic on its way to a corpse (AI_MEDIC) does only that }
   if UpdateMedic(SecondsPassed) then
+    Exit;
+  { A fixbot going to weld, or welding }
+  if UpdateWeld(SecondsPassed) then
     Exit;
 
   Delta := PlayerPos - Transform.Translation;
@@ -2400,6 +2665,10 @@ begin
     { Out of sight: last sighting, then the player trail (ai_run) }
     if (not CanSeePlayer) and PursuitGoal(Goal) then
       MoveVec := Goal - Transform.Translation;
+    if Swimming then
+      { The gekk swims at the player's middle }
+      MoveVec.Y := (PlayerPos.Y - 20) - Transform.Translation.Y
+    else
     if not Def^.Flying then
       MoveVec.Y := 0
     else
@@ -2555,6 +2824,16 @@ begin
   begin
     Result := Q1AnimNames(Names);
     Exit;
+  end;
+  { The gekk in water: amb_ to stand, pain_, wdeath_ }
+  if Swimming then
+  begin
+    if (Pos('death', Result) > 0) or (Pos('die', Result) > 0) then
+      Exit('wdeath_');
+    if Pos('pain', Result) > 0 then
+      Exit('pain_');
+    if (Pos('stand', Result) > 0) or (Pos('idle', Result) > 0) then
+      Exit('amb_');
   end;
   if Def^.ClassName = 'monster_makron' then
   begin
@@ -2733,6 +3012,9 @@ begin
   AttackDamage := FAttack.ShotDamage(ShotIndex);
   AttackBullets := Seq.Volley;
   AttackKick := Seq.Kick;
+  { The gekk's bites push nothing, its claws do }
+  if (Seq.ClawFrom > 0) and (ShotIndex < Seq.ClawFrom) then
+    AttackKick := 0;
   AttackRadius := Seq.Radius;
   if Seq.Sweep then
     AttackYaw := SweepYaw(FAttack.Frame)
@@ -2817,7 +3099,7 @@ var
 
 begin
   Result := False;
-  if Def^.Flying then
+  if Flies then
     Exit; { flyers keep heading for the player }
   { First where the player was last seen }
   if FHasLastSighting then

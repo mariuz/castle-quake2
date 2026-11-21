@@ -1207,6 +1207,76 @@ end;
 { --retail <pak>: the full game's monsters' attack and walk / run tables
   against the retail models' frame names (CI has no retail data) }
 { Every Quake 1 variant's model has its archetype's frame count }
+{ The gekk's water attack: bites of 5, then claws of 15 .. 19 }
+procedure GekkWaterAttack;
+var
+  Seqs: TMonsterAttackSeqs;
+  A: TMonsterAttack;
+  D0, D1, D2, D3: Integer;
+begin
+  Seqs := MonsterWaterAttackSeqs('monster_gekk');
+  Check((Length(Seqs) = 1) and (Length(MonsterWaterAttackSeqs('monster_soldier')) = 0),
+    'the gekk has one water attack, land monsters none');
+  if Length(Seqs) = 0 then
+    Exit;
+  A := TMonsterAttack.Create;
+  try
+    A.Start(Seqs[0]);
+    D0 := A.ShotDamage(0);
+    D1 := A.ShotDamage(1);
+    D2 := A.ShotDamage(2);
+    D3 := A.ShotDamage(3);
+    Check((Seqs[0].FirstFrame = 'attack_01') and (Seqs[0].Count = 21) and (Length(Seqs[0].FireFrames) = 4) and
+      (D0 = 5) and (D1 = 5) and (D2 >= 15) and (D2 <= 19) and (D3 >= 15) and (D3 <= 19),
+      'gekk_move_attack: bites of 5 on attack_05 and 10, claws of 15 .. 19 on 14 and 19');
+  finally
+    A.Free;
+  end;
+end;
+
+{ --retail <pak> <xatrix pak0.pak>: the gekk's water frames and the fixbot's
+  weld and laser frames on The Reckoning's models }
+procedure TestXatrixModels;
+const
+  Runs: array[0..7] of record C, What, First: String; Count: Integer; end = (
+    (C: 'monster_gekk'; What: 'water attack'; First: 'attack_01'; Count: 21),
+    (C: 'monster_gekk'; What: 'swim'; First: 'amb_01'; Count: 4),
+    (C: 'monster_gekk'; What: 'water death'; First: 'wdeath_01'; Count: 45),
+    (C: 'monster_gekk'; What: 'water pain'; First: 'pain_01'; Count: 6),
+    (C: 'monster_fixbot'; What: 'weld start'; First: 'weldstart_01'; Count: 10),
+    (C: 'monster_fixbot'; What: 'weld'; First: 'weldmiddle_01'; Count: 7),
+    (C: 'monster_fixbot'; What: 'weld end'; First: 'weldend_01'; Count: 7),
+    (C: 'monster_fixbot'; What: 'laser'; First: 'shoot_01'; Count: 6));
+var
+  I, First, J: Integer;
+  Mdl: TQuakeMd2;
+  Ok: Boolean;
+begin
+  if Md2Manager.GetModel('models/monsters/gekk/tris.md2') = nil then
+    Exit;
+  for I := 0 to High(Runs) do
+  begin
+    Mdl := Md2Manager.GetModel(FindMonsterDef(Runs[I].C)^.Model);
+    Ok := Mdl <> nil;
+    if Ok then
+    begin
+      First := Mdl.FrameNames.IndexOf(Runs[I].First);
+      Ok := (First >= 0) and (First + Runs[I].Count <= Mdl.FrameCount);
+      if Ok then
+        for J := First to First + Runs[I].Count - 1 do
+          if FrameBase(Mdl.FrameNames[J]) <> FrameBase(Runs[I].First) then
+          begin
+            Ok := False;
+            Writeln('  ', Runs[I].C, ': ', Runs[I].First, ' runs into ', Mdl.FrameNames[J]);
+            Break;
+          end;
+    end;
+    Check(Ok, Format('%s %s %s + %d on The Reckoning''s model', [Runs[I].C, Runs[I].What, Runs[I].First, Runs[I].Count]));
+  end;
+  Check(MonsterSwimSeq('monster_gekk').FirstFrame = Runs[1].First, 'the swim table is the checked one');
+  Check(MonsterWaterAttackSeqs('monster_gekk')[0].FirstFrame = Runs[0].First, 'the water attack is the checked one');
+end;
+
 procedure TestModQ1Models;
 const
   Classes: array[0..33] of String = ('monster_ogre', 'monster_ogre_prototype', 'monster_ogre2_strogg',
@@ -1426,6 +1496,11 @@ begin
   CheckEquals(0, Length(MonsterMoveSeq('monster_stalker', True).Dists), 'monsters without a move table keep their speed');
   Check((Length(MonsterMoveSeq('monster_gekk', True).Dists) = 6) and (MonsterMoveSeq('monster_gladb', True).FirstFrame = 'run1'),
     'the gekk runs on run_01 .. 06, the beta gladiator like the gladiator');
+  { The gekk in water: amb_01 .. 04 at 16 a frame, bites then claws }
+  Check((MonsterSwimSeq('monster_gekk').FirstFrame = 'amb_01') and
+    SameValue(MoveSeqSpeed(MonsterSwimSeq('monster_gekk')), 160, 0.01) and
+    (Length(MonsterSwimSeq('monster_soldier').Dists) = 0), 'the gekk swims on amb_01 .. 04 at 160 a second, others don''t swim');
+  GekkWaterAttack;
   { Quake 2 paces: 10 frames a second of ai_run distances }
   Check(SameValue(MoveSeqSpeed(MonsterMoveSeq('monster_soldier', True)), 121.67, 0.01) and
     SameValue(MoveSeqSpeed(MonsterMoveSeq('monster_tank', True)), 46.875, 0.01) and
@@ -3518,7 +3593,13 @@ begin
     TestRetailMonsters;
     { A mod PAK too (Call of the Void): its Quake 1 monsters' models }
     if (ParamCount >= 3) and Pak.AddFile(ParamStr(3)) then
-      TestModQ1Models;
+    begin
+      { The Reckoning's PAK, or a Quake 1 mod's }
+      if Md2Manager.GetModel('models/monsters/gekk/tris.md2') <> nil then
+        TestXatrixModels
+      else
+        TestModQ1Models;
+    end;
     Writeln(Format('%d passed, %d failed', [Passed, Failed]));
     if Failed > 0 then
       Halt(1);

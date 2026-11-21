@@ -88,6 +88,9 @@ type
     { The Reckoning's func_object_repair (welding sparks) and misc_amb4
       (world/amb4.wav): entity -> next time }
     FPeriodic: specialize TDictionary<TQuakeEntity, Single>;
+    { func_object_repair's health (100; fixbots weld 10 off a cycle, below
+      0 it is repaired: its targets fire, in FCounters, and it heals back) }
+    FRepairHealth: specialize TDictionary<TQuakeEntity, Integer>;
     { Quake II Remastered dynamic_light entities (not owned; on / off in
       FCounters: 1 / 0) }
     FDynamicLights: TQuakeEntityList;
@@ -200,6 +203,7 @@ type
     procedure LinkTurret(const T: TQuakeTurret);
     procedure TurretFire(const T: TQuakeTurret);
     procedure UpdateMedics(const SecondsPassed: Single);
+    procedure FindWeldTarget(const Fixbot: TQuakeMonster);
     procedure MonsterRevived(const Monster: TQuakeMonster);
     { target_string_use: write the message on the team's target_characters }
     procedure TargetStringUse(const Ent: TQuakeEntity);
@@ -332,6 +336,12 @@ type
     procedure NukeUse(const Ent: TQuakeEntity);
     { The Reckoning's target_mal_laser, while on }
     procedure UpdateMalLaser(const Laser: TQuakeLaser; const SecondsPassed: Single);
+    { func_object_repair: its health, think (sparks, repaired) and a fixbot's
+      weld cycle on it (True: repaired) }
+    function RepairHealth(const Ent: TQuakeEntity): Integer;
+    procedure RepairThink(const Ent: TQuakeEntity);
+    function WeldCycle(const Target: TQuakeEntity): Boolean;
+    function MonsterPointContents(const QuakePos: TVector3): Integer;
     { A Quake 2 temp entity (TE_*) at a CGE point: target_temp_entity, Use_Boss3 }
     procedure TempEntity(const Style: Integer; const Pos: TVector3);
     procedure DamageProp(const Prop: TQuakeProp; const Damage: Integer);
@@ -568,6 +578,8 @@ begin
   PlayerBlockBox := TBox3D.Empty;
   EntityTrace := @WorldTrace;
   EntitySightPossible := @SightPossible;
+  EntityPointContents := @MonsterPointContents;
+  MonsterWeldCycle := @WeldCycle;
   FGun := TQuakeGun.Create;
   FGun.OnEvent := @GunEvent;
   FGun.OnAmmo := @GunAmmo;
@@ -579,6 +591,7 @@ begin
   FLasers := TQuakeLaserList.Create(True);
   FTimers := specialize TDictionary<TQuakeEntity, Single>.Create;
   FPeriodic := specialize TDictionary<TQuakeEntity, Single>.Create;
+  FRepairHealth := specialize TDictionary<TQuakeEntity, Integer>.Create;
   FDelayed := specialize TList<TDelayedTarget>.Create;
   FCounters := specialize TDictionary<TQuakeEntity, Integer>.Create;
   FDynamicLights := TQuakeEntityList.Create(False);
@@ -603,6 +616,8 @@ begin
   FreeAndNil(FMoverPoses);
   EntityTrace := nil;
   EntitySightPossible := nil;
+  EntityPointContents := nil;
+  MonsterWeldCycle := nil;
   FreeAndNil(FCollision);
   FPickups.Free;
   FMonsters.Free;
@@ -619,6 +634,7 @@ begin
   FDelayed.Free;
   FCounters.Free;
   FPeriodic.Free;
+  FRepairHealth.Free;
   FDynamicLights.Free;
   FKeyIcons.Free;
   FLevelStates.Free;
@@ -660,6 +676,7 @@ begin
   FLasers.Clear;
   FTimers.Clear;
   FPeriodic.Clear;
+  FRepairHealth.Clear;
   FDelayed.Clear;
   FCounters.Clear;
   FDynamicLights.Clear;
@@ -2203,7 +2220,8 @@ begin
   FMedicTimer := 1;
   for Medic in FMonsters do
   begin
-    if (not Medic.IsMedic) or (not Medic.IsAlive) or Medic.Dormant or (Medic.HealTarget <> nil) then
+    if (not Medic.IsMedic) or (not Medic.IsAlive) or Medic.Dormant or (Medic.HealTarget <> nil) or
+       (Medic.WeldTarget <> nil) then
       Continue;
     { medic_FindDeadMonster: a visible, finished corpse within 1024 units,
       not claimed by another medic, the one with the most max health }
@@ -2221,8 +2239,31 @@ begin
       Medic.HealTime := 0;
       Best.Healer := Medic;
       WritelnLog('QuakeWorld', '%s goes to revive %s', [Medic.Transform.Name, Best.Transform.Name]);
-    end;
+    end else
+    if Medic.IsFixbot and (Medic.WeldTarget = nil) and (Medic.WeldCooldown = 0) and not Medic.Alerted then
+      FindWeldTarget(Medic);
   end;
+end;
+
+procedure TQuakeWorld.FindWeldTarget(const Fixbot: TQuakeMonster);
+var
+  Pair: specialize TPair<TQuakeEntity, Single>;
+  Pos: TVector3;
+begin
+  { use_scanner: the first func_object_repair within 1024 units, in sight,
+    with health 100 or more }
+  for Pair in FPeriodic do
+    if Pair.Key.ClassName = 'func_object_repair' then
+    begin
+      Pos := QuakeToCge(Pair.Key.Origin);
+      if (RepairHealth(Pair.Key) >= 100) and
+         (PointsDistance(Pos, Fixbot.Transform.Translation) <= 1024) and Fixbot.HasLineOfSight(Pos) then
+      begin
+        Fixbot.WeldTarget := Pair.Key;
+        WritelnLog('QuakeWorld', '%s goes to weld at %s', [Fixbot.Transform.Name, Pair.Key.Origin.ToString]);
+        Exit;
+      end;
+    end;
 end;
 
 procedure TQuakeWorld.MonsterRevived(const Monster: TQuakeMonster);
@@ -2635,10 +2676,7 @@ begin
         FPeriodic[Ent] := FTime + 2;
         Sounds.PlayAtPoint('sound/world/amb4.wav', QuakeToCge(Ent.Origin), 1, ATTN_NONE);
       end else
-      begin
-        FPeriodic[Ent] := FTime + Max(0.1, Ent.GetFloat('delay', 1));
-        TempEntity(TE_WELDING_SPARKS, QuakeToCge(Ent.Origin));
-      end;
+        RepairThink(Ent);
   finally
     Fire.Free;
   end;
@@ -2697,6 +2735,57 @@ begin
       end;
     end;
   end;
+end;
+
+function TQuakeWorld.RepairHealth(const Ent: TQuakeEntity): Integer;
+begin
+  if not FRepairHealth.TryGetValue(Ent, Result) then
+    Result := 100;
+end;
+
+procedure TQuakeWorld.RepairThink(const Ent: TQuakeEntity);
+var
+  Health: Integer;
+  Delay: Single;
+begin
+  Health := RepairHealth(Ent);
+  Delay := Max(0.1, Ent.GetFloat('delay', 1));
+  FPeriodic[Ent] := FTime + Delay;
+  if not FCounters.ContainsKey(Ent) then
+  begin
+    { object_repair_sparks: sparks every "delay" until welded below 0;
+      then (object_repair_dead) its targets fire once }
+    if Health < 0 then
+    begin
+      FCounters.AddOrSetValue(Ent, 1);
+      FPeriodic[Ent] := FTime + 0.1;
+      WritelnLog('QuakeWorld', 'func_object_repair repaired: fires "%s"', [Ent.Target]);
+      UseTargets(Ent.Target, Ent);
+    end else
+      TempEntity(TE_WELDING_SPARKS, QuakeToCge(Ent.Origin));
+  end else
+  if Health <= 100 then
+    { object_repair_fx: a point of health every "delay", no sparks }
+    FRepairHealth.AddOrSetValue(Ent, Health + 1)
+  else
+    TempEntity(TE_WELDING_SPARKS, QuakeToCge(Ent.Origin));
+end;
+
+function TQuakeWorld.WeldCycle(const Target: TQuakeEntity): Boolean;
+var
+  Health: Integer;
+begin
+  { weldstate on weldmiddle_07: 10 off; done below 0 }
+  Health := RepairHealth(Target) - 10;
+  FRepairHealth.AddOrSetValue(Target, Health);
+  Result := Health < 0;
+end;
+
+function TQuakeWorld.MonsterPointContents(const QuakePos: TVector3): Integer;
+begin
+  if FBsp = nil then
+    Exit(0);
+  Result := FBsp.PointContents(QuakePos);
 end;
 
 procedure TQuakeWorld.UpdateMalLaser(const Laser: TQuakeLaser; const SecondsPassed: Single);
