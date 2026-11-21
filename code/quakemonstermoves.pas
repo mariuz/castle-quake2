@@ -201,6 +201,22 @@ begin
     else
       Result := MakeMove('walk01', [4, 6, 8, 5, 4, 6, 8, 4]);
   end else
+  if MonsterClass = 'monster_carrier' then
+  begin
+    { carrier_move_run / walk: search01 .. 13 at 6 / 4 a frame }
+    if Run then
+      Result := Even('search01', 13, 6)
+    else
+      Result := Even('search01', 13, 4);
+  end else
+  if MonsterClass = 'monster_widow' then
+    { widow_move_walk / run (the same), times MODEL_SCALE 2 }
+    Result := MakeMove('walk01', [5.58, 5.54, 7.06, 7.94, 8.26, 8.18, 7.68, 7.24, 6.58, 12.16, 13.88, 11.46, 5.7])
+  else
+  if MonsterClass = 'monster_widow2' then
+    { widow2_move_walk / run, times MODEL_SCALE 2 }
+    Result := MakeMove('walk01', [18.02, 15.1, 14.02, 13.32, 12.4, 11.56, 14.5, 16.74, 20.82])
+  else
   if MonsterClass = 'monster_turret' then
     { turret_move_run: it never moves }
     Result := Even('run01', 2, 0)

@@ -366,6 +366,13 @@ type
     { medic_callReinforcements / medic_finish_spawn: the medic commander's
       monsters around it }
     procedure MedicSummon(const Medic: TQuakeMonster);
+    { CarrierSpawn (flyers) / WidowSpawn and Widow2Spawn (two stalkers) }
+    procedure BossSummon(const Boss: TQuakeMonster);
+    { Widow2Beam: monster_fire_heat, a beam hurting what it reaches }
+    procedure HeatBeam(const Monster: TQuakeMonster; const Eye, Target: TVector3);
+    { The Widow's first form beams out (spawn_out_do), the second's death
+      kills her stalkers (KillChildren) }
+    procedure UpdateWidows;
     { InitHintPaths: the hint_path chains of the level, for monsters }
     procedure BuildHintPaths;
     function HintPointsVisible(const FromPos, ToPos: TVector3): Boolean;
@@ -3008,6 +3015,132 @@ begin
     MASK_OPAQUE, nil).Fraction >= 1;
 end;
 
+procedure TQuakeWorld.BossSummon(const Boss: TQuakeMonster);
+var
+  Cls: String;
+  Offsets: array of TVector3;
+  I: Integer;
+  YawRad: Single;
+  Fwd, Right, Pos, Mins, Maxs: TVector3;
+  T: TQuakeTrace;
+  Ent: TQuakeEntity;
+  Before, M: TQuakeMonster;
+  Made: Integer;
+begin
+  if Boss.MonsterSlots <= 0 then
+    Exit;
+  if Boss.Def^.ClassName = 'monster_carrier' then
+  begin
+    { CarrierSpawn: flyers 105 ahead and 58 below, one each half second
+      (three a spawn move; the middle one a kamikaze in Ground Zero) }
+    Cls := 'monster_flyer';
+    Offsets := [Vector3(105, 0, -58), Vector3(105, 48, -58), Vector3(105, -48, -58)];
+  end else
+  begin
+    { WidowSpawn / Widow2Spawn: two stalkers beside her }
+    Cls := 'monster_stalker';
+    if Boss.Def^.ClassName = 'monster_widow2' then
+      Offsets := [Vector3(30, 135, 0), Vector3(30, -135, 0)]
+    else
+      Offsets := [Vector3(30, 100, 16), Vector3(30, -100, 16)];
+  end;
+  MonsterBoxSize(Cls, Mins, Maxs);
+  YawRad := DegToRad(Boss.Facing);
+  Fwd := Vector3(Cos(YawRad), Sin(YawRad), 0);
+  Right := Vector3(Sin(YawRad), -Cos(YawRad), 0);
+  Made := 0;
+  for I := 0 to High(Offsets) do
+  begin
+    if Boss.MonsterSlots <= 0 then
+      Break;
+    Pos := Boss.Origin + Fwd * Offsets[I].X - Right * Offsets[I].Y + Vector3(0, 0, Offsets[I].Z);
+    T := WorldTrace(Pos, Pos, Mins, Maxs, MASK_MONSTERSOLID, Boss);
+    if T.StartSolid then
+      Continue;
+    Ent := TQuakeEntity.Create;
+    Ent.SetField('classname', Cls);
+    Ent.SetField('origin', Format('%d %d %d', [Round(Pos.X), Round(Pos.Y), Round(Pos.Z)]));
+    Ent.SetField('angle', IntToStr(Round(Boss.Facing)));
+    FBsp.Entities.Add(Ent);
+    Before := nil;
+    if FMonsters.Count > 0 then
+      Before := FMonsters.Last;
+    SpawnEntity(Ent);
+    if (FMonsters.Count = 0) or (FMonsters.Last = Before) then
+      Continue;
+    M := FMonsters.Last;
+    { AI_SPAWNED_*, AI_DO_NOT_COUNT; they go after the boss's enemy }
+    M.DoNotCount := True;
+    Dec(FStats.TotalKills);
+    M.Alert;
+    Particles.SpawnTeleport(M.Transform.Translation);
+    Dec(Boss.MonsterSlots);
+    Inc(Made);
+  end;
+  if Made > 0 then
+    Sounds.PlayAt('sound/medic_commander/monsterspawn1.wav', Boss.Transform, 1, ATTN_NONE, chBody);
+  WritelnLog('QuakeWorld', '%s spawns %d %s (%d slots left)', [Boss.Transform.Name, Made, Cls, Boss.MonsterSlots]);
+end;
+
+procedure TQuakeWorld.HeatBeam(const Monster: TQuakeMonster; const Eye, Target: TVector3);
+var
+  T: TQuakeTrace;
+  Dir: TVector3;
+begin
+  { monster_fire_heat: a trace to the target and on, 10 to what it hits }
+  Dir := (Target - Eye).Normalize;
+  T := WorldTrace(CgeToQuake(Eye), CgeToQuake(Eye + Dir * 8192), TVector3.Zero, TVector3.Zero, MASK_SHOT, Monster);
+  if T.Ent is TQuakePlayerMovement then
+  begin
+    { Drawn to just short of the player: particles at the eye fill the view }
+    if PointsDistance(Eye, QuakeToCge(T.EndPos)) > 64 then
+      Particles.SpawnBeam(Eye, QuakeToCge(T.EndPos) - Dir * 48, Vector3(1.0, 0.6, 0.2));
+    DamagePlayer(Monster.AttackDamage, Eye);
+  end else
+  begin
+    Particles.SpawnBeam(Eye, QuakeToCge(T.EndPos), Vector3(1.0, 0.6, 0.2));
+  end;
+  if not (T.Ent is TQuakePlayerMovement) then
+  if T.Hit and ((T.Contents and CONTENTS_SOLID) <> 0) then
+    Particles.SpawnSteam(QuakeToCge(T.EndPos) - Dir * 2, -Dir, 8, 60, 223);
+end;
+
+procedure TQuakeWorld.UpdateWidows;
+var
+  M, S: TQuakeMonster;
+  Ent: TQuakeEntity;
+  Org: TVector3;
+begin
+  for M in FMonsters do
+    if (M.Def^.ClassName = 'monster_widow') and (M.State = msDead) and (not M.Gibbed) and M.Transform.Exists then
+    begin
+      { spawn_out_do: splashes, TE_BOSSTPORT, the legs left behind, gone }
+      Org := M.Origin;
+      TempEntity(TE_EXPLOSION1, M.Transform.Translation + Vector3(0, 36, 0));
+      Particles.SpawnTeleport(M.Transform.Translation);
+      Sounds.PlayAtPoint('sound/misc/bigtele.wav', M.Transform.Translation);
+      Ent := TQuakeEntity.Create;
+      Ent.SetField('classname', 'widow_legs');
+      Ent.SetField('origin', Format('%d %d %d', [Round(Org.X), Round(Org.Y), Round(Org.Z - 24)]));
+      Ent.SetField('angle', IntToStr(Round(M.Facing)));
+      FBsp.Entities.Add(Ent);
+      FProps.Add(TQuakeProp.CreateProp(FMap, pkWidowLegs, Ent));
+      M.Gibbed := True;
+      M.Transform.Exists := False;
+      WritelnLog('QuakeWorld', '%s beams out', [M.Transform.Name]);
+    end else
+    if (M.Def^.ClassName = 'monster_widow2') and (not M.IsAlive) and (not M.Gibbed) and
+       (M.Health > M.GibHealth) and not FCounters.ContainsKey(M.Entity) then
+    begin
+      { widow2_die: KillChildren, every stalker on the map dies }
+      FCounters.AddOrSetValue(M.Entity, 1);
+      for S in FMonsters do
+        if S.IsAlive and (S.Def^.ClassName = 'monster_stalker') then
+          S.TakeDamage(S.Health + 1);
+      WritelnLog('QuakeWorld', '%s dies: her stalkers with her', [M.Transform.Name]);
+    end;
+end;
+
 procedure TQuakeWorld.MedicSummon(const Medic: TQuakeMonster);
 const
   Reinforcements: array[0..6] of String = ('monster_soldier_light', 'monster_soldier',
@@ -4983,7 +5116,9 @@ begin
   for M in FMonsters do
     if (M.State = msDead) and (not M.Gibbed) and M.Transform.Exists and
        ((M.Def^.ClassName = 'monster_supertank') or (M.Def^.ClassName = 'monster_boss2') or
-        (M.Def^.ClassName = 'monster_jorg') or (M.Def^.ClassName = 'monster_boss5')) then
+        (M.Def^.ClassName = 'monster_jorg') or (M.Def^.ClassName = 'monster_boss5') or
+        { Ground Zero: carrier_dead, widow2's death explosions }
+        (M.Def^.ClassName = 'monster_carrier') or (M.Def^.ClassName = 'monster_widow2')) then
     begin
       Known := False;
       for K := 0 to High(FBossExplosions) do
@@ -5067,6 +5202,7 @@ begin
     end;
 
   UpdateBossExplosions;
+  UpdateWidows;
 
   { MakronSpawn: a monster_makron where Jorg died, jumping at the player
     (400 toward him, 200 up) }
@@ -5214,7 +5350,12 @@ begin
     akRipper, akBlueBlaster, akLoogie, akHeatRocket, akPlasma:
       XatrixMonsterShot(Monster, Eye, Dir);
     akSummon:
-      MedicSummon(Monster);
+      if Monster.Def^.ClassName = 'monster_medic_commander' then
+        MedicSummon(Monster)
+      else
+        BossSummon(Monster);
+    akHeatBeam:
+      HeatBeam(Monster, Eye, Target);
     akLaser:
       begin
         { The laser soldier's beam (dabeam): 1 to the player each frame it

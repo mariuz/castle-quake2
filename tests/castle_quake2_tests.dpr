@@ -864,7 +864,7 @@ begin
     (FindItemDef('item_quadfire')^.Param = POWERUP_QUADFIRE), 'ammo_trap is the trap weapon; item_quadfire is DualFire');
   Check((MonsterMass('monster_soldier_light') = 100) and (MonsterMass('monster_tank_commander') = 500) and
     (MonsterMass('monster_gladb') = 350) and (MonsterMass('monster_gladiator') = 400) and
-    (MonsterMass('monster_carrier') = 200), 'monster masses by class prefix (traps take under 400)');
+    (MonsterMass('monster_kamikaze') = 200), 'monster masses by class prefix (traps take under 400)');
 end;
 
 { Ground Zero's weapons and items: their slots, ammo, gun frames }
@@ -979,7 +979,7 @@ begin
     end;
   end;
   Check(AllMatch, 'monster attack sequences match the demo models frame names');
-  CheckEquals(0, Length(MonsterAttackSeqs('monster_carrier')), 'monsters without a table use the generic attack');
+  CheckEquals(0, Length(MonsterAttackSeqs('monster_kamikaze')), 'monsters without a table use the generic attack');
   Check((Length(MonsterAttackSeqs('monster_gekk')) = 4) and (MonsterAttackSeqs('monster_soldier_ripper')[0].Kind = akRipper) and
     (MonsterAttackSeqs('monster_boss5')[1].Kind = akHeatRocket) and (MonsterAttackSeqs('monster_gladb')[0].Kind = akPlasma) and
     (MonsterAttackSeqs('monster_chick_heat')[0].Kind = akHeatRocket), 'The Reckoning''s monsters: their own weapons on their base tables');
@@ -1335,8 +1335,8 @@ end;
 
 procedure TestRogueModels;
 const
-  Classes: array[0..3] of String = ('monster_daedalus', 'monster_medic_commander', 'monster_stalker',
-    'monster_turret');
+  Classes: array[0..6] of String = ('monster_daedalus', 'monster_medic_commander', 'monster_stalker',
+    'monster_turret', 'monster_carrier', 'monster_widow', 'monster_widow2');
 var
   C: String;
   Mdl: TQuakeMd2;
@@ -1595,7 +1595,7 @@ begin
     end;
   end;
   Check(AllMatch, 'monster walk / run loops match the demo models frame names');
-  CheckEquals(0, Length(MonsterMoveSeq('monster_carrier', True).Dists), 'monsters without a move table keep their speed');
+  CheckEquals(0, Length(MonsterMoveSeq('monster_kamikaze', True).Dists), 'monsters without a move table keep their speed');
   Check((Length(MonsterMoveSeq('monster_gekk', True).Dists) = 6) and (MonsterMoveSeq('monster_gladb', True).FirstFrame = 'run1'),
     'the gekk runs on run_01 .. 06, the beta gladiator like the gladiator');
   { The gekk in water: amb_01 .. 04 at 16 a frame, bites then claws }
@@ -1615,6 +1615,13 @@ begin
     (Length(MonsterMoveSeq('monster_stalker', False).Dists) = 8) and
     (MonsterAttackSeqs('monster_turret')[0].FirstFrame = 'pow01'),
     'the stalker runs on run01 .. 04 and walks on walk01 .. 08; the turret fires on pow01');
+  { Ground Zero's bosses: the carrier's flyers and the Widow's stalkers,
+    her heat beam; the Widows' walks at MODEL_SCALE 2 }
+  Check((MonsterAttackSeqs('monster_carrier')[High(MonsterAttackSeqs('monster_carrier'))].Kind = akSummon) and
+    (MonsterAttackSeqs('monster_widow2')[0].Kind = akHeatBeam) and
+    SameValue(MonsterMoveSeq('monster_widow', True).Dists[0], 5.58, 0.01) and
+    (MonsterMass('monster_widow2') = 2500) and (MonsterGibs('monster_widow2').GibHealth = -900),
+    'the carrier and the Widow: summons, heat beam, doubled walk, mass, gib health');
   { Quake 2 paces: 10 frames a second of ai_run distances }
   Check(SameValue(MoveSeqSpeed(MonsterMoveSeq('monster_soldier', True)), 121.67, 0.01) and
     SameValue(MoveSeqSpeed(MonsterMoveSeq('monster_tank', True)), 46.875, 0.01) and

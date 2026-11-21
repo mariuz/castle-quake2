@@ -876,6 +876,79 @@
         "$$ClassName" : "TCastleVector3Persistent",
         "X" : 3.1680000000000000E+003
       }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akHitscan",
+      "AttackCooldown" : 1.0000000000000000E+000,
+      "AttackRange" : 1.5000000000000000E+003,
+      "Damage" : 6,
+      "DeathSound" : "death",
+      "Flying" : true,
+      "Health" : 2000,
+      "Model" : "models/monsters/carrier/tris.md2",
+      "MonsterClass" : "monster_carrier",
+      "Name" : "carrier",
+      "PainSound" : "pain_md",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SightSound" : "sight",
+      "SoundDir" : "carrier",
+      "Speed" : 6.0000000000000000E+001,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 3.2640000000000000E+003
+      }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akBlaster",
+      "AttackCooldown" : 1.0000000000000000E+000,
+      "AttackRange" : 1.5000000000000000E+003,
+      "Damage" : 10,
+      "Health" : 2000,
+      "Model" : "models/monsters/blackwidow/tris.md2",
+      "MonsterClass" : "monster_widow",
+      "Name" : "widow",
+      "PainSound" : "bw1pain1",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SoundDir" : "widow",
+      "Speed" : 8.0000000000000000E+001,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 3.3600000000000000E+003
+      }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akHitscan",
+      "AttackCooldown" : 1.0000000000000000E+000,
+      "AttackRange" : 1.5000000000000000E+003,
+      "Damage" : 10,
+      "DeathSound" : "death",
+      "Health" : 2800,
+      "Model" : "models/monsters/blackwidow2/tris.md2",
+      "MonsterClass" : "monster_widow2",
+      "Name" : "widow2",
+      "PainSound" : "bw2pain1",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SoundDir" : "widow",
+      "Speed" : 1.4000000000000000E+002,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 3.4560000000000000E+003
+      }
     }
   ]
 }

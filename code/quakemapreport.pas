@@ -66,7 +66,7 @@ uses
 
 const
   { Spawned, used by targets, drawn or used as markers by the game code }
-  SupportedClasses: array[0..120] of String = (
+  SupportedClasses: array[0..121] of String = (
     { func_group: brushes the map compiler merged into the world }
     'func_group', 'worldspawn', 'info_player_start', 'info_player_deathmatch', 'info_player_coop',
     'info_player_intermission', 'info_null', 'info_notnull', 'misc_teleporter',
@@ -107,6 +107,8 @@ const
       only, or not in its item list) }
     'weapon_disintegrator', 'ammo_disruptor', 'ammo_nuke', 'item_sphere_hunter', 'item_sphere_vengeance',
     'item_doppleganger', 'weapon_nailgun', 'ammo_nails', 'weapon_heatbeam',
+    { the legs the Widow leaves (made by the game, never in a map) }
+    'widow_legs',
     { the remaster's points of interest (the compass) and level transition landmarks }
     'target_poi', 'info_landmark',
     { clocks and displays (target_character frames) }

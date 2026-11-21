@@ -30,8 +30,9 @@ type
       bolt, the laser soldier's beam (damage every frame it holds), the
       heat-seeking rocket, the phalanx plasma ball, the gekk's spit }
     akRipper, akBlueBlaster, akLaser, akHeatRocket, akPlasma, akLoogie,
-    { Ground Zero: the medic commander calling reinforcements }
-    akSummon);
+    { Ground Zero: the medic commander, the carrier and the Widow calling
+      reinforcements; the Widow's heat beam (monster_fire_heat) }
+    akSummon, akHeatBeam);
 
   { When a sequence can be chosen (auDodge: only by a dodge, never by range) }
   TAttackUse = (auRanged, auMelee, auAny, auDodge);
@@ -658,6 +659,70 @@ begin
     AddSeq(Result, Weighted(S, 0.5));
     AddSeq(Result, MeleeSeq('attack01', 8, [4], 5, 5, 50, 'melee2'));
     AddSeq(Result, MeleeSeq('attack11', 5, [2], 5, 5, 50, 'melee1'));
+  end else
+  if MonsterClass = 'monster_carrier' then
+  begin
+    { carrier_attack: the machineguns (firea09 / 10, a bullet of 6 from each
+      side, again from firea11 while it sees), grenades (fireb07, 50 at
+      600, up to 4 in 1.3 s), the railgun (search04 at the spot saved on
+      search02, 50), rockets (fireb01, 4 of 50 at 500: an enemy behind or
+      below) and flyers (spawn12; more than 2 slots) }
+    S := MakeSeq('firea01', 15, [8, 9], akHitscan, 6, '');
+    S.Volley := 2;
+    AddSeq(Result, Weighted(Looping(S, 8, 10, 0.7), 2));
+    S := MakeSeq('fireb01', 16, [6], akGrenade, 50, '');
+    S.Speed := 600;
+    S.MaxLoops := 3;
+    AddSeq(Result, Weighted(Looping(S, 6, 9, 0.8), 2));
+    S := MakeSeq('search01', 9, [3], akRail, 50, 'railgun');
+    S.AimFrame := 1;
+    S.MinDist := 125;
+    AddSeq(Result, Weighted(S, 3));
+    S := MakeSeq('fireb01', 1, [0], akRocket, 50, '');
+    S.Volley := 4;
+    AddSeq(Result, Weighted(S, 0.5));
+    S := MakeSeq('spawn01', 18, [11], akSummon, 0, '');
+    S.MinDist := 125;
+    AddSeq(Result, Weighted(S, 3));
+  end else
+  if MonsterClass = 'monster_widow' then
+  begin
+    { widow_attack: the blaster (fired03 .. 20, a bolt of 10 at 1000 every
+      frame), the railgun (firea04 at the spot saved on firea03, 50), the
+      kick in melee range (kick04, 50 .. 55, kick 500) and two stalkers
+      (spawn10; 2 slots or more) }
+    S := MakeSeq('fired03', 18, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], akBlaster, 10, '');
+    S.Speed := 1000;
+    AddSeq(Result, Weighted(S, 4));
+    S := MakeSeq('firea01', 9, [3], akRail, 50, 'railgun');
+    S.AimFrame := 2;
+    AddSeq(Result, Weighted(S, 3));
+    AddSeq(Result, MeleeSeq('kick01', 8, [3], 50, 6, 500, ''));
+    S := MakeSeq('spawn01', 18, [9], akSummon, 0, '');
+    S.MinDist := 150;
+    AddSeq(Result, Weighted(S, 3));
+  end else
+  if MonsterClass = 'monster_widow2' then
+  begin
+    { widow2_attack: the heat beam (fireb05 .. 08, 10 a frame, again half
+      the time), the disruptor (firea04 at the spot saved on firea03, 20,
+      homing at 500), the tongue in melee range (tongs01 .. 03, 2 a frame,
+      the crunch of 20 .. 25 with kick 500 on tongs07) and two stalkers
+      (spawn14) }
+    S := MakeSeq('fireb05', 5, [0, 1, 2, 3], akHeatBeam, 10, '');
+    AddSeq(Result, Weighted(Looping(S, 0, 4, 0.35), 4));
+    S := MakeSeq('firea01', 7, [3], akHeatRocket, 20, '');
+    S.Speed := 500;
+    S.AimFrame := 2;
+    AddSeq(Result, Weighted(Looping(S, 0, 6, 0.4), 3));
+    S := MeleeSeq('tongs01', 8, [0, 1, 2, 6], 2, 0, 500, '');
+    S.ClawFrom := 3;
+    S.ClawDamage := 20;
+    S.ClawRandom := 6;
+    AddSeq(Result, S);
+    S := MakeSeq('spawn01', 18, [13], akSummon, 0, '');
+    S.MinDist := 150;
+    AddSeq(Result, Weighted(S, 3));
   end else
   if MonsterClass = 'monster_turret' then
     { turret_move_fire (pow01 .. 04): TurretFire on pow01; the turret's own

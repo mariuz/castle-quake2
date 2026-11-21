@@ -558,7 +558,7 @@ type
   TPropKind = (pkExplobox, pkBanner, pkDeadSoldier, pkSatelliteDish, pkStroggShip, pkGibHead,
     pkViper, pkBigViper, pkViperBomb, pkBlackHole, pkEasterTank, pkEasterChick, pkEasterChick2,
     pkTeleporter, pkCommanderBody, pkBoss3Stand, pkMineLight1, pkMineLight2,
-    pkRotatingLight, pkTransport, pkNukeCore, pkBlacklight, pkOrb);
+    pkRotatingLight, pkTransport, pkNukeCore, pkBlacklight, pkOrb, pkWidowLegs);
 
   { misc_* decorations: exploding barrels, banners, corpses, the satellite dish,
     flying Strogg ships and vipers (follow path_corners when triggered), gib
@@ -843,7 +843,7 @@ const
   { Built-in monster definitions. At startup data/monsters.castle-transform
     (TQuakeMonsterType components, editable in the CGE editor) overrides
     and extends them in MonsterDefs. }
-  DefaultMonsterDefs: array[0..33] of TQuakeMonsterDef = (
+  DefaultMonsterDefs: array[0..36] of TQuakeMonsterDef = (
     (ClassName: 'monster_soldier_light'; Model: 'models/monsters/soldier/tris.md2'; Skin: 0; Health: 20; Speed: 120; Attack: akBlaster; Damage: 5; AttackRange: 900; AttackCooldown: 1.6; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain2'; DeathSound: 'soldeth1'; AttackSound: 'solatck2'),
     (ClassName: 'monster_soldier'; Model: 'models/monsters/soldier/tris.md2'; Skin: 2; Health: 30; Speed: 120; Attack: akPellets; Damage: 2; AttackRange: 700; AttackCooldown: 1.6; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain1'; DeathSound: 'soldeth1'; AttackSound: 'solatck1'),
     (ClassName: 'monster_soldier_ss'; Model: 'models/monsters/soldier/tris.md2'; Skin: 4; Health: 40; Speed: 120; Attack: akHitscan; Damage: 2; AttackRange: 900; AttackCooldown: 0.9; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain3'; DeathSound: 'soldeth3'; AttackSound: 'solatck3'),
@@ -882,7 +882,11 @@ const
     (ClassName: 'monster_daedalus'; Model: 'models/monsters/hover/tris.md2'; Skin: 2; Health: 450; Speed: 120; Attack: akBlaster; Damage: 1; AttackRange: 900; AttackCooldown: 0.8; Flying: True; SoundDir: 'daedalus'; SightSound: 'daedsght1'; PainSound: 'daedpain1'; DeathSound: 'daeddeth1'; AttackSound: 'daedatck1'),
     (ClassName: 'monster_medic_commander'; Model: 'models/monsters/medic/tris.md2'; Skin: 2; Health: 600; Speed: 110; Attack: akBlaster; Damage: 2; AttackRange: 900; AttackCooldown: 0.4; Flying: False; SoundDir: 'medic_commander'; SightSound: 'medsght'; PainSound: 'medpain1'; DeathSound: 'meddeth'; AttackSound: 'medatck1a'),
     (ClassName: 'monster_stalker'; Model: 'models/monsters/stalker/tris.md2'; Skin: 0; Health: 250; Speed: 170; Attack: akBlaster; Damage: 15; AttackRange: 1000; AttackCooldown: 1.0; Flying: False; SoundDir: 'stalker'; SightSound: 'sight'; PainSound: 'pain'; DeathSound: 'death'; AttackSound: ''),
-    (ClassName: 'monster_turret'; Model: 'models/monsters/turret/tris.md2'; Skin: 0; Health: 240; Speed: 0; Attack: akBlaster; Damage: 20; AttackRange: 2000; AttackCooldown: 1.2; Flying: True; SoundDir: ''; SightSound: ''; PainSound: ''; DeathSound: ''; AttackSound: '')
+    (ClassName: 'monster_turret'; Model: 'models/monsters/turret/tris.md2'; Skin: 0; Health: 240; Speed: 0; Attack: akBlaster; Damage: 20; AttackRange: 2000; AttackCooldown: 1.2; Flying: True; SoundDir: ''; SightSound: ''; PainSound: ''; DeathSound: ''; AttackSound: ''),
+    { Ground Zero's bosses (health by skill: CreateMonster) }
+    (ClassName: 'monster_carrier'; Model: 'models/monsters/carrier/tris.md2'; Skin: 0; Health: 2000; Speed: 60; Attack: akHitscan; Damage: 6; AttackRange: 1500; AttackCooldown: 1.0; Flying: True; SoundDir: 'carrier'; SightSound: 'sight'; PainSound: 'pain_md'; DeathSound: 'death'; AttackSound: ''),
+    (ClassName: 'monster_widow'; Model: 'models/monsters/blackwidow/tris.md2'; Skin: 0; Health: 2000; Speed: 80; Attack: akBlaster; Damage: 10; AttackRange: 1500; AttackCooldown: 1.0; Flying: False; SoundDir: 'widow'; SightSound: ''; PainSound: 'bw1pain1'; DeathSound: ''; AttackSound: ''),
+    (ClassName: 'monster_widow2'; Model: 'models/monsters/blackwidow2/tris.md2'; Skin: 0; Health: 2800; Speed: 140; Attack: akHitscan; Damage: 10; AttackRange: 1500; AttackCooldown: 1.0; Flying: False; SoundDir: 'widow'; SightSound: ''; PainSound: 'bw2pain1'; DeathSound: 'death'; AttackSound: '')
   );
 
 var
@@ -1053,7 +1057,7 @@ procedure AdaptVariantAttacks(var Seqs: TMonsterAttackSeqs; const Def: PQuakeMon
 
 function MonsterMass(const MonsterClass: String): Integer;
 const
-  Masses: array[0..27] of record
+  Masses: array[0..30] of record
     ClassName: String;
     Mass: Integer;
   end = (
@@ -1070,7 +1074,9 @@ const
     (ClassName: 'monster_makron'; Mass: 500), (ClassName: 'misc_insane'; Mass: 300),
     (ClassName: 'monster_gekk'; Mass: 300), (ClassName: 'monster_fixbot'; Mass: 150),
     (ClassName: 'monster_daedalus'; Mass: 225), (ClassName: 'monster_medic_commander'; Mass: 600),
-    (ClassName: 'monster_stalker'; Mass: 250), (ClassName: 'monster_turret'; Mass: 250));
+    (ClassName: 'monster_stalker'; Mass: 250), (ClassName: 'monster_turret'; Mass: 250),
+    (ClassName: 'monster_carrier'; Mass: 1000), (ClassName: 'monster_widow'; Mass: 1500),
+    (ClassName: 'monster_widow2'; Mass: 2500));
 var
   I, Best: Integer;
 begin
@@ -1171,6 +1177,15 @@ begin
     Add('sm_meat', 4);
     Add('head2', 1);
   end else
+  if MonsterClass = 'monster_carrier' then
+    Result.GibHealth := -200
+  else
+  if MonsterClass = 'monster_widow' then
+    Result.GibHealth := -5000
+  else
+  if MonsterClass = 'monster_widow2' then
+    Result.GibHealth := -900
+  else
   if MonsterClass = 'monster_turret' then
   begin
     { turret_die: an explosion and debris, always }
@@ -1300,6 +1315,20 @@ begin
   if MonsterClass = 'monster_stalker' then
   begin
     Mins := Vector3(-28, -28, -18); Maxs := Vector3(28, 28, 18);
+  end else
+  if MonsterClass = 'monster_carrier' then
+  begin
+    { It flies: Quake's box around its origin, not moved to the feet }
+    Mins := Vector3(-56, -56, -44); Maxs := Vector3(56, 56, 44);
+    Exit;
+  end else
+  if MonsterClass = 'monster_widow' then
+  begin
+    Mins := Vector3(-40, -40, 0); Maxs := Vector3(40, 40, 144);
+  end else
+  if MonsterClass = 'monster_widow2' then
+  begin
+    Mins := Vector3(-70, -70, 0); Maxs := Vector3(70, 70, 144);
   end else
   if MonsterClass = 'monster_turret' then
   begin
@@ -1605,6 +1634,37 @@ begin
     PowerArmorType := paScreen;
     PowerArmorPower := AEntity.GetInt('power_armor_power', 100);
   end;
+  { Ground Zero's bosses: health and spawning slots by skill, power
+    shields on nightmare }
+  if Def^.ClassName = 'monster_carrier' then
+  begin
+    Health := Max(2000, 2000 + 1000 * (GameSkill - 1));
+    case GameSkill of
+      0: MonsterSlots := 3;
+      3: MonsterSlots := 9;
+      else MonsterSlots := 6;
+    end;
+  end;
+  if (Def^.ClassName = 'monster_widow') or (Def^.ClassName = 'monster_widow2') then
+  begin
+    if Def^.ClassName = 'monster_widow' then
+      Health := 2000 + 1000 * GameSkill
+    else
+      Health := 2800 + 1000 * GameSkill;
+    case GameSkill of
+      0, 1: MonsterSlots := 3;
+      2: MonsterSlots := 4;
+      else MonsterSlots := 6;
+    end;
+    if GameSkill >= 3 then
+    begin
+      PowerArmorType := paShield;
+      if Def^.ClassName = 'monster_widow' then
+        PowerArmorPower := 500
+      else
+        PowerArmorPower := 750;
+    end;
+  end;
   { The medic commander's reinforcement slots by skill }
   if Def^.ClassName = 'monster_medic_commander' then
     case GameSkill of
@@ -1676,6 +1736,10 @@ begin
     { The stalker on the ceiling: upside down (roll 180) }
     if OnCeiling then
       Model.Scene.Rotation := Vector4(1, 0, 0, Pi);
+    { Our origins are 24 above the box's bottom; the Widows' models are
+      drawn from their Quake origin, the box's bottom }
+    if (Def^.ClassName = 'monster_widow') or (Def^.ClassName = 'monster_widow2') then
+      Model.Scene.Translation := Vector3(0, -24, 0);
   end;
   if IsTurretMonster then
   begin
@@ -4134,7 +4198,7 @@ const
     'models/objects/minelite/light1/tris.md2', 'models/objects/minelite/light2/tris.md2',
     'models/objects/light/tris.md2', 'models/objects/ship/tris.md2',
     'models/objects/core/tris.md2', 'models/items/spawngro2/tris.md2',
-    'models/items/spawngro2/tris.md2');
+    'models/items/spawngro2/tris.md2', 'models/monsters/legs/tris.md2');
 var
   Pos: TVector3;
   Flags, Frame: Integer;
@@ -4212,6 +4276,10 @@ begin
     pkOrb:
       if Model <> nil then
         Model.SetFrame(2);
+    { Widowlegs_Spawn: what the Widow leaves when she beams out }
+    pkWidowLegs:
+      if Model <> nil then
+        Model.PlayAnim('', False, 10);
   end;
   { SP_misc_blackhole / eastertank / easterchick(2): frame ranges }
   AnimFirst := -1;
@@ -4266,7 +4334,7 @@ begin
     LightTimer := 0.1;
     Model.SetTint(Lighting.SampleLight(Transform.Translation + Vector3(0, 8, 0)));
   end;
-  if (Model <> nil) and (Kind in [pkBanner, pkSatelliteDish]) then
+  if (Model <> nil) and (Kind in [pkBanner, pkSatelliteDish, pkWidowLegs]) then
     Model.Update(SecondsPassed);
   if Kind in [pkBlacklight, pkOrb] then
   begin
