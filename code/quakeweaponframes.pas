@@ -18,6 +18,9 @@ const
   { Hand grenade fuse (GRENADE_TIMER) }
   GrenadeTimer = 3.0;
   HandGrenadeSlot = 11;
+  { The Reckoning's traps: thrown like hand grenades (Throw_Generic), but
+    they never go off in the hand }
+  TrapGunSlot = 14;
 
 type
   { Weapon_Generic's frame ranges: activate 0..ActivateLast, fire
@@ -76,6 +79,9 @@ type
     OnAmmo: TGunAmmoFunc;
     { Pause on idle frames like Quake 2 (rand() & 15); off in tests }
     RandomPauses: Boolean;
+    { The Reckoning's DualFire: frames at 20 Hz instead of 10
+      (Weapon_AnimationTime's gunrate * 2), and half the grenade waits }
+    Haste: Boolean;
     constructor Create;
     { Start with a weapon being raised (level start, respawn) }
     procedure Reset(const ASlot: Integer; const RaiseIt: Boolean = True);
@@ -86,6 +92,8 @@ type
     procedure Update(const SecondsPassed: Single);
     { One Quake 2 weapon think }
     procedure Think;
+    { Seconds per frame: GunFrameTime, half that with Haste }
+    function FrameTime: Single;
     property Slot: Integer read FSlot;
     property PendingSlot: Integer read FPendingSlot;
     property State: TGunState read FState;
@@ -104,7 +112,8 @@ type
     property Time: Single read FTime;
   end;
 
-{ Frame table of a weapon slot (1 blaster .. 10 BFG, 11 hand grenades) }
+{ Frame table of a weapon slot (1 blaster .. 10 BFG, 11 hand grenades,
+  12 ion ripper, 13 phalanx, 14 traps) }
 function GunFrameDef(const Slot: Integer): TGunFrameDef;
 
 implementation
@@ -143,6 +152,10 @@ begin
     8: Result := MakeDef(5, 20, 49, 53, [], [6, 7, 8, 9, 10, 11]);
     9: Result := MakeDef(3, 18, 56, 61, [56], [4]);
     10: Result := MakeDef(8, 32, 55, 58, [39, 45, 50, 55], [9, 17]);
+    { The Reckoning: Weapon_Ionripper, Weapon_Phalanx (two balls, frames 7
+      and 8) }
+    12: Result := MakeDef(5, 7, 36, 39, [36], [6]);
+    13: Result := MakeDef(5, 20, 58, 63, [29, 42, 55], [7, 8]);
     { Weapon_Grenade: throw 0..15, idle 16..48, no raise / put away }
     else Result := MakeDef(0, 15, 48, 48, [29, 34, 39, 48], []);
   end;
@@ -202,14 +215,22 @@ begin
     FPendingSlot := ASlot;
 end;
 
+function TQuakeGun.FrameTime: Single;
+begin
+  if Haste then
+    Result := GunFrameTime / 2
+  else
+    Result := GunFrameTime;
+end;
+
 function TQuakeGun.FrameLerp: Single;
 begin
-  Result := EnsureRange(FAccum / GunFrameTime, 0, 1);
+  Result := EnsureRange(FAccum / FrameTime, 0, 1);
 end;
 
 function TQuakeGun.Cooking: Boolean;
 begin
-  Result := (FSlot = HandGrenadeSlot) and (FState = gsFiring) and (FFrame <= 12);
+  Result := (FSlot in [HandGrenadeSlot, TrapGunSlot]) and (FState = gsFiring) and (FFrame <= 12);
 end;
 
 procedure TQuakeGun.Update(const SecondsPassed: Single);
@@ -225,11 +246,11 @@ begin
   end;
   FAccum := FAccum + SecondsPassed;
   { Large steps (loading hitches): don't replay many frames }
-  if FAccum > 4 * GunFrameTime then
-    FAccum := GunFrameTime;
-  while FAccum >= GunFrameTime do
+  if FAccum > 4 * FrameTime then
+    FAccum := FrameTime;
+  while FAccum >= FrameTime do
   begin
-    FAccum := FAccum - GunFrameTime;
+    FAccum := FAccum - FrameTime;
     Think;
   end;
 end;
@@ -255,7 +276,7 @@ end;
 procedure TQuakeGun.Think;
 begin
   FOldFrame := FFrame;
-  if FSlot = HandGrenadeSlot then
+  if FSlot in [HandGrenadeSlot, TrapGunSlot] then
     Grenade
   else
     Generic(GunFrameDef(FSlot));
@@ -531,16 +552,19 @@ begin
       if FGrenadeTime = 0 then
       begin
         FGrenadeTime := FTime + GrenadeTimer + 0.2;
-        FLoopSound := 'sound/weapons/hgrenc1b.wav';
+        if FSlot = TrapGunSlot then
+          FLoopSound := 'sound/weapons/traploop.wav'
+        else
+          FLoopSound := 'sound/weapons/hgrenc1b.wav';
       end;
-      { Held too long: it goes off in the hand }
-      if (not FGrenadeBlewUp) and (FTime >= FGrenadeTime) then
+      { Held too long: a grenade goes off in the hand (a trap waits) }
+      if (FSlot <> TrapGunSlot) and (not FGrenadeBlewUp) and (FTime >= FGrenadeTime) then
       begin
         FLoopSound := '';
         FFuse := 0;
         Event(geGrenadeBlowUp);
         FGrenadeBlewUp := True;
-        FGrenadeTime := FTime + 1.0;
+        FGrenadeTime := FTime + 10 * FrameTime;
       end;
       if Attack then
         Exit;
@@ -559,7 +583,8 @@ begin
       FLoopSound := '';
       FFuse := Max(0, FGrenadeTime - FTime);
       Event(geGrenadeThrow);
-      FGrenadeTime := FTime + 1.0;
+      { grenade_wait_time: 1 s, half with DualFire }
+      FGrenadeTime := FTime + 10 * FrameTime;
     end;
     if (FFrame = 15) and (FTime < FGrenadeTime) then
       Exit;

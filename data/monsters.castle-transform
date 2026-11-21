@@ -569,6 +569,212 @@
         "$$ClassName" : "TCastleVector3Persistent",
         "X" : 2.0160000000000000E+003
       }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akRipper",
+      "AttackCooldown" : 1.6000000238418579E+000,
+      "AttackRange" : 9.0000000000000000E+002,
+      "Damage" : 5,
+      "DeathSound" : "soldeth2",
+      "Health" : 50,
+      "Model" : "models/monsters/soldierh/tris.md2",
+      "MonsterClass" : "monster_soldier_ripper",
+      "Name" : "soldier_ripper",
+      "PainSound" : "solpain2",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SightSound" : "solsght1",
+      "SoundDir" : "soldier",
+      "Speed" : 1.2000000000000000E+002,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 2.1120000000000000E+003
+      }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akBlueBlaster",
+      "AttackCooldown" : 1.6000000238418579E+000,
+      "AttackRange" : 9.0000000000000000E+002,
+      "Damage" : 1,
+      "DeathSound" : "soldeth1",
+      "Health" : 60,
+      "Model" : "models/monsters/soldierh/tris.md2",
+      "MonsterClass" : "monster_soldier_hypergun",
+      "Name" : "soldier_hypergun",
+      "PainSound" : "solpain1",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SightSound" : "solsght1",
+      "Skin" : 2,
+      "SoundDir" : "soldier",
+      "Speed" : 1.2000000000000000E+002,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 2.2080000000000000E+003
+      }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akLaser",
+      "AttackCooldown" : 1.6000000238418579E+000,
+      "AttackRange" : 9.0000000000000000E+002,
+      "Damage" : 1,
+      "DeathSound" : "soldeth3",
+      "Health" : 70,
+      "Model" : "models/monsters/soldierh/tris.md2",
+      "MonsterClass" : "monster_soldier_lasergun",
+      "Name" : "soldier_lasergun",
+      "PainSound" : "solpain3",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SightSound" : "solsght1",
+      "Skin" : 4,
+      "SoundDir" : "soldier",
+      "Speed" : 1.2000000000000000E+002,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 2.3040000000000000E+003
+      }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akHeatRocket",
+      "AttackCooldown" : 2.0000000000000000E+000,
+      "AttackRange" : 1.0000000000000000E+003,
+      "AttackSound" : "chkatck2",
+      "Damage" : 50,
+      "DeathSound" : "chkdeth1",
+      "Health" : 175,
+      "Model" : "models/monsters/bitch/tris.md2",
+      "MonsterClass" : "monster_chick_heat",
+      "Name" : "chick_heat",
+      "PainSound" : "chkpain1",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SightSound" : "chksght1",
+      "Skin" : 2,
+      "SoundDir" : "chick",
+      "Speed" : 1.3000000000000000E+002,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 2.4000000000000000E+003
+      }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akPlasma",
+      "AttackCooldown" : 2.5000000000000000E+000,
+      "AttackRange" : 1.2000000000000000E+003,
+      "Damage" : 35,
+      "DeathSound" : "glddeth2",
+      "Health" : 250,
+      "Model" : "models/monsters/gladb/tris.md2",
+      "MonsterClass" : "monster_gladb",
+      "Name" : "gladb",
+      "PainSound" : "pain",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SightSound" : "sight",
+      "SoundDir" : "gladiator",
+      "Speed" : 1.2000000000000000E+002,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 2.4960000000000000E+003
+      }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akHeatRocket",
+      "AttackCooldown" : 1.2000000476837158E+000,
+      "AttackRange" : 1.5000000000000000E+003,
+      "AttackSound" : "btkunqv2",
+      "Damage" : 40,
+      "DeathSound" : "btkdeth1",
+      "Health" : 1500,
+      "Model" : "models/monsters/boss5/tris.md2",
+      "MonsterClass" : "monster_boss5",
+      "Name" : "boss5",
+      "PainSound" : "btkpain1",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SightSound" : "btkunqv1",
+      "SoundDir" : "bosstank",
+      "Speed" : 8.0000000000000000E+001,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 2.5920000000000000E+003
+      }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "AttackCooldown" : 1.0000000000000000E+000,
+      "AttackRange" : 1.0000000000000000E+003,
+      "AttackSound" : "gk_atck1",
+      "Damage" : 5,
+      "DeathSound" : "gk_deth1",
+      "Health" : 125,
+      "Model" : "models/monsters/gekk/tris.md2",
+      "MonsterClass" : "monster_gekk",
+      "Name" : "gekk",
+      "PainSound" : "gk_pain1",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SightSound" : "gk_sght1",
+      "SoundDir" : "gek",
+      "Speed" : 1.5000000000000000E+002,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 2.6880000000000000E+003
+      }
+    },
+    {
+      "$$ClassName" : "TQuakeMonsterType",
+      "Attack" : "akBlaster",
+      "AttackCooldown" : 2.0000000000000000E+000,
+      "AttackRange" : 9.0000000000000000E+002,
+      "Damage" : 15,
+      "DeathSound" : "flydeth1",
+      "Flying" : true,
+      "Health" : 150,
+      "Model" : "models/monsters/fixbot/tris.md2",
+      "MonsterClass" : "monster_fixbot",
+      "Name" : "fixbot",
+      "PainSound" : "flypain1",
+      "RotationPersistent" : {
+        "$$ClassName" : "TCastleVector4RotationPersistent",
+        "W" : -1.5707963705062866E+000,
+        "Y" : 1.0000000000000000E+000
+      },
+      "SightSound" : "flysght1",
+      "SoundDir" : "flyer",
+      "Speed" : 1.1000000000000000E+002,
+      "TranslationPersistent" : {
+        "$$ClassName" : "TCastleVector3Persistent",
+        "X" : 2.7840000000000000E+003
+      }
     }
   ]
 }

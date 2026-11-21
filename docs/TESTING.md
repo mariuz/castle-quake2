@@ -61,7 +61,7 @@ On Linux without a display, run under `xvfb-run -a -s "-screen 0 1600x900x24"`, 
 | `BS`, `BE` | Start / end a benchmark: logs frame time percentiles, game logic time and shapes drawn |
 | `X`, `H` | Fire once; toggle holding fire |
 | `U`, `F`, `J` | Use; toggle the help computer; jump |
-| `C:slot` | Select a weapon (1 Blaster .. 10 BFG, 11 hand grenades); wait about 1 s before firing it |
+| `C:slot` | Select a weapon (1 Blaster .. 10 BFG, 11 hand grenades, 12 ion ripper, 13 phalanx, 14 traps); wait about 1 s before firing it |
 | `K`, `Y` | Give everything; god mode |
 | `A:deg`, `T:deg`, `P:deg` | Absolute yaw, turn, pitch |
 | `M:units`, `GO:forward side seconds` | Move along the view; hold movement keys |

@@ -84,6 +84,14 @@ begin
     Quake 2 soldier) }
   if Q1Archetype(MonsterClass) <> qaNone then
     Exit(Q1MonsterMoveSeq(MonsterClass, Run));
+  { The Reckoning: the gekk's run_01 .. 06 (walk and run alike); the
+    variants walk like their base monster (the fixbot flies: none) }
+  if MonsterClass = 'monster_gekk' then
+    Exit(MakeMove('run_01', [3.849, 19.606, 25.583, 34.625, 27.365, 28.480]));
+  if MonsterClass = 'monster_fixbot' then
+    Exit;
+  if XatrixBaseClass(MonsterClass) <> '' then
+    Exit(MonsterMoveSeq(XatrixBaseClass(MonsterClass), Run));
   if Copy(MonsterClass, 1, 15) = 'monster_soldier' then
   begin
     { soldier_move_run (after start_run); walking: soldier_move_walk2

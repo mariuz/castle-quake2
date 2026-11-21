@@ -154,6 +154,8 @@ type
     procedure SpawnBfgHit(const Pos: TVector3);
     { TE_BFG_LASER: a short green beam from the ball to a target }
     procedure SpawnBfgLaser(const FromPos, ToPos: TVector3);
+    { A laser beam of this colour for 0.1 s (the laser soldier's: red) }
+    procedure SpawnBeam(const FromPos, ToPos, Color: TVector3);
   public
     { Set by the world: gibs land on and bounce off the map's brushes
       (else render meshes are ray cast) }
@@ -844,6 +846,12 @@ begin
 end;
 
 procedure TQuakeParticleManager.SpawnBfgLaser(const FromPos, ToPos: TVector3);
+begin
+  { CL_ParseLaser: a green beam for 0.1 s }
+  SpawnBeam(FromPos, ToPos, Vector3(0.3, 1.0, 0.3));
+end;
+
+procedure TQuakeParticleManager.SpawnBeam(const FromPos, ToPos, Color: TVector3);
 var
   Dir: TVector3;
   Len, D: Single;
@@ -855,12 +863,11 @@ begin
   if Len < 1 then
     Exit;
   Dir := Dir / Len;
-  { CL_ParseLaser: a green beam for 0.1 s }
   D := 0;
   while D < Len do
   begin
     FParticles.Add(TQuakeParticle.Create(FParent, FromPos + Dir * D, TVector3.Zero, pkTrail,
-      0.1, 1.5, 1.5, Vector3(0.3, 1.0, 0.3)));
+      0.1, 1.5, 1.5, Color));
     D := D + 6;
   end;
 end;

@@ -114,6 +114,10 @@ type
     { Underwater view warp (Quake 2 software renderer's D_WarpScreen) }
     procedure CreateWaterWarp;
     procedure UpdateWaterWarp(const SecondsPassed: Single);
+    { target_poi marker on the HUD (UpdateCompass) and how long it shows }
+    procedure UpdateCompass(const SecondsPassed: Single);
+  private
+    FCompassTime: Single;
     function WantMouseLook: Boolean;
     procedure TouchUse(Sender: TObject);
     procedure TouchNextWeapon(Sender: TObject);
@@ -183,6 +187,15 @@ var
   ViewPlay: TViewPlay;
 
 implementation
+
+{ ", dualfire N s" for the V log while DualFire runs }
+function DualFireText(const Time: Single): String;
+begin
+  if Time > 0 then
+    Result := Format(', dualfire %.1f s', [Time])
+  else
+    Result := '';
+end;
 
 constructor TViewPlay.Create(AOwner: TComponent);
 begin
@@ -677,7 +690,17 @@ begin
     PlaceCamera(FWorld.SpawnPoint, FWorld.SpawnAngle);
     Hud.ShowMessage(FMapName, 3.0);
   end else
+  begin
     Hud.ShowMessage('Failed to load level: ' + LevelName, 5.0);
+    { An autotest with no map to play can't run its script: say so, quit
+      with exit code 1 (a missing map used to hang the test) }
+    if FAutoTestActive and (FWorld.Bsp = nil) then
+    begin
+      WritelnWarning('GameViewPlay', 'Autotest: level "%s" could not be loaded, quitting', [LevelName]);
+      ExitCode := 1;
+      FQuitPending := True;
+    end;
+  end;
 end;
 
 function TViewPlay.SaveScreenOffscreen: TCastleImage;
@@ -1273,10 +1296,11 @@ begin
     WritelnLog('Demo', 'Replay drift: max %.1f units', [FDemoMaxDrift]);
     WritelnLog('Demo', 'Kills: %d / %d, secrets %d / %d, goals %d / %d', [FWorld.Stats.Kills, FWorld.Stats.TotalKills,
       FWorld.Stats.Secrets, FWorld.Stats.TotalSecrets, FWorld.Stats.Goals, FWorld.Stats.TotalGoals]);
-    WritelnLog('Demo', 'Gun: weapon %d state %d frame %d, ammo shells %d bullets %d grenades %d cells %d slugs %d', [
+    WritelnLog('Demo', 'Gun: weapon %d state %d frame %d, ammo shells %d bullets %d grenades %d cells %d slugs %d mag slugs %d traps %d%s', [
       FWorld.Gun.Slot, Ord(FWorld.Gun.State), FWorld.Gun.Frame, FWorld.Stats.Ammo[atShells],
       FWorld.Stats.Ammo[atBullets], FWorld.Stats.Ammo[atGrenades], FWorld.Stats.Ammo[atCells],
-      FWorld.Stats.Ammo[atSlugs]]);
+      FWorld.Stats.Ammo[atSlugs], FWorld.Stats.Ammo[atMagSlugs], FWorld.Stats.Ammo[atTraps],
+      DualFireText(FWorld.Stats.QuadFireTime)]);
     for J := 0 to FWorld.Lasers.Count - 1 do
       WritelnLog('Demo', 'Laser %d on %s length %.0f', [J,
         BoolToStr(FWorld.Lasers[J].IsOn, True), FWorld.Lasers[J].Length]);
@@ -1758,6 +1782,28 @@ begin
   MainViewport.AddScreenEffect(FWaterWarp);
 end;
 
+procedure TViewPlay.UpdateCompass(const SecondsPassed: Single);
+var
+  Target, ToTarget: TVector3;
+  P: TVector2;
+begin
+  { The remaster's compass: the target_poi marker for a few seconds after
+    the compass command, and while the help computer is open }
+  FCompassTime := Max(0, FCompassTime - SecondsPassed);
+  Hud.PoiVisible := (FWorld <> nil) and FWorld.PoiValid and ((FCompassTime > 0) or Hud.HelpVisible);
+  if not Hud.PoiVisible then
+    Exit;
+  Target := QuakeToCge(FWorld.PoiPosition);
+  ToTarget := Target - MainViewport.Camera.Translation;
+  Hud.PoiDistance := ToTarget.Length;
+  P := MainViewport.PositionFromWorld(Target);
+  P := Vector2(P.X / Max(1, MainViewport.EffectiveWidth), P.Y / Max(1, MainViewport.EffectiveHeight));
+  { Behind the camera the projection is mirrored: put it at the bottom edge }
+  if TVector3.DotProduct(ToTarget, MainViewport.Camera.Direction) < 0 then
+    P := Vector2(1 - P.X, 0);
+  Hud.PoiScreen := P;
+end;
+
 procedure TViewPlay.UpdateWaterWarp(const SecondsPassed: Single);
 var
   Underwater: Boolean;
@@ -1852,6 +1898,11 @@ begin
   if LabelFps.Exists then
     LabelFps.Caption := 'FPS: ' + Container.Fps.ToString;
 
+  { No map loaded (it was missing): nothing to update; the menu and the
+    console still work }
+  if FWorld.Bsp = nil then
+    Exit;
+
   { The level editor covers the game: the world waits }
   if EditorOpen then
     Exit;
@@ -1884,6 +1935,7 @@ begin
   WalkNavigation.Exists := not FWorld.Dead;
   UpdateDeathView(SecondsPassed);
   UpdateWaterWarp(SecondsPassed);
+  UpdateCompass(SecondsPassed);
 
   if FWorld.TeleportPending then
   begin
@@ -1983,7 +2035,7 @@ begin
       Exit(False);
     case PadAction of
       QuakeSettings.paUse: DoUse;
-      QuakeSettings.paGrenade: DoSelectWeapon(11); { hand grenades }
+      QuakeSettings.paGrenade: DoSelectWeapon(FWorld.ChainedWeapon(11)); { hand grenades / traps }
       QuakeSettings.paHelp: DoToggleHelp;
       else Exit(False); { jump / crouch are held: ReadGamepads }
     end;
@@ -1999,12 +2051,12 @@ begin
   for Slot := 1 to 10 do
     if Event.IsKey(WeaponKeys[Slot]) then
     begin
-      DoSelectWeapon(Slot);
+      DoSelectWeapon(FWorld.ChainedWeapon(Slot));
       Exit(True);
     end;
   if Event.IsKey(Settings.Keys[qaGrenade]) then
   begin
-    DoSelectWeapon(11); { hand grenades }
+    DoSelectWeapon(FWorld.ChainedWeapon(11)); { hand grenades / traps }
     Exit(True);
   end;
 
@@ -2171,6 +2223,35 @@ begin
   begin
     FWorld.Geometry.NoVis := not FWorld.Geometry.NoVis;
     Hud.ShowMessage('novis ' + Iff(FWorld.Geometry.NoVis, 'ON', 'OFF'), 2);
+  end else
+  if Cmd = 'compass' then
+  begin
+    { The remaster's compass: show the point of interest for 5 seconds }
+    if FWorld.PoiValid then
+      FCompassTime := 5
+    else
+      Hud.ShowMessage('No point of interest', 2);
+  end else
+  if Cmd = 'hurt' then
+  begin
+    { hurt <monster index | last> <damage>: damage one monster (tests: boss
+      deaths; "last" is the one spawned last) }
+    Words := TStringList.Create;
+    try
+      Words.Delimiter := ' ';
+      Words.StrictDelimiter := True;
+      Words.DelimitedText := Args;
+      if (Words.Count >= 1) and SameText(Words[0], 'last') then
+        Words[0] := IntToStr(FWorld.Monsters.Count - 1);
+      if (Words.Count >= 2) and (StrToIntDef(Words[0], -1) >= 0) and
+         (StrToIntDef(Words[0], -1) < FWorld.Monsters.Count) then
+      begin
+        FWorld.Monsters[StrToInt(Words[0])].TakeDamage(StrToIntDef(Words[1], 0));
+        WritelnLog('Console', 'hurt %s by %s', [FWorld.Monsters[StrToInt(Words[0])].Transform.Name, Words[1]]);
+      end;
+    finally
+      Words.Free;
+    end;
   end else
   if Cmd = 'horplus' then
   begin

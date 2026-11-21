@@ -29,7 +29,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeWebParams, QuakeInstalls, QuakeInsane, Zipper;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeWebParams, QuakeInstalls, QuakeInsane, QuakeHud, Zipper;
 
 var
   Passed, Failed: Integer;
@@ -630,8 +630,14 @@ begin
   Check(ClassSupport('trigger_elevator', NoteText) = csSupported, 'trigger_elevator sends its train to the pathtarget of its user');
   Check(ClassSupport('func_door_secret2', NoteText) = csSupported, 'func_door_secret2 (mission pack / remaster) is a secret door');
   Check(ClassSupport('dynamic_light', NoteText) = csSupported, 'the remaster''s dynamic_light is a run-time light');
-  Check(ClassSupport('target_poi', NoteText) = csPartial, 'target_poi: no compass');
-  Check(ClassSupport('info_landmark', NoteText) = csPartial, 'info_landmark: no offset kept across maps');
+  Check((ClassSupport('target_poi', NoteText) = csSupported) and (ClassSupport('info_landmark', NoteText) = csSupported) and
+    (ClassSupport('turret_invisible_brain', NoteText) = csSupported), 'the remaster''s target_poi, info_landmark and turret brain');
+  { info_landmark: 64 east of a landmark facing north (90) is 64 to its
+    right (-y in its frame); at a landmark facing west (180) in the next
+    map that is 64 north of it }
+  Check(TVector3.Equals(LandmarkLocal(Vector3(164, 0, 10), Vector3(100, 0, 0), 90), Vector3(0, -64, 10), 0.001) and
+    TVector3.Equals(LandmarkWorld(Vector3(0, -64, 10), Vector3(0, 500, 0), 180), Vector3(0, 564, 10), 0.001),
+    'info_landmark keeps the place relative to the landmark, turned with it');
   Check(ClassSupport('turret_breach', NoteText) = csSupported, 'turret_breach turns and fires');
   Check(ClassSupport('turret_driver', NoteText) = csSupported, 'turret_driver aims its breach');
   Check(ClassSupport('misc_actor', NoteText) = csUnsupported, 'misc_actor is unsupported');
@@ -804,6 +810,46 @@ begin
     SameValue(P.FirstTime(geGrenadeBlowUp), 1.1 + 3.2, 0.05),
     'held hand grenade blows up 3.2 s after the throw frame (4.3 s after the press)');
   FreeProbe(P);
+
+  { The Reckoning: the ion ripper refires every 0.3 s (Weapon_Generic 5, 7) }
+  P := NewProbe(IonRipperSlot, MaxInt);
+  P.Run(1.95, True);
+  CheckEquals(7, P.Count(geFire), 'ion ripper held 1.95 s fires 7 times (0.3 s refire)');
+  FreeProbe(P);
+  { The phalanx: two balls 0.1 s apart (frames 7 and 8), a pair every 1.6 s }
+  P := NewProbe(PhalanxSlot, MaxInt);
+  P.Run(3.25, True);
+  Check((P.Count(geFire) = 4) and (Length(P.Times) >= 2) and SameValue(P.Times[1] - P.Times[0], 0.1, 0.02),
+    'phalanx fires pairs 0.1 s apart, 1.6 s between pairs');
+  FreeProbe(P);
+  { DualFire: frames at 20 Hz, the blaster refires every 0.25 s }
+  P := NewProbe(1, MaxInt);
+  P.Gun.Haste := True;
+  P.Run(1.95, True);
+  CheckEquals(8, P.Count(geFire), 'DualFire blaster held 1.95 s fires 8 bolts');
+  FreeProbe(P);
+  { Traps never go off in the hand; released, one is thrown }
+  P := NewProbe(TrapSlot, 5);
+  P.Run(6.0, True);
+  Check((P.Count(geGrenadeBlowUp) = 0) and (P.Count(geGrenadeThrow) = 0) and
+    (P.Gun.LoopSound = 'sound/weapons/traploop.wav'), 'a held trap waits in the hand (traploop)');
+  P.Run(1.5, False);
+  Check((P.Count(geGrenadeThrow) = 1) and (P.Gun.Fuse = 0), 'a released trap is thrown at full speed');
+  FreeProbe(P);
+end;
+
+procedure TestReckoningItems;
+begin
+  Check((FindItemDef('weapon_boomer') <> nil) and (FindItemDef('weapon_boomer')^.Weapon = IonRipperSlot) and
+    (WeaponDefs[IonRipperSlot].AmmoType = atCells) and (WeaponDefs[IonRipperSlot].AmmoPerShot = 2),
+    'weapon_boomer gives the ion ripper (2 cells a shot)');
+  Check((FindItemDef('weapon_phalanx') <> nil) and (FindItemDef('weapon_phalanx')^.AmmoType = atMagSlugs) and
+    (FindItemDef('ammo_magslug')^.Amount = 10), 'weapon_phalanx uses mag slugs (10 a box)');
+  Check((FindItemDef('ammo_trap') <> nil) and (FindItemDef('ammo_trap')^.Weapon = TrapSlot) and
+    (FindItemDef('item_quadfire')^.Param = POWERUP_QUADFIRE), 'ammo_trap is the trap weapon; item_quadfire is DualFire');
+  Check((MonsterMass('monster_soldier_light') = 100) and (MonsterMass('monster_tank_commander') = 500) and
+    (MonsterMass('monster_gladb') = 350) and (MonsterMass('monster_gladiator') = 400) and
+    (MonsterMass('monster_stalker') = 200), 'monster masses by class prefix (traps take under 400)');
 end;
 
 type
@@ -895,7 +941,10 @@ begin
     end;
   end;
   Check(AllMatch, 'monster attack sequences match the demo models frame names');
-  CheckEquals(0, Length(MonsterAttackSeqs('monster_gekk')), 'monsters without a table use the generic attack');
+  CheckEquals(0, Length(MonsterAttackSeqs('monster_stalker')), 'monsters without a table use the generic attack');
+  Check((Length(MonsterAttackSeqs('monster_gekk')) = 4) and (MonsterAttackSeqs('monster_soldier_ripper')[0].Kind = akRipper) and
+    (MonsterAttackSeqs('monster_boss5')[1].Kind = akHeatRocket) and (MonsterAttackSeqs('monster_gladb')[0].Kind = akPlasma) and
+    (MonsterAttackSeqs('monster_chick_heat')[0].Kind = akHeatRocket), 'The Reckoning''s monsters: their own weapons on their base tables');
   CheckEquals(3, Length(MonsterAttackSeqs('monster_tank_commander')), 'the tank commander uses the tank''s attacks');
   { Weighted choice: makron_attack 30 % BFG, 30 % hyperblaster, 40 % railgun }
   Seqs := MonsterAttackSeqs('monster_makron');
@@ -1371,7 +1420,9 @@ begin
     end;
   end;
   Check(AllMatch, 'monster walk / run loops match the demo models frame names');
-  CheckEquals(0, Length(MonsterMoveSeq('monster_gekk', True).Dists), 'monsters without a move table keep their speed');
+  CheckEquals(0, Length(MonsterMoveSeq('monster_stalker', True).Dists), 'monsters without a move table keep their speed');
+  Check((Length(MonsterMoveSeq('monster_gekk', True).Dists) = 6) and (MonsterMoveSeq('monster_gladb', True).FirstFrame = 'run1'),
+    'the gekk runs on run_01 .. 06, the beta gladiator like the gladiator');
   { Quake 2 paces: 10 frames a second of ai_run distances }
   Check(SameValue(MoveSeqSpeed(MonsterMoveSeq('monster_soldier', True)), 121.67, 0.01) and
     SameValue(MoveSeqSpeed(MonsterMoveSeq('monster_tank', True)), 46.875, 0.01) and
@@ -3432,6 +3483,7 @@ begin
   TestMapLevelUrl;
   TestRecord;
   TestGun;
+  TestReckoningItems;
   TestMonsterAttacks;
   TestMonsterMoves;
   TestQ1Monsters;

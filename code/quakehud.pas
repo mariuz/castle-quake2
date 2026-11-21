@@ -13,7 +13,9 @@ uses
   QuakePalette;
 
 type
-  TAmmoType = (atNone, atShells, atBullets, atGrenades, atRockets, atCells, atSlugs);
+  TAmmoType = (atNone, atShells, atBullets, atGrenades, atRockets, atCells, atSlugs,
+    { The Reckoning: mag slugs (the phalanx), traps (both weapon and ammo) }
+    atMagSlugs, atTraps);
 
   { Player statistics needed for HUD rendering and gameplay }
   TQuakePlayerStats = record
@@ -22,14 +24,16 @@ type
     ArmorType: Integer; { 0 = none, 1 = jacket, 2 = combat, 3 = body }
     Ammo: array[TAmmoType] of Integer;
     MaxAmmo: array[TAmmoType] of Integer;
-    WeaponMask: Cardinal;   { bit N = weapon slot N (1..11) }
-    CurrentWeapon: Integer; { 1 blaster .. 10 BFG10K, 11 hand grenades }
+    WeaponMask: Cardinal;   { bit N = weapon slot N (1..14) }
+    CurrentWeapon: Integer; { 1 blaster .. 10 BFG10K, 11 hand grenades, 12 ion ripper, 13 phalanx, 14 traps }
     Keys: Cardinal;         { bitmask of TQuakeKey }
     Kills, TotalKills: Integer;
     Secrets, TotalSecrets: Integer;
     Goals, TotalGoals: Integer;
     LevelTime: Single;
     QuadTime, InvulnTime: Single;
+    { The Reckoning's DualFire: the gun runs at twice its frame rate }
+    QuadFireTime: Single;
     { Rebreather / environment suit seconds left, silenced shots left }
     BreatherTime, EnviroTime: Single;
     SilencerShots: Integer;
@@ -92,6 +96,14 @@ type
     { End of level: the help computer layout as a mission summary, no status bar }
     property Intermission: Boolean read FIntermission write FIntermission;
     property LevelName: String read FLevelName write FLevelName;
+  public
+    var
+      { target_poi marker: shown, where (fractions of the screen from the
+        bottom left, off-screen values are kept at the edge), how far
+        (Quake units) }
+      PoiVisible: Boolean;
+      PoiScreen: TVector2;
+      PoiDistance: Single;
     property HelpPrimary: String read FHelpPrimary write FHelpPrimary;
     property HelpSecondary: String read FHelpSecondary write FHelpSecondary;
   end;
@@ -250,6 +262,8 @@ begin
     S := S + '   [GOD]';
   if Stats.QuadTime > 0 then
     S := S + Format('   QUAD %d', [Ceil(Stats.QuadTime)]);
+  if Stats.QuadFireTime > 0 then
+    S := S + Format('   DUALFIRE %d', [Ceil(Stats.QuadFireTime)]);
   if Stats.InvulnTime > 0 then
     S := S + Format('   INVULNERABLE %d', [Ceil(Stats.InvulnTime)]);
   if Stats.EnviroTime > 0 then
@@ -378,6 +392,9 @@ begin
     DrawRectangle(R, Vector4(0.8, 0.0, 0.0, FDamageFlash));
   if FStats.QuadTime > 0 then
     DrawRectangle(R, Vector4(0.0, 0.0, 1.0, 0.08));
+  { The Reckoning's DualFire: pink (p_view's quadfire blend) }
+  if FStats.QuadFireTime > 0 then
+    DrawRectangle(R, Vector4(1.0, 0.2, 0.5, 0.08));
   if FStats.InvulnTime > 0 then
     DrawRectangle(R, Vector4(1.0, 1.0, 0.0, 0.08))
   else
@@ -398,8 +415,10 @@ begin
     4, 5: AmmoT := atBullets;
     6, 11: AmmoT := atGrenades;
     7: AmmoT := atRockets;
-    8, 10: AmmoT := atCells;
+    8, 10, 12: AmmoT := atCells;
     9: AmmoT := atSlugs;
+    13: AmmoT := atMagSlugs;
+    14: AmmoT := atTraps;
     else AmmoT := atNone;
   end;
   if AmmoT <> atNone then
@@ -508,6 +527,26 @@ begin
       DrawRectangle(FloatRectangle(CX + 3, CY - 1, 5, 2), Vector4(1, 1, 1, 0.75));
       DrawRectangle(FloatRectangle(CX - 1, CY - 8, 2, 5), Vector4(1, 1, 1, 0.75));
       DrawRectangle(FloatRectangle(CX - 1, CY + 3, 2, 5), Vector4(1, 1, 1, 0.75));
+    end;
+  end;
+
+  if PoiVisible then
+  begin
+    { The point of interest: a yellow square and its distance, at the screen
+      edge when it is off-screen or behind }
+    X := R.Left + W * EnsureRange(PoiScreen.X, 0.03, 0.97);
+    Y := R.Bottom + H * EnsureRange(PoiScreen.Y, 0.06, 0.94);
+    CX := 10 * UIScale * InterfaceScale;
+    DrawRectangle(FloatRectangle(X - CX, Y - CX, 2 * CX, 3 * UIScale), Vector4(1, 0.85, 0.1, 0.9));
+    DrawRectangle(FloatRectangle(X - CX, Y + CX - 3 * UIScale, 2 * CX, 3 * UIScale), Vector4(1, 0.85, 0.1, 0.9));
+    DrawRectangle(FloatRectangle(X - CX, Y - CX, 3 * UIScale, 2 * CX), Vector4(1, 0.85, 0.1, 0.9));
+    DrawRectangle(FloatRectangle(X + CX - 3 * UIScale, Y - CX, 3 * UIScale, 2 * CX), Vector4(1, 0.85, 0.1, 0.9));
+    UIFont.PushProperties;
+    try
+      UIFont.Size := UIFont.EffectiveSize * InterfaceScale;
+      UIFont.Print(X - CX, Y + CX + 4 * UIScale, Vector4(1, 0.85, 0.1, 1), Format('%d', [Round(PoiDistance)]));
+    finally
+      UIFont.PopProperties;
     end;
   end;
 

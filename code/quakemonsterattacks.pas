@@ -25,7 +25,11 @@ type
   { akBfg: monster_fire_bfg (Jorg, Makron); akLeap: the mutant's jump
     (mutant_jump_takeoff: forward 600, up 250, hurts on touch) }
   TAttackKind = (akMelee, akHitscan, akBlaster, akRocket, akGrenade, akRail, akPellets,
-    akBfg, akLeap);
+    akBfg, akLeap,
+    { The Reckoning: the ion ripper's bouncing bolt, the blue hyperblaster
+      bolt, the laser soldier's beam (damage every frame it holds), the
+      heat-seeking rocket, the phalanx plasma ball, the gekk's spit }
+    akRipper, akBlueBlaster, akLaser, akHeatRocket, akPlasma, akLoogie);
 
   { When a sequence can be chosen (auDodge: only by a dodge, never by range) }
   TAttackUse = (auRanged, auMelee, auAny, auDodge);
@@ -152,6 +156,12 @@ function MeleeSeq(const First: String; const Count: Integer; const Fire: array o
   const Damage, Spread: Integer; const Kick: Single; const Sound: String): TMonsterAttackSeq;
 procedure AddSeq(var Seqs: TMonsterAttackSeqs; const S: TMonsterAttackSeq);
 
+{ The Reckoning's monster classes, and the base monster a variant shares its
+  frames with (soldier, chick, gladiator, supertank; '' for the gekk and
+  the fixbot) }
+function IsXatrixMonster(const MonsterClass: String): Boolean;
+function XatrixBaseClass(const MonsterClass: String): String;
+
 { Attack sequences of a monster class (empty: no table, generic attack) }
 function MonsterAttackSeqs(const MonsterClass: String): TMonsterAttackSeqs;
 
@@ -257,6 +267,135 @@ begin
   Seqs[High(Seqs)] := S;
 end;
 
+function IsXatrixMonster(const MonsterClass: String): Boolean;
+begin
+  Result := (MonsterClass = 'monster_soldier_ripper') or (MonsterClass = 'monster_soldier_hypergun') or
+    (MonsterClass = 'monster_soldier_lasergun') or (MonsterClass = 'monster_chick_heat') or
+    (MonsterClass = 'monster_gladb') or (MonsterClass = 'monster_boss5') or
+    (MonsterClass = 'monster_gekk') or (MonsterClass = 'monster_fixbot');
+end;
+
+function XatrixBaseClass(const MonsterClass: String): String;
+begin
+  if MonsterClass = 'monster_chick_heat' then
+    Result := 'monster_chick'
+  else
+  if MonsterClass = 'monster_gladb' then
+    Result := 'monster_gladiator'
+  else
+  if MonsterClass = 'monster_boss5' then
+    Result := 'monster_supertank'
+  else
+  if Copy(MonsterClass, 1, 16) = 'monster_soldier_' then
+    Result := 'monster_soldier'
+  else
+    Result := '';
+end;
+
+function XatrixAttackSeqs(const MonsterClass: String): TMonsterAttackSeqs;
+var
+  S: TMonsterAttackSeq;
+  I: Integer;
+begin
+  { The Reckoning's monsters (m_soldier / m_chick / m_gladiator /
+    m_supertank with its branches, m_xatrix_gekk, m_xatrix_fixbot) }
+  Result := nil;
+  if MonsterClass = 'monster_soldier_ripper' then
+  begin
+    { soldierh_attack1: ion ripper bolts of 5 on attak103 .. 105, refire1 on
+      attak106 back to attak102 half the time while visible, else skip the
+      cocking to attak110; attack2 the same on attak205 .. 207 / attak208 }
+    S := MakeSeq('attak101', 12, [2, 3, 4], akRipper, 5, '');
+    AddSeq(Result, Looping(S, 1, 5, 0.5));
+    Result[High(Result)].SkipFrame := 9;
+    S := MakeSeq('attak201', 18, [4, 5, 6], akRipper, 5, '');
+    AddSeq(Result, Looping(S, 3, 7, 0.5));
+    Result[High(Result)].SkipFrame := 15;
+  end else
+  if MonsterClass = 'monster_soldier_hypergun' then
+  begin
+    { blue hyperblaster bolts of 1 on attak103 .. 105, the hyper refire on
+      attak107 back to attak103 70 % of the time; attack2 on attak205 .. 207,
+      back from attak209 to attak205 }
+    AddSeq(Result, Looping(MakeSeq('attak101', 12, [2, 3, 4], akBlueBlaster, 1, ''), 2, 6, 0.7));
+    AddSeq(Result, Looping(MakeSeq('attak201', 18, [4, 5, 6], akBlueBlaster, 1, ''), 4, 8, 0.7));
+  end else
+  if MonsterClass = 'monster_soldier_lasergun' then
+  begin
+    { attack4: the laser on attak403, held 0.3 .. 1.1 s, 1 a frame }
+    S := MakeSeq('attak401', 6, [2], akLaser, 1, '');
+    S.HoldFrame := 2;
+    S.HoldMin := 3;
+    S.HoldMax := 11;
+    AddSeq(Result, S);
+  end else
+  if MonsterClass = 'monster_gekk' then
+  begin
+    { gekk_melee: claws of 5 .. 9 (kick 100) on clawatk3_04, or on
+      clawatk5_03 and 06, again while in melee range; gekk_attack: spit
+      (spit_06, a loogie of 5 at 550, 30 % again), or the leap (leapatk_05:
+      forward 700, up 250; 10 .. 19 when it lands on the player) }
+    AddSeq(Result, Looping(MeleeSeq('clawatk3_01', 9, [3], 5, 5, 100, 'gk_atck2'), 0, 8, 0.5, lcMelee));
+    AddSeq(Result, Looping(MeleeSeq('clawatk5_01', 9, [2, 5], 5, 5, 100, 'gk_atck3'), 0, 8, 0.5, lcMelee));
+    S := MakeSeq('spit_01', 7, [5], akLoogie, 5, 'gk_atck4');
+    S.Speed := 550;
+    AddSeq(Result, Weighted(Looping(S, 0, 6, 0.3), 0.5));
+    S := MakeSeq('leapatk_01', 19, [4], akLeap, 10, 'gk_sght1');
+    S.DamageRandom := 10;
+    S.MinDist := 100;
+    S.LeapForward := 700;
+    S.LeapUp := 250;
+    AddSeq(Result, Weighted(S, 0.5));
+  end else
+  if MonsterClass = 'monster_fixbot' then
+  begin
+    { fixbot_attack2 (charging_01 .. 31): backs off, a blaster bolt of 15 at
+      1000 on charging_21 }
+    S := MakeSeq('charging_01', 31, [20], akBlaster, 15, '');
+    S.Speed := 1000;
+    AddSeq(Result, S);
+  end else
+  begin
+    { The variants of base monsters: their tables, another weapon }
+    Result := MonsterAttackSeqs(XatrixBaseClass(MonsterClass));
+    for I := 0 to High(Result) do
+      if MonsterClass = 'monster_chick_heat' then
+      begin
+        { chick_heat: heat-seeking rockets at 500 }
+        if Result[I].Kind = akRocket then
+        begin
+          Result[I].Kind := akHeatRocket;
+          Result[I].Speed := 500;
+        end;
+      end else
+      if MonsterClass = 'monster_boss5' then
+      begin
+        { boss5 (the supertank with a power shield): heat-seekers of 40 }
+        if Result[I].Kind = akRocket then
+        begin
+          Result[I].Kind := akHeatRocket;
+          Result[I].Damage := 40;
+          Result[I].Speed := 500;
+        end;
+      end else
+      if MonsterClass = 'monster_gladb' then
+      begin
+        { gladb_attack: plasma of 35 (45 within 45) on attack3, of 17 (22) on
+          attack6, at the saved position }
+        if Result[I].Kind = akRail then
+        begin
+          Result[I].Kind := akPlasma;
+          Result[I].FireFrames := [2, 5];
+          Result[I].Damage := 35;
+          Result[I].RepeatDamage := 17;
+          Result[I].Radius := 45;
+          Result[I].Speed := 725;
+          Result[I].Sound := '';
+        end;
+      end;
+  end;
+end;
+
 function MonsterAttackSeqs(const MonsterClass: String): TMonsterAttackSeqs;
 var
   S: TMonsterAttackSeq;
@@ -267,6 +406,8 @@ begin
   Result := nil;
   if Q1Archetype(MonsterClass) <> qaNone then
     Exit(Q1MonsterAttackSeqs(MonsterClass));
+  if IsXatrixMonster(MonsterClass) then
+    Exit(XatrixAttackSeqs(MonsterClass));
   if (MonsterClass = 'monster_soldier_light') or (MonsterClass = 'monster_soldier') or
      (MonsterClass = 'monster_soldier_ss') then
   begin

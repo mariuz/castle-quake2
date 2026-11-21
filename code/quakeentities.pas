@@ -376,7 +376,14 @@ type
 
   TQuakeMonsterList = specialize TObjectList<TQuakeMonster>;
 
-  TProjectileKind = (pkBlasterBolt, pkRocket, pkGrenade, pkHandGrenade, pkBfg);
+  TProjectileKind = (pkBlasterBolt, pkRocket, pkGrenade, pkHandGrenade, pkBfg,
+    { The Reckoning: the ion ripper's bolt (bounces off walls for 3 s), the
+      blue hyperblaster bolt, the heat-seeking rocket, the phalanx plasma
+      ball (a hit and a splash), the gekk's spit }
+    pkRipper, pkBlueBolt, pkHeatRocket, pkPlasma, pkLoogie,
+    { The Reckoning's trap (fire_trap): bounces, opens, pulls a monster in,
+      turns it into a food cube }
+    pkTrap);
 
   { Active projectile (blaster bolt, rocket, grenade, BFG ball) }
   TQuakeProjectile = class
@@ -397,6 +404,18 @@ type
     { BFG ball that hit something: stopped and hidden, its "BFG effect"
       (bfg_explode) goes off when Life runs out }
     Exploding: Boolean;
+    { pkHeatRocket: how much of the way to its target it turns in 0.025 s
+      (fire_heat's slerp fraction per server frame), 0 = none }
+    HeatTurn: Single;
+    { pkTrap (Trap_Think): seconds to the next think, model frame, landed,
+      the countdown of frame 5 (wait: 64 down by 2), the victim's mass }
+    TrapTimer: Single;
+    TrapFrame: Integer;
+    TrapLanded: Boolean;
+    TrapWait: Integer;
+    TrapMass: Integer;
+    { pkTrap pulling a monster in (trapsuck.wav instead of traploop.wav) }
+    TrapSucking: Boolean;
     constructor Create(const Parent: TCastleTransform; const AKind: TProjectileKind;
       const Pos, Vel: TVector3; const ADamage: Integer; const AFromPlayer: Boolean);
     destructor Destroy; override;
@@ -551,8 +570,14 @@ const
   KEY_Q1_RUNIC_GOLD     = 1 shl 23;
   KEY_Q1_RUNIC_SILVER   = 1 shl 24;
 
-  { Weapon slots: 1 Blaster .. 10 BFG10K, 11 Hand Grenades }
-  WeaponSlots = 11;
+  { Weapon slots: 1 Blaster .. 10 BFG10K, 11 Hand Grenades, then The
+    Reckoning's 12 Ion Ripper, 13 Phalanx, 14 Traps (chained with the
+    hyperblaster, the railgun and the grenades: their keys switch between
+    the two) }
+  WeaponSlots = 14;
+  IonRipperSlot = 12;
+  PhalanxSlot = 13;
+  TrapSlot = 14;
 
   POWERUP_QUAD = 1;
   POWERUP_INVULN = 2;
@@ -561,8 +586,9 @@ const
   POWERUP_PACK = 5;
   POWERUP_OTHER = 6;
   POWERUP_ANCIENT_HEAD = 7;
+  POWERUP_QUADFIRE = 8;
 
-  ItemDefs: array[0..58] of TQuakeItemDef = (
+  ItemDefs: array[0..64] of TQuakeItemDef = (
     (ClassName: 'weapon_shotgun'; Category: icWeapon; Model: 'models/weapons/g_shotg/tris.md2'; Icon: 'w_shotgun'; Name: 'Shotgun'; Sound: 'sound/misc/w_pkup.wav'; Weapon: 2; AmmoType: atShells; Amount: 10; Param: 0),
     (ClassName: 'weapon_supershotgun'; Category: icWeapon; Model: 'models/weapons/g_shotg2/tris.md2'; Icon: 'w_sshotgun'; Name: 'Super Shotgun'; Sound: 'sound/misc/w_pkup.wav'; Weapon: 3; AmmoType: atShells; Amount: 10; Param: 0),
     (ClassName: 'weapon_machinegun'; Category: icWeapon; Model: 'models/weapons/g_machn/tris.md2'; Icon: 'w_machinegun'; Name: 'Machinegun'; Sound: 'sound/misc/w_pkup.wav'; Weapon: 4; AmmoType: atBullets; Amount: 50; Param: 0),
@@ -630,7 +656,17 @@ const
     (ClassName: 'key_q1_runic_gold_key'; Category: icKey; Model: 'models/items/keys/wizard/w_g_key.md2'; Icon: ''; Name: 'Medieval Gold Key'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_RUNIC_GOLD; Param: 0),
     (ClassName: 'key_q1_runic_silver_key'; Category: icKey; Model: 'models/items/keys/wizard/w_s_key.md2'; Icon: ''; Name: 'Medieval Silver Key'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: KEY_Q1_RUNIC_SILVER; Param: 0),
     { Pickup_AncientHead: 2 more max health (city3's secret) }
-    (ClassName: 'item_ancient_head'; Category: icPowerup; Model: 'models/items/c_head/tris.md2'; Icon: 'i_fixme'; Name: 'Ancient Head'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: 0; Param: POWERUP_ANCIENT_HEAD)
+    (ClassName: 'item_ancient_head'; Category: icPowerup; Model: 'models/items/c_head/tris.md2'; Icon: 'i_fixme'; Name: 'Ancient Head'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: 0; Param: POWERUP_ANCIENT_HEAD),
+    { The Reckoning (g_items' xatrix entries): the ion ripper uses 2 cells a
+      shot, the phalanx mag slugs; traps are both ammo and weapon }
+    (ClassName: 'weapon_boomer'; Category: icWeapon; Model: 'models/weapons/g_boom/tris.md2'; Icon: 'w_ripper'; Name: 'Ion Ripper'; Sound: 'sound/misc/w_pkup.wav'; Weapon: IonRipperSlot; AmmoType: atCells; Amount: 50; Param: 0),
+    (ClassName: 'weapon_phalanx'; Category: icWeapon; Model: 'models/weapons/g_shotx/tris.md2'; Icon: 'w_phallanx'; Name: 'Phalanx'; Sound: 'sound/misc/w_pkup.wav'; Weapon: PhalanxSlot; AmmoType: atMagSlugs; Amount: 10; Param: 0),
+    (ClassName: 'ammo_magslug'; Category: icAmmo; Model: 'models/objects/ammo/tris.md2'; Icon: 'a_mslugs'; Name: 'Mag Slug'; Sound: 'sound/misc/am_pkup.wav'; Weapon: 0; AmmoType: atMagSlugs; Amount: 10; Param: 0),
+    (ClassName: 'ammo_trap'; Category: icAmmo; Model: 'models/weapons/g_trap/tris.md2'; Icon: 'a_trap'; Name: 'Trap'; Sound: 'sound/misc/am_pkup.wav'; Weapon: TrapSlot; AmmoType: atTraps; Amount: 1; Param: 0),
+    (ClassName: 'item_quadfire'; Category: icPowerup; Model: 'models/items/quadfire/tris.md2'; Icon: 'p_quadfire'; Name: 'DualFire Damage'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: 30; Param: POWERUP_QUADFIRE),
+    { What a trap leaves of a monster (SP_item_foodcube): health over the
+      maximum, the entity's "count" (a tenth of the monster's mass) }
+    (ClassName: 'item_foodcube'; Category: icHealth; Model: 'models/objects/trapfx/tris.md2'; Icon: 'i_health'; Name: 'Food Cube'; Sound: 'sound/items/s_health.wav'; Weapon: 0; AmmoType: atNone; Amount: 2; Param: 1)
   );
 
   { Weapon slots 1..11 (key 0 selects slot 10, G slot 11) }
@@ -646,16 +682,21 @@ const
     (Name: 'Railgun'; ViewModel: 'models/weapons/v_rail/tris.md2'; Icon: 'w_railgun'; AmmoType: atSlugs; AmmoPerShot: 1; Sound: 'sound/weapons/railgf1a.wav'),
     (Name: 'BFG10K'; ViewModel: 'models/weapons/v_bfg/tris.md2'; Icon: 'w_bfg'; AmmoType: atCells; AmmoPerShot: 50; Sound: 'sound/weapons/bfg__f1y.wav'),
     { Thrown on release; picking up grenades gives it (Quake 2 "Grenades") }
-    (Name: 'Hand Grenades'; ViewModel: 'models/weapons/v_handgr/tris.md2'; Icon: 'w_hgrenade'; AmmoType: atGrenades; AmmoPerShot: 1; Sound: 'sound/weapons/hgrent1a.wav')
+    (Name: 'Hand Grenades'; ViewModel: 'models/weapons/v_handgr/tris.md2'; Icon: 'w_hgrenade'; AmmoType: atGrenades; AmmoPerShot: 1; Sound: 'sound/weapons/hgrent1a.wav'),
+    { The Reckoning: the phalanx fires two balls for one mag slug (taken
+      on the second), traps are thrown like hand grenades }
+    (Name: 'Ion Ripper'; ViewModel: 'models/weapons/v_boomer/tris.md2'; Icon: 'w_ripper'; AmmoType: atCells; AmmoPerShot: 2; Sound: 'sound/weapons/rippfire.wav'),
+    (Name: 'Phalanx'; ViewModel: 'models/weapons/v_shotx/tris.md2'; Icon: 'w_phallanx'; AmmoType: atMagSlugs; AmmoPerShot: 1; Sound: 'sound/weapons/plasshot.wav'),
+    (Name: 'Traps'; ViewModel: 'models/weapons/v_trap/tris.md2'; Icon: 'a_trap'; AmmoType: atTraps; AmmoPerShot: 1; Sound: '')
   );
 
   AmmoIcons: array[TAmmoType] of String = ('', 'a_shells', 'a_bullets', 'a_grenades',
-    'a_rockets', 'a_cells', 'a_slugs');
+    'a_rockets', 'a_cells', 'a_slugs', 'a_mslugs', 'a_trap');
 
   { Built-in monster definitions. At startup data/monsters.castle-transform
     (TQuakeMonsterType components, editable in the CGE editor) overrides
     and extends them in MonsterDefs. }
-  DefaultMonsterDefs: array[0..21] of TQuakeMonsterDef = (
+  DefaultMonsterDefs: array[0..29] of TQuakeMonsterDef = (
     (ClassName: 'monster_soldier_light'; Model: 'models/monsters/soldier/tris.md2'; Skin: 0; Health: 20; Speed: 120; Attack: akBlaster; Damage: 5; AttackRange: 900; AttackCooldown: 1.6; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain2'; DeathSound: 'soldeth1'; AttackSound: 'solatck2'),
     (ClassName: 'monster_soldier'; Model: 'models/monsters/soldier/tris.md2'; Skin: 2; Health: 30; Speed: 120; Attack: akPellets; Damage: 2; AttackRange: 700; AttackCooldown: 1.6; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain1'; DeathSound: 'soldeth1'; AttackSound: 'solatck1'),
     (ClassName: 'monster_soldier_ss'; Model: 'models/monsters/soldier/tris.md2'; Skin: 4; Health: 40; Speed: 120; Attack: akHitscan; Damage: 2; AttackRange: 900; AttackCooldown: 0.9; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain3'; DeathSound: 'soldeth3'; AttackSound: 'solatck3'),
@@ -677,7 +718,18 @@ const
     (ClassName: 'monster_supertank'; Model: 'models/monsters/boss1/tris.md2'; Skin: 0; Health: 1500; Speed: 80; Attack: akRocket; Damage: 50; AttackRange: 1500; AttackCooldown: 1.2; Flying: False; SoundDir: 'bosstank'; SightSound: 'btkunqv1'; PainSound: 'btkpain1'; DeathSound: 'btkdeth1'; AttackSound: 'btkunqv2'),
     (ClassName: 'monster_boss2'; Model: 'models/monsters/boss2/tris.md2'; Skin: 0; Health: 2000; Speed: 80; Attack: akRocket; Damage: 50; AttackRange: 1500; AttackCooldown: 1.2; Flying: True; SoundDir: 'bosshovr'; SightSound: ''; PainSound: 'bhvpain1'; DeathSound: 'bhvdeth1'; AttackSound: ''),
     (ClassName: 'monster_jorg'; Model: 'models/monsters/boss3/rider/tris.md2'; Skin: 0; Health: 3000; Speed: 100; Attack: akHitscan; Damage: 6; AttackRange: 1500; AttackCooldown: 1.2; Flying: False; SoundDir: 'boss3'; SightSound: ''; PainSound: 'bs3pain1'; DeathSound: 'bs3deth1'; AttackSound: 'bs3atck1'),
-    (ClassName: 'monster_makron'; Model: 'models/monsters/boss3/rider/tris.md2'; Skin: 0; Health: 3000; Speed: 90; Attack: akRail; Damage: 50; AttackRange: 1500; AttackCooldown: 1.2; Flying: False; SoundDir: 'makron'; SightSound: 'voice4'; PainSound: 'pain1'; DeathSound: 'death'; AttackSound: 'rail_up')
+    (ClassName: 'monster_makron'; Model: 'models/monsters/boss3/rider/tris.md2'; Skin: 0; Health: 3000; Speed: 90; Attack: akRail; Damage: 50; AttackRange: 1500; AttackCooldown: 1.2; Flying: False; SoundDir: 'makron'; SightSound: 'voice4'; PainSound: 'pain1'; DeathSound: 'death'; AttackSound: 'rail_up'),
+    { The Reckoning (models of its PAK: soldierh skins 0 / 2 / 4, gladb,
+      boss5; facts from m_soldier / m_chick / m_gladiator / m_supertank's
+      branches and m_xatrix_gekk / m_xatrix_fixbot) }
+    (ClassName: 'monster_soldier_ripper'; Model: 'models/monsters/soldierh/tris.md2'; Skin: 0; Health: 50; Speed: 120; Attack: akRipper; Damage: 5; AttackRange: 900; AttackCooldown: 1.6; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain2'; DeathSound: 'soldeth2'; AttackSound: ''),
+    (ClassName: 'monster_soldier_hypergun'; Model: 'models/monsters/soldierh/tris.md2'; Skin: 2; Health: 60; Speed: 120; Attack: akBlueBlaster; Damage: 1; AttackRange: 900; AttackCooldown: 1.6; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain1'; DeathSound: 'soldeth1'; AttackSound: ''),
+    (ClassName: 'monster_soldier_lasergun'; Model: 'models/monsters/soldierh/tris.md2'; Skin: 4; Health: 70; Speed: 120; Attack: akLaser; Damage: 1; AttackRange: 900; AttackCooldown: 1.6; Flying: False; SoundDir: 'soldier'; SightSound: 'solsght1'; PainSound: 'solpain3'; DeathSound: 'soldeth3'; AttackSound: ''),
+    (ClassName: 'monster_chick_heat'; Model: 'models/monsters/bitch/tris.md2'; Skin: 2; Health: 175; Speed: 130; Attack: akHeatRocket; Damage: 50; AttackRange: 1000; AttackCooldown: 2.0; Flying: False; SoundDir: 'chick'; SightSound: 'chksght1'; PainSound: 'chkpain1'; DeathSound: 'chkdeth1'; AttackSound: 'chkatck2'),
+    (ClassName: 'monster_gladb'; Model: 'models/monsters/gladb/tris.md2'; Skin: 0; Health: 250; Speed: 120; Attack: akPlasma; Damage: 35; AttackRange: 1200; AttackCooldown: 2.5; Flying: False; SoundDir: 'gladiator'; SightSound: 'sight'; PainSound: 'pain'; DeathSound: 'glddeth2'; AttackSound: ''),
+    (ClassName: 'monster_boss5'; Model: 'models/monsters/boss5/tris.md2'; Skin: 0; Health: 1500; Speed: 80; Attack: akHeatRocket; Damage: 40; AttackRange: 1500; AttackCooldown: 1.2; Flying: False; SoundDir: 'bosstank'; SightSound: 'btkunqv1'; PainSound: 'btkpain1'; DeathSound: 'btkdeth1'; AttackSound: 'btkunqv2'),
+    (ClassName: 'monster_gekk'; Model: 'models/monsters/gekk/tris.md2'; Skin: 0; Health: 125; Speed: 150; Attack: akMelee; Damage: 5; AttackRange: 1000; AttackCooldown: 1.0; Flying: False; SoundDir: 'gek'; SightSound: 'gk_sght1'; PainSound: 'gk_pain1'; DeathSound: 'gk_deth1'; AttackSound: 'gk_atck1'),
+    (ClassName: 'monster_fixbot'; Model: 'models/monsters/fixbot/tris.md2'; Skin: 0; Health: 150; Speed: 110; Attack: akBlaster; Damage: 15; AttackRange: 900; AttackCooldown: 2.0; Flying: True; SoundDir: 'flyer'; SightSound: 'flysght1'; PainSound: 'flypain1'; DeathSound: 'flydeth1'; AttackSound: '')
   );
 
 var
@@ -814,6 +866,11 @@ type
 { Quake 2 gibs of a monster class (generic meat and bones for others) }
 function MonsterGibs(const MonsterClass: String): TMonsterGibs;
 
+{ A monster's mass (the SP_monster_* functions' self->mass; 200 when not
+  known). Traps (Trap_Think) swallow monsters under 400 and leave a food
+  cube of a tenth of it. }
+function MonsterMass(const MonsterClass: String): Integer;
+
 implementation
 
 uses
@@ -821,12 +878,49 @@ uses
 
 procedure AdaptVariantAttacks(var Seqs: TMonsterAttackSeqs; const Def: PQuakeMonsterDef); forward;
 
+function MonsterMass(const MonsterClass: String): Integer;
+const
+  Masses: array[0..23] of record
+    ClassName: String;
+    Mass: Integer;
+  end = (
+    (ClassName: 'monster_soldier'; Mass: 100), (ClassName: 'monster_infantry'; Mass: 200),
+    (ClassName: 'monster_gunner'; Mass: 200), (ClassName: 'monster_berserk'; Mass: 250),
+    (ClassName: 'monster_gladiator'; Mass: 400), (ClassName: 'monster_gladb'; Mass: 350),
+    (ClassName: 'monster_flyer'; Mass: 50), (ClassName: 'monster_parasite'; Mass: 250),
+    (ClassName: 'monster_tank'; Mass: 500), (ClassName: 'monster_medic'; Mass: 400),
+    (ClassName: 'monster_chick'; Mass: 200), (ClassName: 'monster_mutant'; Mass: 300),
+    (ClassName: 'monster_brain'; Mass: 400), (ClassName: 'monster_floater'; Mass: 300),
+    (ClassName: 'monster_hover'; Mass: 150), (ClassName: 'monster_flipper'; Mass: 100),
+    (ClassName: 'monster_supertank'; Mass: 800), (ClassName: 'monster_boss5'; Mass: 800),
+    (ClassName: 'monster_boss2'; Mass: 1000), (ClassName: 'monster_jorg'; Mass: 1000),
+    (ClassName: 'monster_makron'; Mass: 500), (ClassName: 'misc_insane'; Mass: 300),
+    (ClassName: 'monster_gekk'; Mass: 300), (ClassName: 'monster_fixbot'; Mass: 150));
+var
+  I, Best: Integer;
+begin
+  { The longest matching prefix: monster_soldier_light is a soldier,
+    monster_tank_commander a tank, monster_chick_heat a chick }
+  Result := 200;
+  Best := 0;
+  for I := Low(Masses) to High(Masses) do
+    if (Pos(Masses[I].ClassName, MonsterClass) = 1) and (Length(Masses[I].ClassName) > Best) then
+    begin
+      Best := Length(Masses[I].ClassName);
+      Result := Masses[I].Mass;
+    end;
+end;
+
 function MonsterGibs(const MonsterClass: String): TMonsterGibs;
 
   procedure Add(const Model: String; const Count: Integer; const Metallic: Boolean = False);
   begin
     SetLength(Result.Pieces, Length(Result.Pieces) + 1);
-    Result.Pieces[High(Result.Pieces)].Model := 'models/objects/gibs/' + Model + '/tris.md2';
+    { A gib of models/objects/gibs, or a model's own folder ("gekkgib/arm") }
+    if Pos('/', Model) > 0 then
+      Result.Pieces[High(Result.Pieces)].Model := 'models/objects/' + Model + '/tris.md2'
+    else
+      Result.Pieces[High(Result.Pieces)].Model := 'models/objects/gibs/' + Model + '/tris.md2';
     Result.Pieces[High(Result.Pieces)].Count := Count;
     Result.Pieces[High(Result.Pieces)].Metallic := Metallic;
   end;
@@ -881,9 +975,36 @@ begin
     Result.GibHealth := -50;
     Result.Explodes := True;
   end else
-  if (MonsterClass = 'monster_supertank') or (MonsterClass = 'monster_jorg') then
+  if MonsterClass = 'monster_gekk' then
   begin
-    { supertank_die / jorg_die never gib (their death ends in BossExplode) }
+    { gekk_die: acid gibs (gekkgib: pelvis, two arms, torso, claw, two legs,
+      head), gib_health -30 }
+    Result.GibHealth := -30;
+    Result.Pieces := nil;
+    Add('gekkgib/pelvis', 1);
+    Add('gekkgib/arm', 2);
+    Add('gekkgib/torso', 1);
+    Add('gekkgib/claw', 1);
+    Add('gekkgib/leg', 2);
+    Add('gekkgib/head', 1);
+  end else
+  if MonsterClass = 'monster_fixbot' then
+  begin
+    { fixbot_die: BecomeExplosion1, always }
+    Result.GibHealth := -50;
+    Result.Explodes := True;
+  end else
+  if (XatrixBaseClass(MonsterClass) <> '') and (Copy(MonsterClass, 1, 16) <> 'monster_soldier_') then
+  begin
+    { The heat chick, the beta gladiator, boss5: their base monster's }
+    Result := MonsterGibs(XatrixBaseClass(MonsterClass));
+    Exit;
+  end else
+  if (MonsterClass = 'monster_supertank') or (MonsterClass = 'monster_jorg') or
+     (MonsterClass = 'monster_boss2') then
+  begin
+    { supertank_die / jorg_die / boss2_die never gib: their death ends in
+      BossExplode (TQuakeWorld.UpdateBossExplosions) }
     Result.GibHealth := -100000;
     Add('sm_metal', 4, True);
   end else
@@ -909,9 +1030,6 @@ begin
     else
     if MonsterClass = 'monster_medic' then
       Result.GibHealth := -130
-    else
-    if MonsterClass = 'monster_boss2' then
-      Result.GibHealth := -200
     else
     if MonsterClass = 'monster_makron' then
       Result.GibHealth := -2000
@@ -974,6 +1092,21 @@ begin
   if MonsterClass = 'monster_makron' then
   begin
     Mins := Vector3(-30, -30, 0); Maxs := Vector3(30, 30, 90);
+  end else
+  { The Reckoning: the variants have their base's box; the gekk 36 x 36 x 48,
+    the fixbot 64 x 64 x 48 }
+  if XatrixBaseClass(MonsterClass) <> '' then
+  begin
+    MonsterBoxSize(XatrixBaseClass(MonsterClass), Mins, Maxs);
+    Exit;
+  end else
+  if MonsterClass = 'monster_gekk' then
+  begin
+    Mins := Vector3(-18, -18, -24); Maxs := Vector3(18, 18, 24);
+  end else
+  if MonsterClass = 'monster_fixbot' then
+  begin
+    Mins := Vector3(-32, -32, -24); Maxs := Vector3(32, 32, 24);
   end;
   { Our monster origins are 24 above the feet }
   Height := Maxs.Z - Mins.Z;
@@ -1261,6 +1394,16 @@ begin
   begin
     PowerArmorType := paScreen;
     PowerArmorPower := 100;
+  end;
+  { The Reckoning: power shields on the beta gladiator (250) and boss5 (400),
+    unless the map gives its own "power_armor_power" }
+  if (Def^.ClassName = 'monster_gladb') or (Def^.ClassName = 'monster_boss5') then
+  begin
+    PowerArmorType := paShield;
+    if Def^.ClassName = 'monster_gladb' then
+      PowerArmorPower := AEntity.GetInt('power_armor_power', 250)
+    else
+      PowerArmorPower := AEntity.GetInt('power_armor_power', 400);
   end;
 
   Transform := TCastleTransform.Create(nil);
@@ -2790,18 +2933,37 @@ begin
     QuatFromAxisAngle(Vector3(0, 0, 1), Pitch)).ToAxisAngle;
 
   case AKind of
-    pkBlasterBolt: MdlPath := 'models/objects/laser/tris.md2';
-    pkRocket: MdlPath := 'models/objects/rocket/tris.md2';
+    pkBlasterBolt, pkBlueBolt: MdlPath := 'models/objects/laser/tris.md2';
+    pkRocket, pkHeatRocket: MdlPath := 'models/objects/rocket/tris.md2';
     pkGrenade: MdlPath := 'models/objects/grenade/tris.md2';
     pkHandGrenade: MdlPath := 'models/objects/grenade2/tris.md2';
+    pkRipper: MdlPath := 'models/objects/boomrang/tris.md2';
+    pkLoogie: MdlPath := 'models/objects/loogy/tris.md2';
+    pkTrap: MdlPath := 'models/weapons/z_trap/tris.md2';
     else MdlPath := '';
   end;
+  case AKind of
+    pkRipper: Life := 3;
+    pkBlueBolt, pkLoogie: Life := 2;
+    { 8000 / speed (725): about 11 s }
+    pkPlasma: Life := 11;
+    { fire_trap: 30 s (timestamp), its first think after 1 s }
+    pkTrap:
+      begin
+        Life := 30;
+        TrapTimer := 1;
+      end;
+  end;
   if MdlPath <> '' then
-    Model := Md2Manager.CreateInstance(MdlPath);
-  { The BFG ball is an animated sprite }
-  if AKind = pkBfg then
+    { fire_blueblaster: the laser model's second skin }
+    Model := Md2Manager.CreateInstance(MdlPath, Ord(AKind = pkBlueBolt));
+  { The BFG ball and the plasma ball are animated sprites }
+  if AKind in [pkBfg, pkPlasma] then
   begin
-    Sprite := SpriteManager.CreateInstance('sprites/s_bfg1.sp2');
+    if AKind = pkPlasma then
+      Sprite := SpriteManager.CreateInstance('sprites/s_photon.sp2')
+    else
+      Sprite := SpriteManager.CreateInstance('sprites/s_bfg1.sp2');
     if Sprite <> nil then
       Transform.Add(Sprite.Scene);
   end;
