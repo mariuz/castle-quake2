@@ -94,6 +94,13 @@ type
     { target_steam's sustained effects: until (level time) and the next puff }
     FSteam: specialize TDictionary<TQuakeEntity, TVector2>;
     FHintPaths: TQuakeHintPaths;
+    { The monster that fired the shot hurting the player now (for the
+      defender sphere); the sphere, its enemy, its next shot }
+    FDamageSource: TQuakeMonster;
+    FDefender: TCastleTransform;
+    FDefenderModel, FDefenderShell: TQuakeMd2Instance;
+    FDefenderEnemy: TQuakeMonster;
+    FDefenderCooldown, FDefenderThink: Single;
     { Quake II Remastered dynamic_light entities (not owned; on / off in
       FCounters: 1 / 0) }
     FDynamicLights: TQuakeEntityList;
@@ -344,6 +351,15 @@ type
     procedure SteamPuff(const Ent: TQuakeEntity);
     procedure UpdateSteam;
     procedure AngerUse(const Ent: TQuakeEntity);
+    { Ground Zero's defender sphere: above the player, blaster bolts at
+      whoever hurt the player }
+    procedure UpdateDefender(const SecondsPassed: Single);
+    procedure RemoveDefender(const WithExplosion: Boolean);
+    { Ground Zero's chainfist hit and plasma beam }
+    procedure ChainfistHit(const Origin, Dir: TVector3; const Damage: Integer);
+    procedure PlasmaBeam(const Origin, Dir: TVector3; const Damage: Integer);
+    { A prox mine stuck and armed: monsters near it, its lifetime }
+    procedure ProxThink(const Proj: TQuakeProjectile; const SecondsPassed: Single);
     { medic_callReinforcements / medic_finish_spawn: the medic commander's
       monsters around it }
     procedure MedicSummon(const Medic: TQuakeMonster);
@@ -653,6 +669,7 @@ begin
   FCounters.Free;
   FPeriodic.Free;
   FRepairHealth.Free;
+  RemoveDefender(False);
   FSteam.Free;
   if HintPaths = FHintPaths then
     HintPaths := nil;
@@ -676,6 +693,9 @@ begin
   FStats.MaxAmmo[atSlugs] := 50;
   FStats.MaxAmmo[atMagSlugs] := 50;
   FStats.MaxAmmo[atTraps] := 5;
+  { Ground Zero's InitClientPersistant }
+  FStats.MaxAmmo[atFlechettes] := 200;
+  FStats.MaxAmmo[atProx] := 50;
   FStats.WeaponMask := 1 shl 1; { Blaster }
   FStats.CurrentWeapon := 1;
 end;
@@ -701,6 +721,8 @@ begin
   FRepairHealth.Clear;
   FSteam.Clear;
   PlayerDisguised := False;
+  RemoveDefender(False);
+  FDamageSource := nil;
   FDelayed.Clear;
   FCounters.Clear;
   FDynamicLights.Clear;
@@ -833,6 +855,14 @@ var
   T: TQuakeTrace;
 begin
   CName := Ent.ClassName;
+  { Ground Zero's SpawnItem in single player: the disruptor (without
+    g_disruptor), the A-M bomb, the hunter and vengeance spheres and the
+    doppelganger are deathmatch only; the nailgun and weapon_heatbeam aren't in its item list }
+  if (CName = 'weapon_disintegrator') or (CName = 'ammo_disruptor') or (CName = 'ammo_nuke') or
+     (CName = 'item_sphere_hunter') or (CName = 'item_sphere_vengeance') or (CName = 'item_doppleganger') or
+     (CName = 'weapon_nailgun') or (CName = 'ammo_nails') or (CName = 'dm_tag_token') or
+     (CName = 'weapon_heatbeam') then
+    Exit;
   Pos := QuakeToCge(Ent.Origin);
   SpawnFlags := Ent.SpawnFlags;
 
@@ -1504,6 +1534,26 @@ begin
             Sounds.Play('sound/items/quadfire1.wav', 1, chItem);
           end;
         POWERUP_INVULN: FStats.InvulnTime := FStats.InvulnTime + Def^.Amount;
+        { Ground Zero, used on pickup: Use_Double (30 s), Use_IR (60 s),
+          Use_Defender (one sphere at a time: Pickup_Sphere refuses) }
+        POWERUP_DOUBLE:
+          begin
+            FStats.DoubleTime := FStats.DoubleTime + Def^.Amount;
+            Sounds.Play('sound/misc/ddamage1.wav', 1, chItem);
+          end;
+        POWERUP_IR:
+          begin
+            FStats.IRTime := FStats.IRTime + Def^.Amount;
+            Sounds.Play('sound/misc/ir_start.wav', 1, chItem);
+          end;
+        POWERUP_DEFENDER:
+          begin
+            if FStats.DefenderTime > 0 then
+              Exit(False);
+            FStats.DefenderTime := Def^.Amount;
+            FDefenderEnemy := nil;
+            WritelnLog('QuakeWorld', 'Defender sphere out');
+          end;
         { Used on pickup here (Quake 2 single player keeps them in the
           inventory until used): Use_Breather, Use_Envirosuit, Use_Silencer }
         POWERUP_OTHER:
@@ -1545,7 +1595,9 @@ begin
               FStats.MaxAmmo[atCells] := Max(FStats.MaxAmmo[atCells], 300);
               FStats.MaxAmmo[atSlugs] := Max(FStats.MaxAmmo[atSlugs], 100);
               FStats.MaxAmmo[atMagSlugs] := Max(FStats.MaxAmmo[atMagSlugs], 100);
+              FStats.MaxAmmo[atFlechettes] := Max(FStats.MaxAmmo[atFlechettes], 300);
               AddAmmo(atMagSlugs, 10);
+              AddAmmo(atFlechettes, 50);
             end else
             begin
               FStats.MaxAmmo[atShells] := Max(FStats.MaxAmmo[atShells], 150);
@@ -1553,6 +1605,7 @@ begin
               FStats.MaxAmmo[atCells] := Max(FStats.MaxAmmo[atCells], 250);
               FStats.MaxAmmo[atSlugs] := Max(FStats.MaxAmmo[atSlugs], 75);
               FStats.MaxAmmo[atMagSlugs] := Max(FStats.MaxAmmo[atMagSlugs], 75);
+              FStats.MaxAmmo[atFlechettes] := Max(FStats.MaxAmmo[atFlechettes], 250);
             end;
             for A := atShells to atSlugs do
               AddAmmo(A, 10);
@@ -3044,6 +3097,80 @@ begin
     [Medic.Transform.Name, Made, Strength, Medic.MonsterSlots]);
 end;
 
+procedure TQuakeWorld.RemoveDefender(const WithExplosion: Boolean);
+begin
+  if FDefender = nil then
+    Exit;
+  { sphere_think_explode: BecomeExplosion1 }
+  if WithExplosion then
+    TempEntity(TE_EXPLOSION1, FDefender.Translation);
+  FreeAndNil(FDefenderModel);
+  FreeAndNil(FDefenderShell);
+  FreeAndNil(FDefender);
+  FDefenderEnemy := nil;
+end;
+
+procedure TQuakeWorld.UpdateDefender(const SecondsPassed: Single);
+var
+  Goal, Dir: TVector3;
+begin
+  if (FStats.DefenderTime <= 0) or FDead then
+  begin
+    if FDefender <> nil then
+      WritelnLog('QuakeWorld', 'Defender sphere gone');
+    RemoveDefender(FDefender <> nil);
+    FStats.DefenderTime := 0;
+    Exit;
+  end;
+  FStats.DefenderTime := Max(0, FStats.DefenderTime - SecondsPassed);
+  { Above the player's head (4 over the top of the box) }
+  Goal := FPlayerPos + Vector3(0, 32 - 22 + 4, 0);
+  if FDefender = nil then
+  begin
+    FDefender := TCastleTransform.Create(nil);
+    FDefender.Name := 'DefenderSphere';
+    FDefender.Translation := Goal;
+    FDefenderModel := Md2Manager.CreateInstance('models/items/defender/tris.md2');
+    if FDefenderModel <> nil then
+    begin
+      FDefenderModel.Scene.Collides := False;
+      FDefenderModel.Scene.Pickable := False;
+      FDefender.Add(FDefenderModel.Scene);
+    end;
+    FDefenderShell := Md2Manager.CreateInstance('models/items/shell/tris.md2');
+    if FDefenderShell <> nil then
+    begin
+      FDefenderShell.Scene.Collides := False;
+      FDefenderShell.Scene.Pickable := False;
+      FDefender.Add(FDefenderShell.Scene);
+    end;
+    FItems.Add(FDefender);
+  end;
+  { defender_think: 5 times the way there a second; RF_FULLBRIGHT }
+  FDefender.Translation := FDefender.Translation + (Goal - FDefender.Translation) * Min(1, 5 * SecondsPassed);
+  FDefender.Rotation := Vector4(0, 1, 0, FTime * 2);
+  if FDefenderModel <> nil then
+    FDefenderModel.SetTint(Vector3(1.5, 1.5, 1.5));
+  { Every 0.1 s: a bolt of 10 at 1000 at its enemy while it is alive and in
+    sight, 0.4 s apart }
+  FDefenderCooldown := FDefenderCooldown - SecondsPassed;
+  FDefenderThink := FDefenderThink - SecondsPassed;
+  if FDefenderThink > 0 then
+    Exit;
+  FDefenderThink := 0.1;
+  if (FDefenderEnemy <> nil) and ((not FDefenderEnemy.IsAlive) or FDefenderEnemy.Dormant) then
+    FDefenderEnemy := nil;
+  if (FDefenderEnemy = nil) or (FDefenderCooldown > 0) then
+    Exit;
+  if not HintPointsVisible(FDefender.Translation, FDefenderEnemy.EyePos) then
+    Exit;
+  Dir := (FDefenderEnemy.Transform.Translation - FDefender.Translation).Normalize;
+  SpawnProjectile(pkBlasterBolt, FDefender.Translation + Vector3(0, 2, 0), Dir, 1000, 10, True);
+  Sounds.PlayAt('sound/weapons/laser2.wav', FDefender, 1, 1, chWeapon);
+  FDefenderCooldown := 0.4;
+  WritelnLog('QuakeWorld', 'Defender sphere fires at %s', [FDefenderEnemy.Transform.Name]);
+end;
+
 procedure TQuakeWorld.AngerUse(const Ent: TQuakeEntity);
 var
   Victims: TQuakeEntityList;
@@ -3587,8 +3714,12 @@ end;
 
 function TQuakeWorld.DamageMultiplier: Integer;
 begin
+  { P_DamageModifier: quad 4, else double damage 2 }
   if FStats.QuadTime > 0 then
     Result := 4
+  else
+  if FStats.DoubleTime > 0 then
+    Result := 2
   else
     Result := 1;
 end;
@@ -3729,11 +3860,17 @@ begin
   if Has(PhalanxSlot, atMagSlugs, 1) then
     SelectWeapon(PhalanxSlot)
   else
+  if Has(PlasmaBeamSlot, atCells, 2) then
+    SelectWeapon(PlasmaBeamSlot)
+  else
   if Has(8, atCells, 1) then
     SelectWeapon(8)
   else
   if Has(IonRipperSlot, atCells, 2) then
     SelectWeapon(IonRipperSlot)
+  else
+  if Has(EtfRifleSlot, atFlechettes, 1) then
+    SelectWeapon(EtfRifleSlot)
   else
   if Has(5, atBullets, 1) then
     SelectWeapon(5)
@@ -4374,6 +4511,65 @@ begin
   end;
 end;
 
+procedure TQuakeWorld.ProxThink(const Proj: TQuakeProjectile; const SecondsPassed: Single);
+const
+  { PROX_DAMAGE_RADIUS, PROX_BOUND_SIZE }
+  DamageRadius = 192;
+  FieldSize = 96;
+var
+  M: TQuakeMonster;
+  Pos: TVector3;
+  Mult: Integer;
+  Box: TBox3D;
+begin
+  Pos := Proj.Transform.Translation;
+  { prox_open: 10 frames of opening, then armed }
+  if Proj.ProxArm > 0 then
+  begin
+    Proj.ProxArm := Proj.ProxArm - SecondsPassed;
+    if Proj.ProxArm > 0 then
+      Exit;
+    { Armed: a monster in sight within 202 sets it off now; else it lives
+      45 s (30, 15, 10 with double, quad or both) }
+    for M in FMonsters do
+      if M.IsAlive and (not M.Dormant) and (PointsDistance(M.Transform.Translation, Pos) < DamageRadius + 10) and
+         M.HasLineOfSight(Pos) then
+      begin
+        Proj.ProxTrigger := 0;
+        Break;
+      end;
+    Mult := Max(1, Proj.Damage div 90);
+    case Mult of
+      1: Proj.ProxFuse := 45;
+      2: Proj.ProxFuse := 30;
+      4: Proj.ProxFuse := 15;
+      else Proj.ProxFuse := 10;
+    end;
+  end;
+  { prox_field_touch: a monster in the 192 box: proxwarn, off 0.5 s later }
+  if Proj.ProxTrigger < 0 then
+  begin
+    Box := Box3D(Pos - Vector3(FieldSize, FieldSize, FieldSize), Pos + Vector3(FieldSize, FieldSize, FieldSize));
+    for M in FMonsters do
+      if M.IsAlive and (not M.Dormant) and Box.Collision(M.Transform.BoundingBox) then
+      begin
+        Proj.ProxTrigger := 0.5;
+        Sounds.PlayAt('sound/weapons/proxwarn.wav', Proj.Transform);
+        Break;
+      end;
+  end;
+  if Proj.ProxTrigger >= 0 then
+    Proj.ProxTrigger := Proj.ProxTrigger - SecondsPassed;
+  Proj.ProxFuse := Proj.ProxFuse - SecondsPassed;
+  if (Proj.ProxTrigger < 0) and (Proj.ProxTrigger > -0.5) or (Proj.ProxFuse <= 0) then
+  begin
+    { Prox_Explode: 90 (times the multiplier) within 192 }
+    WritelnLog('QuakeWorld', 'Prox mine goes off');
+    Explode(Pos, Proj.Damage, DamageRadius, Proj.FromPlayer);
+    Proj.Life := 0;
+  end;
+end;
+
 procedure TQuakeWorld.UpdateProjectiles(const SecondsPassed: Single);
 var
   I: Integer;
@@ -4391,7 +4587,8 @@ begin
     Remove := False;
     OldPos := Proj.Transform.Translation;
 
-    if (Proj.Kind in [pkGrenade, pkHandGrenade]) or ((Proj.Kind = pkTrap) and not Proj.TrapLanded) then
+    if (Proj.Kind in [pkGrenade, pkHandGrenade]) or ((Proj.Kind = pkTrap) and not Proj.TrapLanded) or
+       ((Proj.Kind = pkProx) and not Proj.ProxStuck) then
       Proj.Velocity.Y := Proj.Velocity.Y - 800 * SecondsPassed;
     if Proj.Sprite <> nil then
       Proj.Sprite.Update(SecondsPassed);
@@ -4416,6 +4613,14 @@ begin
         WritelnLog('QuakeWorld', 'Trap blew up');
       end;
       FProjectiles.Delete(I);
+      Continue;
+    end;
+
+    if (Proj.Kind = pkProx) and Proj.ProxStuck then
+    begin
+      ProxThink(Proj, SecondsPassed);
+      if Proj.Life <= 0 then
+        FProjectiles.Delete(I);
       Continue;
     end;
 
@@ -4486,6 +4691,30 @@ begin
           Proj.Transform.Rotation := Vector4(0, 1, 0, Random * 2 * Pi);
         end;
       end else
+      if Proj.Kind = pkProx then
+      begin
+        { prox_land: a monster (or the player) sets it off; lava or slime
+          too; it sticks to the world and to movers' tops }
+        if Damageable or ((T.Contents and (8 or 16)) <> 0) or
+           ((T.Ent is TQuakeMover) and (HitNormal.Y <= 0.7)) then
+        begin
+          Explode(NewPos, Proj.Damage, 192, Proj.FromPlayer);
+          Remove := True;
+        end else
+        if (T.Contents and CONTENTS_SOLID) = 0 then
+          Remove := True
+        else
+        begin
+          NewPos := NewPos + HitNormal * 0.5;
+          Proj.Velocity := TVector3.Zero;
+          Proj.ProxStuck := True;
+          Proj.ProxArm := 0.5;
+          Proj.ProxFuse := -1;
+          Proj.ProxTrigger := -1;
+          Sounds.PlayAt('sound/weapons/proxopen.wav', Proj.Transform);
+          WritelnLog('QuakeWorld', 'Prox mine stuck at %s', [CgeToQuake(NewPos).ToString]);
+        end;
+      end else
       if Proj.Kind in [pkGrenade, pkHandGrenade] then
       begin
         if Damageable then
@@ -4519,6 +4748,7 @@ begin
         end else
         if T.Ent is TQuakePlayerMovement then
         begin
+          FDamageSource := Proj.Owner;
           if Proj.Kind in [pkBlasterBolt, pkBfg, pkRipper, pkBlueBolt, pkLoogie, pkPlasma] then
             DamagePlayer(Proj.Damage, OldPos);
         end else
@@ -4547,6 +4777,10 @@ begin
               Proj.Velocity := TVector3.Zero;
               Proj.Transform.Exists := False;
             end;
+          { flechette_touch: TE_FLECHETTE on walls }
+          pkFlechette:
+            if not Damageable then
+              Particles.SpawnImpact(NewPos - Dir * 2, -Dir);
           else
             begin
               Particles.SpawnBlasterImpact(NewPos - Dir * 2, -Dir);
@@ -4740,6 +4974,7 @@ begin
   if FDead then
     Exit;
   Inc(FMonsterShots);
+  FDamageSource := Monster;
   Eye := Monster.EyePos;
   Target := FPlayerPos - Vector3(0, 12, 0);
   if Monster.AngerActive then
@@ -5011,9 +5246,15 @@ procedure TQuakeWorld.DamagePlayer(const Amount: Integer; const FromPos: TVector
 var
   Save, Take: Integer;
 begin
+  { The defender sphere goes after whoever hurt the player (defender_pain) }
+  if (FStats.DefenderTime > 0) and (FDamageSource <> nil) and FDamageSource.IsAlive then
+    FDefenderEnemy := FDamageSource;
   if FDead or FStats.GodMode or (FStats.InvulnTime > 0) or (Amount <= 0) then
     Exit;
   Take := Amount;
+  { T_Damage: half damage while a defender sphere is out }
+  if FStats.DefenderTime > 0 then
+    Take := Max(1, Take div 2);
   { Quake 2 T_Damage: half damage on easy }
   if GameSkill = 0 then
     Take := Max(1, Take div 2);
@@ -5129,7 +5370,14 @@ begin
     Sounds.Play('sound/items/quadfire2.wav', 1, chItem);
   FStats.QuadFireTime := Max(0, FStats.QuadFireTime - SecondsPassed);
   FGun.Haste := FStats.QuadFireTime > 0;
+  { Double damage: ddamage2.wav 3 s before it ends }
+  if (FStats.DoubleTime > 3) and (FStats.DoubleTime - SecondsPassed <= 3) then
+    Sounds.Play('sound/misc/ddamage2.wav', 1, chItem);
+  FStats.DoubleTime := Max(0, FStats.DoubleTime - SecondsPassed);
+  FStats.IRTime := Max(0, FStats.IRTime - SecondsPassed);
+  IRGogglesOn := FStats.IRTime > 0;
   UpdatePlayerItems(SecondsPassed);
+  UpdateDefender(SecondsPassed);
   FPainSoundTimer := FPainSoundTimer - SecondsPassed;
   { Projectile lights of the previous frame }
   Lighting.EndFrame;
@@ -5227,7 +5475,11 @@ begin
       they blink in the last 3 seconds, like the Quake 2 HUD icons }
     Shell := TVector3.Zero;
     if (FStats.QuadTime > 3) or ((FStats.QuadTime > 0) and (Frac(FTime * 4) < 0.5)) then
-      Shell := Shell + Vector3(0, 0, 1);
+      Shell := Shell + Vector3(0, 0, 1)
+    else
+    { EF_DOUBLE: a gold shell }
+    if (FStats.DoubleTime > 3) or ((FStats.DoubleTime > 0) and (Frac(FTime * 4) < 0.5)) then
+      Shell := Shell + Vector3(0.6, 0.45, 0);
     if (FStats.InvulnTime > 3) or ((FStats.InvulnTime > 0) and (Frac(FTime * 4) < 0.5)) then
       Shell := Shell + Vector3(1, 0, 0);
     FWeaponModel.SetShell(Shell);
@@ -5277,7 +5529,8 @@ end;
 
 function TQuakeWorld.ChainedWeapon(const Slot: Integer): Integer;
 var
-  Partner: Integer;
+  Chain: array of Integer;
+  I, Cur: Integer;
 
   function Owned(const S: Integer): Boolean;
   begin
@@ -5285,20 +5538,35 @@ var
   end;
 
 begin
-  { The items' chains (the hyperblaster and the ion ripper, the railgun and
-    the phalanx, grenades and traps): the key of one picks the other when
-    one of them is up, or when only the other is owned }
+  { The items' chains (the blaster and the chainfist, the machinegun and
+    the ETF rifle, the grenade launcher and the prox launcher, the
+    hyperblaster, ion ripper and plasma beam, the railgun and the phalanx,
+    grenades and traps): with one of the chain up, the key picks the next
+    owned one; otherwise the first owned one }
   case Slot of
-    8: Partner := IonRipperSlot;
-    9: Partner := PhalanxSlot;
-    HandGrenadeSlot: Partner := TrapSlot;
+    1: Chain := [1, ChainfistSlot];
+    4: Chain := [4, EtfRifleSlot];
+    6: Chain := [6, ProxLauncherSlot];
+    8: Chain := [8, IonRipperSlot, PlasmaBeamSlot];
+    9: Chain := [9, PhalanxSlot];
+    HandGrenadeSlot: Chain := [HandGrenadeSlot, TrapSlot];
     else Exit(Slot);
   end;
   Result := Slot;
-  if not Owned(Partner) then
-    Exit;
-  if (FStats.CurrentWeapon = Slot) or not Owned(Slot) then
-    Result := Partner;
+  Cur := -1;
+  for I := 0 to High(Chain) do
+    if Chain[I] = FStats.CurrentWeapon then
+      Cur := I;
+  if Cur >= 0 then
+  begin
+    for I := 1 to High(Chain) do
+      if Owned(Chain[(Cur + I) mod Length(Chain)]) then
+        Exit(Chain[(Cur + I) mod Length(Chain)]);
+    Exit(FStats.CurrentWeapon);
+  end;
+  for I := 0 to High(Chain) do
+    if Owned(Chain[I]) then
+      Exit(Chain[I]);
 end;
 
 procedure TQuakeWorld.SelectWeapon(const Slot: Integer);
@@ -5369,6 +5637,9 @@ begin
     else
       Sounds.Play(Def.Sound, SilencedVolume, chWeapon);
   end;
+  if Mult = 2 then
+    Sounds.Play('sound/misc/ddamage3.wav', 1, chItem)
+  else
   if Mult > 1 then
     Sounds.Play('sound/items/damage3.wav', 1, chItem);
 
@@ -5407,6 +5678,29 @@ begin
       SpawnProjectile(pkRipper, MuzzlePos, YawTurned(Dir, Random * 2 - 1), 500, 50 * Mult, True);
     { weapon_phalanx_fire: 70..79 at 725, 1.5 degrees to the left on frame
       7 with a 120 splash, to the right on frame 8 with 30 (radius 120) }
+    ChainfistSlot:
+      ChainfistHit(Origin, Dir, 15 * Mult);
+    { weapon_etf_rifle_fire: flechettes of 10 at 750 from the right barrel
+      on frame 6, the left on 7 }
+    EtfRifleSlot:
+      begin
+        Right := TVector3.CrossProduct(Dir, Vector3(0, 1, 0));
+        if Right.IsZero then
+          Right := Vector3(1, 0, 0);
+        Right := Right.Normalize;
+        if FGun.Frame = 7 then
+          SpawnProjectile(pkFlechette, Origin + Dir * 15 + Right * 8 - Vector3(0, 8, 0), Dir, 750, 10 * Mult, True)
+        else
+          SpawnProjectile(pkFlechette, Origin + Dir * 15 + Right * 6 - Vector3(0, 8, 0), Dir, 750, 10 * Mult, True);
+      end;
+    { weapon_grenadelauncher_fire with prox: 600 ahead, 200 up }
+    ProxLauncherSlot:
+      begin
+        Right := Dir * 600 + Vector3(0, 200 + Random * 10, 0);
+        SpawnProjectile(pkProx, MuzzlePos, Right.Normalize, Right.Length, 90 * Mult, True);
+      end;
+    PlasmaBeamSlot:
+      PlasmaBeam(Origin, Dir, 15 * Mult);
     PhalanxSlot:
       begin
         if FGun.Frame = 8 then
@@ -5419,6 +5713,78 @@ begin
         else
           FProjectiles.Last.SplashDamage := 120 * Mult;
       end;
+  end;
+end;
+
+procedure TQuakeWorld.ChainfistHit(const Origin, Dir: TVector3; const Damage: Integer);
+var
+  T: TQuakeTrace;
+  HitPos: TVector3;
+begin
+  { chainfist_fire / fire_player_melee: a trace of 64 (CHAINFIST_REACH);
+    a hit pushes the player forward and up 75; walls get sparks }
+  T := WorldTrace(CgeToQuake(Origin), CgeToQuake(Origin + Dir * 64), TVector3.Zero, TVector3.Zero,
+    MASK_SHOT, FPlayer);
+  if not T.Hit then
+    Exit;
+  HitPos := QuakeToCge(T.EndPos);
+  if T.Ent is TQuakeMonster then
+  begin
+    TQuakeMonster(T.Ent).TakeDamage(Damage);
+    Particles.SpawnBlood(HitPos, -Dir);
+    if FPlayer <> nil then
+      FPlayer.AddVelocity(Vector3(Dir.X, 0, Dir.Z) * 75 + Vector3(0, 75, 0));
+  end else
+  begin
+    if T.Ent is TQuakeMover then
+      DamageMover(TQuakeMover(T.Ent), Damage)
+    else
+    if T.Ent is TQuakeProp then
+      DamageProp(TQuakeProp(T.Ent), Damage);
+    Particles.SpawnImpact(HitPos - Dir * 2, -Dir);
+  end;
+end;
+
+procedure TQuakeWorld.PlasmaBeam(const Origin, Dir: TVector3; const Damage: Integer);
+var
+  T: TQuakeTrace;
+  Start, Stop: TVector3;
+  Dmg: Integer;
+  Right, Muzzle, HitPos: TVector3;
+begin
+  { fire_heatbeam: a trace of 8192, half the damage through water (the
+    beam goes on), the beam drawn from the gun }
+  Dmg := Damage;
+  Start := CgeToQuake(Origin);
+  Stop := Start + CgeToQuake(Dir) * 8192;
+  T := WorldTrace(Start, Stop, TVector3.Zero, TVector3.Zero, MASK_SHOT or 8 or 16 or 32, FPlayer);
+  if T.Hit and ((T.Contents and (8 or 16 or 32)) <> 0) then
+  begin
+    Dmg := Dmg div 2;
+    T := WorldTrace(T.EndPos + CgeToQuake(Dir), Stop, TVector3.Zero, TVector3.Zero, MASK_SHOT, FPlayer);
+  end;
+  HitPos := QuakeToCge(T.EndPos);
+  Right := TVector3.CrossProduct(Dir, Vector3(0, 1, 0));
+  if Right.IsZero then
+    Right := Vector3(1, 0, 0);
+  Muzzle := Origin + Dir * 7 + Right.Normalize * 2 - Vector3(0, 3, 0);
+  Particles.SpawnBeam(Muzzle, HitPos, Vector3(1.0, 0.75, 0.2));
+  if not T.Hit then
+    Exit;
+  if T.Ent is TQuakeMonster then
+  begin
+    TQuakeMonster(T.Ent).TakeDamage(Dmg);
+    Particles.SpawnBlood(HitPos, -Dir);
+  end else
+  begin
+    if T.Ent is TQuakeMover then
+      DamageMover(TQuakeMover(T.Ent), Dmg)
+    else
+    if T.Ent is TQuakeProp then
+      DamageProp(TQuakeProp(T.Ent), Dmg);
+    { TE_HEATBEAM_STEAM }
+    if (T.Contents and CONTENTS_SOLID) <> 0 then
+      Particles.SpawnSteam(HitPos - Dir * 2, -Dir, 8, 60, 223);
   end;
 end;
 
@@ -5493,6 +5859,9 @@ begin
   O.Add('levelTime', FStats.LevelTime);
   O.Add('quad', FStats.QuadTime);
   O.Add('quadFire', FStats.QuadFireTime);
+  O.Add('double', FStats.DoubleTime);
+  O.Add('ir', FStats.IRTime);
+  O.Add('defender', FStats.DefenderTime);
   O.Add('invuln', FStats.InvulnTime);
   O.Add('breather', FStats.BreatherTime);
   O.Add('enviro', FStats.EnviroTime);
@@ -5715,6 +6084,9 @@ begin
     FStats.LevelTime := O.Get('levelTime', 0.0);
     FStats.QuadTime := O.Get('quad', 0.0);
     FStats.QuadFireTime := O.Get('quadFire', 0.0);
+    FStats.DoubleTime := O.Get('double', 0.0);
+    FStats.IRTime := O.Get('ir', 0.0);
+    FStats.DefenderTime := O.Get('defender', 0.0);
     FStats.InvulnTime := O.Get('invuln', 0.0);
     FStats.BreatherTime := O.Get('breather', 0.0);
     FStats.EnviroTime := O.Get('enviro', 0.0);
@@ -6702,11 +7074,13 @@ begin
   for A := atShells to atSlugs do
     FStats.Ammo[A] := FStats.MaxAmmo[A];
   { The Reckoning's weapons when their models are there (-game xatrix) }
-  for I := IonRipperSlot to TrapSlot do
+  { and Ground Zero's (-game rogue) }
+  for I := IonRipperSlot to PlasmaBeamSlot do
     if Pak.FileExists(WeaponDefs[I].ViewModel) then
     begin
       FStats.WeaponMask := FStats.WeaponMask or (1 shl I);
-      FStats.Ammo[WeaponDefs[I].AmmoType] := FStats.MaxAmmo[WeaponDefs[I].AmmoType];
+      if WeaponDefs[I].AmmoType <> atNone then
+        FStats.Ammo[WeaponDefs[I].AmmoType] := FStats.MaxAmmo[WeaponDefs[I].AmmoType];
     end;
   FStats.ArmorType := 3;
   FStats.Armor := 200;

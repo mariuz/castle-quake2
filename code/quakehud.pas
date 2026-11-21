@@ -15,7 +15,9 @@ uses
 type
   TAmmoType = (atNone, atShells, atBullets, atGrenades, atRockets, atCells, atSlugs,
     { The Reckoning: mag slugs (the phalanx), traps (both weapon and ammo) }
-    atMagSlugs, atTraps);
+    atMagSlugs, atTraps,
+    { Ground Zero: flechettes (the ETF rifle), prox mines }
+    atFlechettes, atProx);
 
   { Player statistics needed for HUD rendering and gameplay }
   TQuakePlayerStats = record
@@ -34,6 +36,8 @@ type
     QuadTime, InvulnTime: Single;
     { The Reckoning's DualFire: the gun runs at twice its frame rate }
     QuadFireTime: Single;
+    { Ground Zero: double damage, IR goggles, the defender sphere's seconds }
+    DoubleTime, IRTime, DefenderTime: Single;
     { Rebreather / environment suit seconds left, silenced shots left }
     BreatherTime, EnviroTime: Single;
     SilencerShots: Integer;
@@ -264,6 +268,12 @@ begin
     S := S + Format('   QUAD %d', [Ceil(Stats.QuadTime)]);
   if Stats.QuadFireTime > 0 then
     S := S + Format('   DUALFIRE %d', [Ceil(Stats.QuadFireTime)]);
+  if Stats.DoubleTime > 0 then
+    S := S + Format('   DOUBLE %d', [Ceil(Stats.DoubleTime)]);
+  if Stats.IRTime > 0 then
+    S := S + Format('   IR %d', [Ceil(Stats.IRTime)]);
+  if Stats.DefenderTime > 0 then
+    S := S + Format('   DEFENDER %d', [Ceil(Stats.DefenderTime)]);
   if Stats.InvulnTime > 0 then
     S := S + Format('   INVULNERABLE %d', [Ceil(Stats.InvulnTime)]);
   if Stats.EnviroTime > 0 then
@@ -391,7 +401,14 @@ begin
   if FDamageFlash > 0 then
     DrawRectangle(R, Vector4(0.8, 0.0, 0.0, FDamageFlash));
   if FStats.QuadTime > 0 then
-    DrawRectangle(R, Vector4(0.0, 0.0, 1.0, 0.08));
+    DrawRectangle(R, Vector4(0.0, 0.0, 1.0, 0.08))
+  else
+  { Ground Zero's double damage (gold), under quad's }
+  if FStats.DoubleTime > 0 then
+    DrawRectangle(R, Vector4(0.9, 0.7, 0.0, 0.08));
+  { IR goggles: red }
+  if FStats.IRTime > 0 then
+    DrawRectangle(R, Vector4(1.0, 0.0, 0.0, 0.2));
   { The Reckoning's DualFire: pink (p_view's quadfire blend) }
   if FStats.QuadFireTime > 0 then
     DrawRectangle(R, Vector4(1.0, 0.2, 0.5, 0.08));
@@ -419,6 +436,9 @@ begin
     9: AmmoT := atSlugs;
     13: AmmoT := atMagSlugs;
     14: AmmoT := atTraps;
+    16: AmmoT := atFlechettes;
+    17: AmmoT := atProx;
+    18: AmmoT := atCells;
     else AmmoT := atNone;
   end;
   if AmmoT <> atNone then

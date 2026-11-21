@@ -469,7 +469,10 @@ type
     pkRipper, pkBlueBolt, pkHeatRocket, pkPlasma, pkLoogie,
     { The Reckoning's trap (fire_trap): bounces, opens, pulls a monster in,
       turns it into a food cube }
-    pkTrap);
+    pkTrap,
+    { Ground Zero: the ETF rifle's flechette, the prox mine (sticks where it
+      lands, arms, goes off when a monster comes near) }
+    pkFlechette, pkProx);
 
   { Active projectile (blaster bolt, rocket, grenade, BFG ball) }
   TQuakeProjectile = class
@@ -502,6 +505,10 @@ type
     TrapMass: Integer;
     { pkTrap pulling a monster in (trapsuck.wav instead of traploop.wav) }
     TrapSucking: Boolean;
+    { pkProx: stuck to a surface, seconds to arming (prox_open), its
+      lifetime once armed, the countdown after a monster came near }
+    ProxStuck: Boolean;
+    ProxArm, ProxFuse, ProxTrigger: Single;
     constructor Create(const Parent: TCastleTransform; const AKind: TProjectileKind;
       const Pos, Vel: TVector3; const ADamage: Integer; const AFromPlayer: Boolean);
     destructor Destroy; override;
@@ -672,10 +679,17 @@ const
     Reckoning's 12 Ion Ripper, 13 Phalanx, 14 Traps (chained with the
     hyperblaster, the railgun and the grenades: their keys switch between
     the two) }
-  WeaponSlots = 14;
+  WeaponSlots = 18;
   IonRipperSlot = 12;
   PhalanxSlot = 13;
   TrapSlot = 14;
+  { Ground Zero's 15 Chainfist, 16 ETF Rifle, 17 Prox Launcher, 18 Plasma
+    Beam (chained with the blaster, the machinegun, the grenade launcher
+    and the hyperblaster) }
+  ChainfistSlot = 15;
+  EtfRifleSlot = 16;
+  ProxLauncherSlot = 17;
+  PlasmaBeamSlot = 18;
 
   POWERUP_QUAD = 1;
   POWERUP_INVULN = 2;
@@ -685,8 +699,12 @@ const
   POWERUP_OTHER = 6;
   POWERUP_ANCIENT_HEAD = 7;
   POWERUP_QUADFIRE = 8;
+  { Ground Zero }
+  POWERUP_DOUBLE = 9;
+  POWERUP_IR = 10;
+  POWERUP_DEFENDER = 11;
 
-  ItemDefs: array[0..64] of TQuakeItemDef = (
+  ItemDefs: array[0..73] of TQuakeItemDef = (
     (ClassName: 'weapon_shotgun'; Category: icWeapon; Model: 'models/weapons/g_shotg/tris.md2'; Icon: 'w_shotgun'; Name: 'Shotgun'; Sound: 'sound/misc/w_pkup.wav'; Weapon: 2; AmmoType: atShells; Amount: 10; Param: 0),
     (ClassName: 'weapon_supershotgun'; Category: icWeapon; Model: 'models/weapons/g_shotg2/tris.md2'; Icon: 'w_sshotgun'; Name: 'Super Shotgun'; Sound: 'sound/misc/w_pkup.wav'; Weapon: 3; AmmoType: atShells; Amount: 10; Param: 0),
     (ClassName: 'weapon_machinegun'; Category: icWeapon; Model: 'models/weapons/g_machn/tris.md2'; Icon: 'w_machinegun'; Name: 'Machinegun'; Sound: 'sound/misc/w_pkup.wav'; Weapon: 4; AmmoType: atBullets; Amount: 50; Param: 0),
@@ -762,6 +780,17 @@ const
     (ClassName: 'ammo_magslug'; Category: icAmmo; Model: 'models/objects/ammo/tris.md2'; Icon: 'a_mslugs'; Name: 'Mag Slug'; Sound: 'sound/misc/am_pkup.wav'; Weapon: 0; AmmoType: atMagSlugs; Amount: 10; Param: 0),
     (ClassName: 'ammo_trap'; Category: icAmmo; Model: 'models/weapons/g_trap/tris.md2'; Icon: 'a_trap'; Name: 'Trap'; Sound: 'sound/misc/am_pkup.wav'; Weapon: TrapSlot; AmmoType: atTraps; Amount: 1; Param: 0),
     (ClassName: 'item_quadfire'; Category: icPowerup; Model: 'models/items/quadfire/tris.md2'; Icon: 'p_quadfire'; Name: 'DualFire Damage'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: 30; Param: POWERUP_QUADFIRE),
+    { Ground Zero (its g_items entries): the ETF rifle fires flechettes, the
+      plasma beam 2 cells a frame, the chainfist nothing }
+    (ClassName: 'weapon_chainfist'; Category: icWeapon; Model: 'models/weapons/g_chainf/tris.md2'; Icon: 'w_chainfist'; Name: 'Chainfist'; Sound: 'sound/misc/w_pkup.wav'; Weapon: ChainfistSlot; AmmoType: atNone; Amount: 0; Param: 0),
+    (ClassName: 'weapon_etf_rifle'; Category: icWeapon; Model: 'models/weapons/g_etf_rifle/tris.md2'; Icon: 'w_etf_rifle'; Name: 'ETF Rifle'; Sound: 'sound/misc/w_pkup.wav'; Weapon: EtfRifleSlot; AmmoType: atFlechettes; Amount: 50; Param: 0),
+    (ClassName: 'weapon_proxlauncher'; Category: icWeapon; Model: 'models/weapons/g_plaunch/tris.md2'; Icon: 'w_proxlaunch'; Name: 'Prox Launcher'; Sound: 'sound/misc/w_pkup.wav'; Weapon: ProxLauncherSlot; AmmoType: atProx; Amount: 5; Param: 0),
+    (ClassName: 'weapon_plasmabeam'; Category: icWeapon; Model: 'models/weapons/g_beamer/tris.md2'; Icon: 'w_heatbeam'; Name: 'Plasma Beam'; Sound: 'sound/misc/w_pkup.wav'; Weapon: PlasmaBeamSlot; AmmoType: atCells; Amount: 50; Param: 0),
+    (ClassName: 'ammo_flechettes'; Category: icAmmo; Model: 'models/ammo/am_flechette/tris.md2'; Icon: 'a_flechettes'; Name: 'Flechettes'; Sound: 'sound/misc/am_pkup.wav'; Weapon: 0; AmmoType: atFlechettes; Amount: 50; Param: 0),
+    (ClassName: 'item_double'; Category: icPowerup; Model: 'models/items/ddamage/tris.md2'; Icon: 'p_double'; Name: 'Double Damage'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: 30; Param: POWERUP_DOUBLE),
+    (ClassName: 'item_ir_goggles'; Category: icPowerup; Model: 'models/items/goggles/tris.md2'; Icon: 'p_ir'; Name: 'IR Goggles'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: 60; Param: POWERUP_IR),
+    (ClassName: 'item_sphere_defender'; Category: icPowerup; Model: 'models/items/defender/tris.md2'; Icon: 'p_defender'; Name: 'Defender Sphere'; Sound: 'sound/items/pkup.wav'; Weapon: 0; AmmoType: atNone; Amount: 30; Param: POWERUP_DEFENDER),
+    (ClassName: 'ammo_prox'; Category: icAmmo; Model: 'models/ammo/am_prox/tris.md2'; Icon: 'a_prox'; Name: 'Prox'; Sound: 'sound/misc/am_pkup.wav'; Weapon: 0; AmmoType: atProx; Amount: 5; Param: 0),
     { What a trap leaves of a monster (SP_item_foodcube): health over the
       maximum, the entity's "count" (a tenth of the monster's mass) }
     (ClassName: 'item_foodcube'; Category: icHealth; Model: 'models/objects/trapfx/tris.md2'; Icon: 'i_health'; Name: 'Food Cube'; Sound: 'sound/items/s_health.wav'; Weapon: 0; AmmoType: atNone; Amount: 2; Param: 1)
@@ -785,11 +814,17 @@ const
       on the second), traps are thrown like hand grenades }
     (Name: 'Ion Ripper'; ViewModel: 'models/weapons/v_boomer/tris.md2'; Icon: 'w_ripper'; AmmoType: atCells; AmmoPerShot: 2; Sound: 'sound/weapons/rippfire.wav'),
     (Name: 'Phalanx'; ViewModel: 'models/weapons/v_shotx/tris.md2'; Icon: 'w_phallanx'; AmmoType: atMagSlugs; AmmoPerShot: 1; Sound: 'sound/weapons/plasshot.wav'),
-    (Name: 'Traps'; ViewModel: 'models/weapons/v_trap/tris.md2'; Icon: 'a_trap'; AmmoType: atTraps; AmmoPerShot: 1; Sound: '')
+    (Name: 'Traps'; ViewModel: 'models/weapons/v_trap/tris.md2'; Icon: 'a_trap'; AmmoType: atTraps; AmmoPerShot: 1; Sound: ''),
+    { Ground Zero: the chainfist's saw and the plasma beam's hum are loop
+      sounds (TQuakeGun.LoopSound) }
+    (Name: 'Chainfist'; ViewModel: 'models/weapons/v_chainf/tris.md2'; Icon: 'w_chainfist'; AmmoType: atNone; AmmoPerShot: 0; Sound: ''),
+    (Name: 'ETF Rifle'; ViewModel: 'models/weapons/v_etf_rifle/tris.md2'; Icon: 'w_etf_rifle'; AmmoType: atFlechettes; AmmoPerShot: 1; Sound: 'sound/weapons/nail1.wav'),
+    (Name: 'Prox Launcher'; ViewModel: 'models/weapons/v_plaunch/tris.md2'; Icon: 'w_proxlaunch'; AmmoType: atProx; AmmoPerShot: 1; Sound: 'sound/weapons/grenlf1a.wav'),
+    (Name: 'Plasma Beam'; ViewModel: 'models/weapons/v_beamer/tris.md2'; Icon: 'w_heatbeam'; AmmoType: atCells; AmmoPerShot: 2; Sound: '')
   );
 
   AmmoIcons: array[TAmmoType] of String = ('', 'a_shells', 'a_bullets', 'a_grenades',
-    'a_rockets', 'a_cells', 'a_slugs', 'a_mslugs', 'a_trap');
+    'a_rockets', 'a_cells', 'a_slugs', 'a_mslugs', 'a_trap', 'a_flechettes', 'a_prox');
 
   { Built-in monster definitions. At startup data/monsters.castle-transform
     (TQuakeMonsterType components, editable in the CGE editor) overrides
@@ -946,6 +981,8 @@ var
   { trigger_disguise (Ground Zero, FL_DISGUISED): monsters don't notice the
     player by sight }
   PlayerDisguised: Boolean = False;
+  { Ground Zero's IR goggles on: monsters are drawn glowing red }
+  IRGogglesOn: Boolean = False;
   { The player's trail (created and fed by TQuakeWorld) }
   PlayerTrail: TQuakePlayerTrail;
   { The level's hint_path chains (nil without any; owned by the world) and
@@ -2998,7 +3035,11 @@ begin
     begin
       { 10 times a second, like Quake 2 relights entities every frame }
       FLightTimer := 0.1;
-      Model.SetTint(Lighting.SampleLight(Transform.Translation));
+      if IRGogglesOn and IsAlive then
+        { RDF_IRGOGGLES: RF_IR_VISIBLE entities full bright red }
+        Model.SetTint(Vector3(2.0, 0.25, 0.25))
+      else
+        Model.SetTint(Lighting.SampleLight(Transform.Translation));
     end;
     { M_SetEffects while the power armor is absorbing: a power screen shows
       EF_POWERSCREEN (the screen model, translucent with a green shell, in
@@ -3942,6 +3983,8 @@ begin
     pkRipper: MdlPath := 'models/objects/boomrang/tris.md2';
     pkLoogie: MdlPath := 'models/objects/loogy/tris.md2';
     pkTrap: MdlPath := 'models/weapons/z_trap/tris.md2';
+    pkFlechette: MdlPath := 'models/proj/flechette/tris.md2';
+    pkProx: MdlPath := 'models/weapons/g_prox/tris.md2';
     else MdlPath := '';
   end;
   case AKind of
@@ -3949,6 +3992,10 @@ begin
     pkBlueBolt, pkLoogie: Life := 2;
     { 8000 / speed (725): about 11 s }
     pkPlasma: Life := 11;
+    { fire_flechette: 8000 / 750 }
+    pkFlechette: Life := 8000 / 750;
+    { A prox mine lives until it went off (its lifetime starts when armed) }
+    pkProx: Life := 1000;
     { fire_trap: 30 s (timestamp), its first think after 1 s }
     pkTrap:
       begin

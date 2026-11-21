@@ -1447,10 +1447,10 @@ begin
     WritelnLog('Demo', 'Replay drift: max %.1f units', [FDemoMaxDrift]);
     WritelnLog('Demo', 'Kills: %d / %d, secrets %d / %d, goals %d / %d', [FWorld.Stats.Kills, FWorld.Stats.TotalKills,
       FWorld.Stats.Secrets, FWorld.Stats.TotalSecrets, FWorld.Stats.Goals, FWorld.Stats.TotalGoals]);
-    WritelnLog('Demo', 'Gun: weapon %d state %d frame %d, ammo shells %d bullets %d grenades %d cells %d slugs %d mag slugs %d traps %d%s', [
+    WritelnLog('Demo', 'Gun: weapon %d state %d frame %d, ammo shells %d bullets %d grenades %d cells %d slugs %d mag slugs %d traps %d flechettes %d prox %d%s', [
       FWorld.Gun.Slot, Ord(FWorld.Gun.State), FWorld.Gun.Frame, FWorld.Stats.Ammo[atShells],
       FWorld.Stats.Ammo[atBullets], FWorld.Stats.Ammo[atGrenades], FWorld.Stats.Ammo[atCells],
-      FWorld.Stats.Ammo[atSlugs], FWorld.Stats.Ammo[atMagSlugs], FWorld.Stats.Ammo[atTraps],
+      FWorld.Stats.Ammo[atSlugs], FWorld.Stats.Ammo[atMagSlugs], FWorld.Stats.Ammo[atTraps], FWorld.Stats.Ammo[atFlechettes], FWorld.Stats.Ammo[atProx],
       DualFireText(FWorld.Stats.QuadFireTime)]);
   end else
   if Action = 'G' then { Go to "x y z" (Quake coordinates) }

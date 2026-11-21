@@ -156,6 +156,12 @@ begin
       and 8) }
     12: Result := MakeDef(5, 7, 36, 39, [36], [6]);
     13: Result := MakeDef(5, 20, 58, 63, [29, 42, 55], [7, 8]);
+    { Ground Zero: Weapon_ChainFist, Weapon_ETF_Rifle, Weapon_ProxLaunch
+      (the grenade launcher's frames), Weapon_Heatbeam }
+    15: Result := MakeDef(4, 32, 57, 60, [], [8, 9, 16, 17, 18, 30, 31]);
+    16: Result := MakeDef(4, 7, 37, 41, [18, 28], [6, 7]);
+    17: Result := MakeDef(5, 16, 59, 64, [34, 51, 59], [6]);
+    18: Result := MakeDef(8, 12, 39, 44, [35], [9, 10, 11, 12]);
     { Weapon_Grenade: throw 0..15, idle 16..48, no raise / put away }
     else Result := MakeDef(0, 15, 48, 48, [29, 34, 39, 48], []);
   end;
@@ -286,7 +292,19 @@ procedure TQuakeGun.Generic(const Def: TGunFrameDef);
 var
   N: Integer;
   Fired: Boolean;
+  R: Single;
 begin
+  { The chainfist's saw: sawhit.wav while it swings, sawidle.wav up }
+  if FSlot = 15 then
+  begin
+    if FState = gsDropping then
+      FLoopSound := ''
+    else
+    if FState = gsFiring then
+      FLoopSound := 'sound/weapons/sawhit.wav'
+    else
+      FLoopSound := 'sound/weapons/sawidle.wav';
+  end;
   if FState = gsDropping then
   begin
     if FFrame >= Def.DeactivateLast then
@@ -353,6 +371,28 @@ begin
 
   if FState = gsFiring then
   begin
+    { Weapon_ChainFist: a swing ends on 13 or 23 (on to 32); held there or
+      on 32 it swings again: a third of the time the left (14), a third
+      the right (24), else the overhead (6) }
+    if (FSlot = 15) and ((FFrame = 13) or (FFrame = 23) or (FFrame = 32)) then
+    begin
+      if Attack then
+      begin
+        R := Random;
+        if R < 0.33 then
+          FFrame := 14
+        else
+        if R < 0.66 then
+          FFrame := 24
+        else
+          FFrame := 6;
+      end else
+      if FFrame <> 32 then
+        FFrame := 32;
+    end;
+    { Weapon_ETF_Rifle: held on 8, back to 6 }
+    if (FSlot = 16) and (FFrame = 8) and Attack and (Ammo(FSlot) > 0) then
+      FFrame := 6;
     Fired := False;
     for N in Def.FireFrames do
       if FFrame = N then
@@ -472,6 +512,21 @@ begin
         begin
           FLoopSound := '';
           Event(geHyperBlasterDown);
+        end;
+      end;
+    18: { Heatbeam_Fire: 9 .. 12 again while held with 2 cells, its hum }
+      begin
+        if Attack and (Ammo(FSlot) > 0) then
+        begin
+          FLoopSound := 'sound/weapons/bfg__l1a.wav';
+          Event(geFire);
+          Inc(FFrame);
+          if FFrame >= 13 then
+            FFrame := 9;
+        end else
+        begin
+          FLoopSound := '';
+          FFrame := 13;
         end;
       end;
     10: { weapon_bfg_fire: flash on frame 9, the ball on 17 }

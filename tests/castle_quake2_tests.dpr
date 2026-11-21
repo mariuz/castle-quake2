@@ -857,6 +857,26 @@ begin
     (MonsterMass('monster_carrier') = 200), 'monster masses by class prefix (traps take under 400)');
 end;
 
+{ Ground Zero's weapons and items: their slots, ammo, gun frames }
+procedure TestRogueItems;
+var
+  D: TGunFrameDef;
+begin
+  Check((FindItemDef('weapon_etf_rifle')^.Weapon = EtfRifleSlot) and (WeaponDefs[EtfRifleSlot].AmmoType = atFlechettes) and
+    (FindItemDef('ammo_flechettes')^.Amount = 50) and (FindItemDef('weapon_proxlauncher')^.AmmoType = atProx) and
+    (WeaponDefs[PlasmaBeamSlot].AmmoPerShot = 2) and (WeaponDefs[ChainfistSlot].AmmoType = atNone),
+    'Ground Zero''s weapons: ETF rifle flechettes, prox launcher, plasma beam 2 cells, chainfist no ammo');
+  D := GunFrameDef(ChainfistSlot);
+  Check((D.FireLast = 32) and (D.IdleLast = 57) and (Length(D.FireFrames) = 7), 'Weapon_ChainFist frames');
+  D := GunFrameDef(EtfRifleSlot);
+  Check((D.ActivateLast = 4) and (D.FireLast = 7) and (D.DeactivateLast = 41), 'Weapon_ETF_Rifle frames');
+  D := GunFrameDef(PlasmaBeamSlot);
+  Check((D.ActivateLast = 8) and (D.FireLast = 12) and (Length(D.FireFrames) = 4), 'Weapon_Heatbeam frames');
+  Check((FindItemDef('item_double')^.Param = POWERUP_DOUBLE) and (FindItemDef('item_double')^.Amount = 30) and
+    (FindItemDef('item_ir_goggles')^.Amount = 60) and (FindItemDef('item_sphere_defender')^.Amount = 30),
+    'double damage 30 s, IR goggles 60 s, the defender sphere 30 s');
+end;
+
 type
   TAttackProbe = class
     Attack: TMonsterAttack;
@@ -1286,6 +1306,20 @@ end;
 
 { --retail <pak> <rogue pak0.pak>: Ground Zero's monsters' attack and move
   tables on its models (every sequence within one animation) }
+procedure TestRogueWeaponModels;
+var
+  Slot: Integer;
+  Mdl: TQuakeMd2;
+begin
+  { Weapon_Generic's frames within each view model }
+  for Slot := ChainfistSlot to PlasmaBeamSlot do
+  begin
+    Mdl := Md2Manager.GetModel(WeaponDefs[Slot].ViewModel);
+    Check((Mdl <> nil) and (Mdl.FrameCount > GunFrameDef(Slot).DeactivateLast),
+      WeaponDefs[Slot].Name + '''s frames fit Ground Zero''s view model');
+  end;
+end;
+
 procedure TestRogueModels;
 const
   Classes: array[0..3] of String = ('monster_daedalus', 'monster_medic_commander', 'monster_stalker',
@@ -3666,8 +3700,10 @@ begin
         TestXatrixModels
       else
       if Md2Manager.GetModel('models/monsters/stalker/tris.md2') <> nil then
-        TestRogueModels
-      else
+      begin
+        TestRogueModels;
+        TestRogueWeaponModels;
+      end else
         TestModQ1Models;
     end;
     Writeln(Format('%d passed, %d failed', [Passed, Failed]));
@@ -3713,6 +3749,7 @@ begin
   TestRecord;
   TestGun;
   TestReckoningItems;
+  TestRogueItems;
   TestMonsterAttacks;
   TestMonsterMoves;
   TestQ1Monsters;
