@@ -413,7 +413,7 @@ end;
 initialization
   CmdPaks := TStringList.Create;
   ApplicationProperties.ApplicationName := 'castle-quake2';
-  ApplicationProperties.Version := '0.32.0';
+  ApplicationProperties.Version := '0.33.0';
   LogFileName := 'castle-quake2.log';
   { --log-file <file>: a log of its own (several runs at once) }
   {$ifndef WASI}

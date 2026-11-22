@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.33.0 — 2026-11-22
 
 - Ground Zero's stalker plays dead: below a quarter of its health a hit may make it fall over (off the ceiling too), twitching while it heals back (1 health a tenth of a second, 2 on hard, 3 on nightmare), getting up at full health or when hit again. Hurt by more than 10, or dodging a shot, it jumps straight up and clings to the ceiling when there's a flat one within 256 units (from the ceiling it drops down). Turrets with a blaster or rockets that lose the player shoot blind at the spot he was last seen: at once, then after a few seconds more, then not again until they see him.
 - Monsters whose Quake 2 box doesn't start 24 below their origin are drawn at the right height: the chick (and the heat chick), the flipper, the supertank (and boss5), the hornet boss, Jorg and the Makron no longer float 24 units above the floor, the tank 8 and the stalker 6.

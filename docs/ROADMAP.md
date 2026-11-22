@@ -34,11 +34,11 @@ Comparison with the original **Quake 2** (id Tech 2, `ref_gl` + `game` DLL), wha
 - **Engineering**: CI on Windows / Linux / Android / Web, autotests under Mesa (keyboard, virtual gamepad and simulated touch), screenshot references, culling check (vis vs `novis`), map compatibility report, recorded replays, 480 unit checks.
 - **Levels**: random levels from a seed (`QuakeLevelGen`, Quake / Doom layout rules: loops, steps, lifts, doors, pools, an exit switch, pacing) and an in-game level editor (`QuakeLevelEditor`: doors, lifts, switches, water, sky, themes, entities), compiled at runtime into Quake 2 maps (`QuakeBspBuilder`); levels show in the CGE editor through `TQuakeMap`.
 - **Full game and mission packs**: the original game's 39 single-player maps play through with the same kill / secret / goal totals as Yamagi Quake II; The Reckoning (`-game xatrix`) and Ground Zero (`-game rogue`) single player are complete (monsters, bosses, weapons, items, map entities).
-- **Releases**: v0.3.0 to v0.32.0, each with Windows / Linux / Android packages and the browser build ([changelog](CHANGELOG.md)).
+- **Releases**: v0.3.0 to v0.33.0, each with Windows / Linux / Android packages and the browser build ([changelog](CHANGELOG.md)).
 
 ## Next (prioritised)
 
-Phases 1–6 are done as far as the demo data and a headless machine allow; Phase 7 (levels) is in progress; v0.3.0 to v0.32.0 are released. In order of value for effort:
+Phases 1–6 are done as far as the demo data and a headless machine allow; Phase 7 (levels) is in progress; v0.3.0 to v0.33.0 are released. In order of value for effort:
 
 1. ~~**More level content**~~ (Phase 7): the discovered themes are checked on GOG's `baseq2` (November 2026): eight themes (e1u2, e1u3, e2u1–e2u3, e3u1–e3u3), the `test` folder of number textures and near-black textures (e1u4's metal, mean brightness below 24) left out, no computer-bank walls (e3u2 uses its hall panels). Next: more level content of other kinds.
 2. **Try it on real hardware** (needs a phone, a gamepad and a GPU). Touch, gamepads and GPU speed were only tested headless: install the APK, play with a controller, run on a real GPU with `fps` on. Expected follow-ups: touch button sizes and look speed.
