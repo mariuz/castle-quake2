@@ -5247,6 +5247,9 @@ begin
   FDamageSource := Monster;
   Eye := Monster.EyePos;
   Target := FPlayerPos - Vector3(0, 12, 0);
+  { A turret's blind shot: at the spot the player was last seen }
+  if Monster.BlindFire then
+    Target := Monster.BlindAim;
   if Monster.AngerActive then
   begin
     { target_anger: shooting at a spot; hitscans make impacts there,
@@ -6169,6 +6172,8 @@ begin
     O.Add('alerted', FMonsters[I].Alerted);
     O.Add('gibbed', FMonsters[I].Gibbed);
     O.Add('dormant', FMonsters[I].Dormant);
+    if FMonsters[I].Def^.ClassName = 'monster_stalker' then
+      O.Add('ceiling', FMonsters[I].OnCeiling);
     Arr.Add(O);
   end;
   Result.Add('monsters', Arr);
@@ -6400,6 +6405,8 @@ begin
     for I := 0 to Min(Arr.Count, FMonsters.Count) - 1 do
     begin
       O := Arr.Objects[I];
+      if O.Find('ceiling') <> nil then
+        FMonsters[I].SetCeiling(O.Get('ceiling', False));
       FMonsters[I].RestoreState(JsonToVec(O.Find('pos')), O.Get('facing', 0.0),
         O.Get('health', 0), TMonsterState(O.Get('state', 0)),
         O.Get('alerted', False), O.Get('gibbed', False));

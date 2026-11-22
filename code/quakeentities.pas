@@ -171,6 +171,20 @@ type
     FRoamGoal, FRoamOld: TVector3;
     FRoamClock, FRoamStuck: Single;
     FCeilingStuck: Boolean;
+    { The stalker's false death (stalker_false_death*): 0 none, 1 falling
+      down (death01..09), 2 twitching and healing (twitch), 3 getting up
+      (reactive01..04); seconds in it, to the next heal }
+    FFalseDeath: Integer;
+    FFalseDeathTime, FHealTimer: Single;
+    { stalker_jump_straightup to the ceiling: gravity reversed, Quake
+      vertical speed, seconds in the air }
+    FCeilingJump: Boolean;
+    FCeilingVel, FCeilingJumpTime: Single;
+    { monster_turret's blind fire: where the player was last seen (CGE,
+      his origin), seconds since, the delay before the next blind shot }
+    FBlindTarget: TVector3;
+    FHasBlind: Boolean;
+    FBlindLost, FBlindDelay: Single;
     FTurretCooldown, FTurretThink, FTurretReady, FTurretOutSpeed: Single;
     FTurretBase: TCastleTransform;
     FTurretBaseModel: TQuakeMd2Instance;
@@ -218,6 +232,8 @@ type
     procedure UpdateInsane(const SecondsPassed: Single);
     { monster_turret: aim within its mounting, fire, come out of the wall }
     procedure UpdateTurret(const SecondsPassed: Single; const PlayerPos: TVector3);
+    { turret_checkattack's blind fire and TurretFireBlind }
+    procedure TurretBlindFire(const PlayerPos, Aim: TVector3);
     { Fraction of the attack animation at which the attack happens }
     function AttackFirePoint: Single;
     { Start a Quake 2 attack sequence for the distance; False if the
@@ -228,6 +244,13 @@ type
     function StartDodgeAttack(const PauseTime: Single): Boolean;
     procedure AttackSeqFire(const ShotIndex: Integer);
     procedure UpdateJump(const SecondsPassed: Single);
+    { The stalker: stalker_pain (True: handled), the false death, the jump
+      up to the ceiling }
+    function StalkerPain(const Dmg: Integer): Boolean;
+    procedure StartFalseDeath;
+    procedure StalkerReactivate;
+    procedure UpdateFalseDeath(const SecondsPassed: Single);
+    procedure UpdateCeilingJump(const SecondsPassed: Single);
     function MTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer = MASK_MONSTERSOLID): TQuakeTrace;
     procedure SetOrigin(const Q: TVector3);
     function OnGroundTrace: Boolean;
@@ -369,6 +392,21 @@ type
     procedure ActivateWallTurret;
     { The stalker drops from the ceiling (stalker_jump_straightup there) }
     procedure DropFromCeiling;
+    { stalker_ok_to_transition: a flat ceiling within 256 above (ToCeiling)
+      or a floor within 384 below }
+    function CeilingTransitionOk(const ToCeiling: Boolean): Boolean;
+    { Turn the stalker upside down (or back), its box staying where it is }
+    procedure SetCeiling(const Up: Boolean);
+    { stalker_jump_straightup: up to the ceiling (or a hop), or down from it }
+    procedure JumpStraightUp;
+  public
+    { Health it spawned with (the stalker heals back to it) }
+    MaxHealth: Integer;
+    { A turret's blind shot: MonsterAttack aims at BlindAim (CGE) }
+    BlindFire: Boolean;
+    BlindAim: TVector3;
+    { The stalker is playing dead (or falling / getting up) }
+    function FalseDeath: Boolean;
     { Flying, or swimming }
     function Flies: Boolean;
     { Is a Quake point in water, slime or lava }
@@ -1731,6 +1769,7 @@ begin
       PowerArmorPower := AEntity.GetInt('power_armor_power', 400);
   end;
 
+  MaxHealth := Health;
   Transform := TCastleTransform.Create(nil);
   Transform.Name := Format('Monster%.3d_%s', [NextEntityNumber, Def^.ClassName]);
   Transform.Translation := Pos;
@@ -1854,6 +1893,20 @@ end;
 
 procedure TQuakeMonster.Dodge(const Eta: Single);
 begin
+  if Def^.ClassName = 'monster_stalker' then
+  begin
+    { stalker_dodge: a jump straight up (off the ceiling there) unless the
+      shot is about to hit or far off; a quarter of the time on easy
+      (check_dodge) }
+    if Dormant or not IsAlive or (Model = nil) or (FFalseDeath > 0) or FJumping or FCeilingJump then
+      Exit;
+    if (Eta < 0.1) or (Eta > 5) or ((GameSkill = 0) and (Random > 0.25)) then
+      Exit;
+    if not Alerted then
+      Alert;
+    JumpStraightUp;
+    Exit;
+  end;
   if Dormant or not IsAlive or not CanDodge or (Model = nil) or
      (State in [msPain, msDuck]) or ((State = msAttack) and FAttack.Ducked) then
     Exit;
@@ -2554,33 +2607,299 @@ begin
 end;
 
 procedure TQuakeMonster.DropFromCeiling;
-var
-  T: TQuakeTrace;
-  SwapZ: Single;
 begin
   if not OnCeiling then
     Exit;
-  { stalker_ok_to_transition from the ceiling: a floor within 384 below
-    (alive; a dying one just falls) }
-  if IsAlive and Assigned(EntityTrace) then
-  begin
-    T := MTrace(Origin, Origin - Vector3(0, 0, 384), BoxMins, BoxMaxs);
-    if (T.Fraction >= 1) or (T.Normal.Z < 0.9) then
-      Exit;
-  end;
-  OnCeiling := False;
-  SwapZ := BoxMins.Z;
-  BoxMins.Z := -BoxMaxs.Z;
-  BoxMaxs.Z := -SwapZ;
-  if Model <> nil then
-    Model.Scene.Rotation := Vector4(0, 1, 0, 0);
-    Model.Scene.Translation := Vector3(0, MonsterModelOffset(Def^.ClassName), 0);
+  { Alive, only onto a floor (a dying one just falls) }
+  if IsAlive and not CeilingTransitionOk(False) then
+    Exit;
+  FCeilingJump := False;
+  SetCeiling(False);
   if IsAlive then
   begin
     FJumping := True;
     FJumpVel := TVector3.Zero;
   end;
   WritelnLog('QuakeEntities', '%s drops from the ceiling', [Transform.Name]);
+end;
+
+function TQuakeMonster.CeilingTransitionOk(const ToCeiling: Boolean): Boolean;
+var
+  T, C: TQuakeTrace;
+  Corner: TVector3;
+  I: Integer;
+begin
+  if not Assigned(EntityTrace) then
+    Exit(not ToCeiling);
+  if not ToCeiling then
+  begin
+    T := MTrace(Origin, Origin - Vector3(0, 0, 384), BoxMins, BoxMaxs);
+    Exit((T.Fraction < 1) and (T.Normal.Z >= 0.9));
+  end;
+  T := MTrace(Origin, Origin + Vector3(0, 0, 256), BoxMins, BoxMaxs);
+  if T.StartSolid or (T.Fraction >= 1) or (T.Normal.Z > -0.9) or (T.Ent <> nil) then
+    Exit(False);
+  { Flat enough: each corner of the top (2 inside, off the brush edges the
+    box touched) meets the ceiling within 8 }
+  for I := 0 to 3 do
+  begin
+    Corner := T.EndPos + Vector3(0, 0, BoxMaxs.Z - 1);
+    if (I and 1) <> 0 then
+      Corner.X := Corner.X + BoxMaxs.X - 2
+    else
+      Corner.X := Corner.X + BoxMins.X + 2;
+    if (I and 2) <> 0 then
+      Corner.Y := Corner.Y + BoxMaxs.Y - 2
+    else
+      Corner.Y := Corner.Y + BoxMins.Y + 2;
+    C := MTrace(Corner, Corner + Vector3(0, 0, 9), TVector3.Zero, TVector3.Zero);
+    if C.Fraction >= 1 then
+      Exit(False);
+  end;
+  Result := True;
+end;
+
+procedure TQuakeMonster.SetCeiling(const Up: Boolean);
+var
+  OldMinsZ, SwapZ: Single;
+begin
+  if OnCeiling = Up then
+    Exit;
+  OldMinsZ := BoxMins.Z;
+  OnCeiling := Up;
+  SwapZ := BoxMins.Z;
+  BoxMins.Z := -BoxMaxs.Z;
+  BoxMaxs.Z := -SwapZ;
+  { Our box isn't centred on the origin: move the origin so the box stays }
+  Transform.Translation := Transform.Translation + Vector3(0, OldMinsZ - BoxMins.Z, 0);
+  FCeilingStuck := True;
+  if Model <> nil then
+  begin
+    if Up then
+    begin
+      Model.Scene.Rotation := Vector4(1, 0, 0, Pi);
+      Model.Scene.Translation := Vector3(0, -MonsterModelOffset(Def^.ClassName), 0);
+    end else
+    begin
+      Model.Scene.Rotation := Vector4(0, 1, 0, 0);
+      Model.Scene.Translation := Vector3(0, MonsterModelOffset(Def^.ClassName), 0);
+    end;
+  end;
+end;
+
+procedure TQuakeMonster.JumpStraightUp;
+begin
+  if not IsAlive then
+    Exit;
+  if OnCeiling then
+  begin
+    DropFromCeiling;
+    Exit;
+  end;
+  if not OnGroundTrace then
+    Exit;
+  State := msChase;
+  SetWalking(False);
+  if Model <> nil then
+    Model.PlayAnim('jump', False, 10);
+  if CeilingTransitionOk(True) then
+  begin
+    { 400 up, gravity pulling it up from now on }
+    SetCeiling(True);
+    FCeilingJump := True;
+    FCeilingVel := 400;
+    FCeilingJumpTime := 0;
+    WritelnLog('QuakeEntities', '%s jumps up to the ceiling', [Transform.Name]);
+  end else
+  begin
+    { No ceiling to cling to: a hop }
+    FJumping := True;
+    FJumpVel := Vector3(Random * 10 - 5, 400, Random * 10 - 5);
+    WritelnLog('QuakeEntities', '%s jumps (no ceiling to cling to)', [Transform.Name]);
+  end;
+end;
+
+procedure TQuakeMonster.UpdateCeilingJump(const SecondsPassed: Single);
+var
+  T: TQuakeTrace;
+begin
+  FCeilingJumpTime := FCeilingJumpTime + SecondsPassed;
+  FCeilingVel := FCeilingVel + 800 * SecondsPassed;
+  T := MTrace(Origin, Origin + Vector3(0, 0, FCeilingVel * SecondsPassed), BoxMins, BoxMaxs);
+  if not T.AllSolid then
+    SetOrigin(T.EndPos);
+  if T.Fraction < 1 then
+  begin
+    FCeilingJump := False;
+    WritelnLog('QuakeEntities', '%s climbs back to the ceiling at %s', [Transform.Name, Origin.ToString]);
+  end else
+  if FCeilingJumpTime > 2 then
+  begin
+    { Never got there: fall back down }
+    FCeilingJump := False;
+    SetCeiling(False);
+    FJumping := True;
+    FJumpVel := TVector3.Zero;
+  end;
+end;
+
+function TQuakeMonster.FalseDeath: Boolean;
+begin
+  Result := FFalseDeath > 0;
+end;
+
+function TQuakeMonster.StalkerPain(const Dmg: Integer): Boolean;
+begin
+  Result := True;
+  { Falling down or getting up: no pain; hurt while playing dead: up }
+  if FFalseDeath in [1, 3] then
+    Exit;
+  if FFalseDeath = 2 then
+  begin
+    StalkerReactivate;
+    Exit;
+  end;
+  { Below a quarter of its health, 30 % of the time: plays dead (from the
+    ceiling only when there's a floor to fall to) }
+  if (Health < MaxHealth div 4) and (Random < 0.3) and (not FCeilingJump) and
+     ((not OnCeiling) or CeilingTransitionOk(False)) then
+  begin
+    StartFalseDeath;
+    Exit;
+  end;
+  if FPainDebounce > 0 then
+    Exit;
+  FPainDebounce := 3;
+  { Only hits over 10 count; no pain animation on nightmare }
+  if (Dmg <= 10) or (GameSkill >= 3) then
+    Exit;
+  Sounds.PlayAt(MonsterSound(Def, Def^.PainSound), Transform, 1, 1, chWeapon);
+  { Half the time a dodge jump (up to the ceiling, or down from it) }
+  if (OnCeiling or OnGroundTrace) and (Random < 0.5) and not (FJumping or FCeilingJump) then
+    JumpStraightUp
+  else
+  if not OnCeiling then
+    SetState(msPain);
+end;
+
+procedure TQuakeMonster.StartFalseDeath;
+begin
+  FCeilingJump := False;
+  if OnCeiling then
+  begin
+    SetCeiling(False);
+    FJumping := True;
+    FJumpVel := TVector3.Zero;
+  end;
+  FFalseDeath := 1;
+  FFalseDeathTime := 0;
+  SetWalking(False);
+  State := msPain;
+  if Def^.DeathSound <> '' then
+    Sounds.PlayAt(MonsterSound(Def, Def^.DeathSound), Transform, 1, 1, chVoice);
+  if Model <> nil then
+    Model.PlayAnim('death', False, 10);
+  WritelnLog('QuakeEntities', '%s plays dead (health %d)', [Transform.Name, Health]);
+end;
+
+procedure TQuakeMonster.StalkerReactivate;
+begin
+  FFalseDeath := 3;
+  FFalseDeathTime := 0;
+  if Model <> nil then
+    Model.PlayAnim('reactive', False, 10);
+  WritelnLog('QuakeEntities', '%s gets up (health %d)', [Transform.Name, Health]);
+end;
+
+procedure TQuakeMonster.UpdateFalseDeath(const SecondsPassed: Single);
+begin
+  FFalseDeathTime := FFalseDeathTime + SecondsPassed;
+  StickToFloor(SecondsPassed);
+  case FFalseDeath of
+    1:
+      { death01..09, then lying there twitching }
+      if (Model = nil) or Model.AnimDone or (FFalseDeathTime > 1) then
+      begin
+        FFalseDeath := 2;
+        FFalseDeathTime := 0;
+        FHealTimer := 0;
+        if Model <> nil then
+          Model.PlayAnim('twitch', True, 10);
+      end;
+    2:
+      begin
+        { stalker_heal every frame: 1 health, 2 on hard, 3 on nightmare;
+          up again at full health }
+        FHealTimer := FHealTimer + SecondsPassed;
+        while FHealTimer >= 0.1 do
+        begin
+          FHealTimer := FHealTimer - 0.1;
+          Health := Health + Max(1, GameSkill);
+          if Health >= MaxHealth then
+          begin
+            Health := MaxHealth;
+            StalkerReactivate;
+            Break;
+          end;
+        end;
+      end;
+    else
+      if (Model = nil) or Model.AnimDone or (FFalseDeathTime > 0.5) then
+      begin
+        FFalseDeath := 0;
+        SetState(msChase);
+      end;
+  end;
+end;
+
+procedure TQuakeMonster.TurretBlindFire(const PlayerPos, Aim: TVector3);
+var
+  T: TQuakeTrace;
+  Dir, Target: TVector3;
+begin
+  { Blaster and rocket turrets that lost the player shoot where he was
+    last seen: at once, then after a delay growing by 5.2 .. 8.2 s a shot,
+    until it passes 10 s; nothing but the target in the way (the machinegun
+    turret only aims there) }
+  if (not FHasBlind) or (TurretWeapon = 1) or (FBlindDelay > 10) or (FBlindLost < FBlindDelay) then
+    Exit;
+  T := MTrace(Origin, CgeToQuake(FBlindTarget), TVector3.Zero, TVector3.Zero, CONTENTS_MONSTER);
+  if T.StartSolid or T.AllSolid or (T.Fraction < 1) then
+    Exit;
+  FTurretCooldown := 0.5 + 2 * Random;
+  FBlindDelay := FBlindDelay + 5.2 + 3 * Random;
+  Dir := Vector3(Cos(DegToRad(TurretAimPitch)) * Cos(DegToRad(TurretAimYaw)),
+    Cos(DegToRad(TurretAimPitch)) * Sin(DegToRad(TurretAimYaw)), -Sin(DegToRad(TurretAimPitch)));
+  if (Aim.Length < 1) or (TVector3.DotProduct(Dir, Aim.Normalize) < 0.98) then
+    Exit;
+  { Above the spot if the player is lower now, else below it }
+  Target := FBlindTarget;
+  if PlayerPos.Y - 22 < FBlindTarget.Y then
+    Target.Y := Target.Y + 22 + 10
+  else
+    Target.Y := Target.Y - 24 - 10;
+  if Model <> nil then
+    Model.PlayAnim('pow', False, 10);
+  if TurretWeapon = 2 then
+  begin
+    AttackKind := akRocket;
+    AttackDamage := 50;
+  end else
+  begin
+    AttackKind := akBlaster;
+    AttackDamage := 20;
+    AttackSpeed := 1000;
+  end;
+  AttackBullets := 1;
+  AttackYaw := 0;
+  AttackKick := 0;
+  AttackReach := 2000;
+  BlindFire := True;
+  BlindAim := Target;
+  WritelnLog('QuakeEntities', '%s blind fires at %s', [Transform.Name, CgeToQuake(Target).ToString]);
+  if Assigned(OnAttack) then
+    OnAttack(Self);
+  BlindFire := False;
 end;
 
 procedure TQuakeMonster.UpdateTurret(const SecondsPassed: Single; const PlayerPos: TVector3);
@@ -2618,7 +2937,17 @@ begin
     CanSeePlayer := (Dist < 2000) and SightClear(Transform.Translation, PlayerPos);
     if (not Alerted) and CanSeePlayer and (Dist < 1000) and (not NoTarget) and (not PlayerDisguised) then
       Alert;
+    { The blind fire target: the player's origin when last seen }
+    if CanSeePlayer and Alerted then
+    begin
+      FBlindTarget := PlayerPos - Vector3(0, 22, 0);
+      FHasBlind := True;
+      FBlindLost := 0;
+      FBlindDelay := 0;
+    end;
   end;
+  if not CanSeePlayer then
+    FBlindLost := FBlindLost + SecondsPassed;
   if not Alerted then
     Exit;
   { turret_move_ready_gun (active01 .. run01) the first time }
@@ -2634,8 +2963,12 @@ begin
     if FTurretReady > 0.01 then
       Exit;
   end;
-  { TurretAim: at the player, limited by the mounting, 45 degrees a frame }
-  Aim := CgeToQuake(PlayerPos) - Origin;
+  { TurretAim: at the player (where he was last seen once lost), limited
+    by the mounting, 45 degrees a frame }
+  if CanSeePlayer or not FHasBlind then
+    Aim := CgeToQuake(PlayerPos) - Origin
+  else
+    Aim := CgeToQuake(FBlindTarget) - Origin;
   WantYaw := RadToDeg(ArcTan2(Aim.Y, Aim.X));
   WantPitch := -RadToDeg(ArcTan2(Aim.Z, Sqrt(Sqr(Aim.X) + Sqr(Aim.Y))));
   if TurretFacing = -1 then
@@ -2661,9 +2994,14 @@ begin
     easy, double on hard), then its cooldown }
   FTurretCooldown := FTurretCooldown - SecondsPassed;
   FTurretThink := FTurretThink - SecondsPassed;
-  if (FTurretThink > 0) or (FTurretCooldown > 0) or not CanSeePlayer then
+  if (FTurretThink > 0) or (FTurretCooldown > 0) then
     Exit;
   FTurretThink := 0.1;
+  if not CanSeePlayer then
+  begin
+    TurretBlindFire(PlayerPos, Aim);
+    Exit;
+  end;
   Chance := Chances[TurretWeapon];
   if GameSkill = 0 then
     Chance := Chance * 0.5
@@ -3049,6 +3387,8 @@ begin
     if Model <> nil then
       Model.Scene.Collides := False;
     { stalker_die: gravity down again, it falls }
+    FFalseDeath := 0;
+    FCeilingJump := False;
     if OnCeiling then
       DropFromCeiling;
     if (Health <= GibHealth) or MonsterGibs(Def^.ClassName).Explodes then
@@ -3065,13 +3405,8 @@ begin
   { SP_turret_driver has no pain function, turret_pain does nothing }
   if TurretDriver or IsTurretMonster then
     Exit;
-  { stalker_pain: a hit over 10 makes it jump half the time (off the
-    ceiling there) }
-  if OnCeiling and (Dmg > 10) and (Random < 0.5) then
-  begin
-    DropFromCeiling;
+  if (Def^.ClassName = 'monster_stalker') and StalkerPain(Dmg) then
     Exit;
-  end;
   { Quake 2 monsters don't flinch on every hit, and never on nightmare }
   if (State <> msPain) and (GameSkill < 3) and (Random < 0.6) then
   begin
@@ -3209,6 +3544,16 @@ begin
   if FJumping and IsAlive then
   begin
     UpdateJump(SecondsPassed);
+    Exit;
+  end;
+  if FCeilingJump and IsAlive then
+  begin
+    UpdateCeilingJump(SecondsPassed);
+    Exit;
+  end;
+  if (FFalseDeath > 0) and IsAlive then
+  begin
+    UpdateFalseDeath(SecondsPassed);
     Exit;
   end;
 
