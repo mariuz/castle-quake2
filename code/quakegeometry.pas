@@ -701,12 +701,13 @@ begin
     MultiTex.FdTexture.Add(LightmapTex);
     MultiTex.FdMode.Items.Clear;
     MultiTex.FdMode.Items.Add('MODULATE');
-    { Lightmaps are 2x "overbright". Not MODULATE2X: CGE generates
+    { Lightmaps are 2x "overbright": the lightmap texture's effect
+      (CreateDLightEffect) doubles the sample. Not MODULATE2X: CGE generates
       "fragment_color *= 2;" for it, an int literal that WebGL's GLSL ES
-      rejects (castlerendererinternalshader_texture.inc). Scaling the unlit
-      material's emissive colour gives the same emissive * texture * lightmap * 2. }
+      rejects (castlerendererinternalshader_texture.inc). Not an emissive
+      colour of 2 either: Mesa 22 clamped it to 1 when drawing into a texture
+      (render scale below 100), halving the world's light. }
     MultiTex.FdMode.Items.Add('MODULATE');
-    UnlitMat.EmissiveColor := Vector3(2, 2, 2);
     Appearance.Texture := MultiTex;
 
     LMCoordNode := TTextureCoordinateNode.Create;
@@ -2685,7 +2686,8 @@ begin
     '  q2_dlight_pos = vertex_object.xyz;' + LineEnding +
     '}';
 
-  { Added to the lightmap sample, before it modulates the wall texture.
+  { Added to the lightmap sample, before it modulates the wall texture,
+    then doubled (Quake 2's overbright lightmaps: 128 = full light).
     Colors are pre-divided by 256: intensity (radius - distance) / 256 }
   FragmentPart := TEffectPartNode.Create;
   FragmentPart.ShaderType := stFragment;
@@ -2693,6 +2695,7 @@ begin
     'void PLUG_texture_color(inout vec4 texture_color, in sampler2D tex, const in vec4 tex_coord)' + LineEnding +
     '{' + LineEnding +
     Sum +
+    '  texture_color.rgb *= 2.0;' + LineEnding +
     '}';
   Result.SetParts([VertexPart, FragmentPart]);
 end;
