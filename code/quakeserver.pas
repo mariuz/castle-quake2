@@ -1,9 +1,12 @@
-{ The server end of E.1: owns the simulation (TQuakeWorld) and the
-  player's pmove (PM, the world's Player), runs the client's commands
-  (usercmd_t moves through pmove, string commands) and sends a snapshot
-  every tick: the player state and the entity_state_t of every entity in the
-  player's PVS, delta coded against the last snapshot the client
-  acknowledged (SV_BuildClientFrame, SV_WriteFrameToClient). }
+{ The server end of E.1 / E.2: owns the simulation (TQuakeWorld) and a
+  client per connection (TServerClient: its loopback channel, pmove, world
+  player, command sequence and snapshots). It runs each client's commands
+  (usercmd_t moves through its pmove, string commands) with the world acting
+  on that client's player, and sends every client a snapshot every tick:
+  its player state and the entity_state_t of the entities it can see (the
+  other players too), delta coded against the last snapshot that client
+  acknowledged (SV_BuildClientFrame, SV_WriteFrameToClient). Client 0 is
+  this program's view. }
 unit QuakeServer;
 
 {$mode objfpc}{$H+}
@@ -15,6 +18,30 @@ uses
   QuakeNet, QuakeWorld, QuakePMove;
 
 type
+  { One connection }
+  TServerClient = class
+  public
+    Channel: TNetLoopback;
+    { The world's player of this client and its pmove (owned) }
+    Player: TQuakePlayer;
+    PM: TQuakePMove;
+    { This program's view (the world's local player) }
+    Local: Boolean;
+    LastCmd: TNetUserCmd;
+    { The last snapshot the client said it has (-1 none), the last command
+      run and the one after which the player was placed by code }
+    Ack, LastSequence, PlacedSequence: Integer;
+    { Placed since the last snapshot; map data and models still to send }
+    PlayerChanged, SendServerData: Boolean;
+    ModelsSent: Integer;
+    Frames: array[0..UpdateBackup - 1] of TNetFrame;
+    Commands, StringCommands, LastBytes, LastDelta: Integer;
+    constructor Create(const AChannel: TNetLoopback);
+    destructor Destroy; override;
+    procedure ResetFrames;
+  end;
+  TServerClientList = specialize TObjectList<TServerClient>;
+
   TQuakeServer = class
   strict private
     type
@@ -23,75 +50,82 @@ type
       end;
     var
       FWorld: TQuakeWorld;
-      FChannel: TNetLoopback;
       FMsg: TNetMessage;
       FFrameNum: Integer;
-      { The last snapshot the client said it has (-1 none) }
-      FAck: Integer;
-      FFrames: array[0..UpdateBackup - 1] of TNetFrame;
-      FLastCmd: TNetUserCmd;
-      { The player's movement, the last command run and the one after which
-        the player was placed by code (teleport flag) }
-      FPM: TQuakePMove;
-      FLastSequence, FPlacedSequence: Integer;
-      FPlayerChanged: Boolean;
-      { The player's eye and view (our coordinates) }
-      FPlayerPos, FPlayerDir: TVector3;
+      FClients: TServerClientList;
+      FLocal: TServerClient;
       FMapName: String;
-      FSendServerData: Boolean;
       { Model table (configstrings CS_MODELS + i): index - 1 -> path }
       FModels: TStringList;
       FModelIndex: specialize TDictionary<String, Integer>;
-      FNewModels: specialize TList<Integer>;
       { Entity numbers: the object behind each entity sent }
       FSlots: specialize TDictionary<TObject, TNetSlot>;
       FUsed: array[0..MaxNetEntities - 1] of Boolean;
       FNextNumber: Integer;
-      FCommands, FStringCommands: Integer;
-      FLastBytes, FLastDelta: Integer;
       FHideModels: Boolean;
+      FPlayerModel: String;
     function ModelIndexOf(const Path: String): Integer;
     function NumberOf(const Obj: TObject; const ModelIndex: Integer): Integer;
-    procedure BuildFrame(out F: TNetFrame);
-    procedure ExecuteMove(const Cmd: TNetUserCmd; const Sequence: Integer);
-    procedure UpdateEye;
-    procedure ExecuteString(const S: String);
-    procedure SpawnCommand(const Args: String);
+    procedure BuildFrame(const C: TServerClient; out F: TNetFrame);
+    procedure SendFrameTo(const C: TServerClient);
+    procedure FreeUnseenNumbers;
+    procedure ExecuteMove(const C: TServerClient; const Cmd: TNetUserCmd; const Sequence: Integer);
+    procedure UpdateEye(const C: TServerClient);
+    procedure ExecuteString(const C: TServerClient; const S: String);
+    procedure SpawnCommand(const C: TServerClient; const Args: String);
     procedure HurtCommand(const Args: String);
     procedure MoveMonsterCommand(const Args: String);
+    procedure ReadClient(const C: TServerClient);
+    function PlayerModelPath: String;
+    function GetPM: TQuakePMove;
+    function GetPlayerChanged: Boolean;
+    function GetPlayerPos: TVector3;
+    function GetPlayerDir: TVector3;
+    function GetCommands: Integer;
+    function GetStringCommands: Integer;
+    function GetLastBytes: Integer;
+    function GetLastDelta: Integer;
+    function GetClient(const Index: Integer): TServerClient;
+    function GetClientCount: Integer;
   public
     constructor Create(const AWorld: TQuakeWorld; const AChannel: TNetLoopback);
     destructor Destroy; override;
+    { Another client on Channel (not owned): a player of its own in the
+      world, at a spawn point }
+    function AddClient(const Channel: TNetLoopback): TServerClient;
+    procedure RemoveClient(const C: TServerClient);
     { A map was loaded: entity numbers, models and snapshots start again
-      (svc_serverdata tells the client) }
+      (svc_serverdata tells the clients); the other players respawn }
     procedure NewMap(const MapName: String);
-    { The player was put here by code (Quake origin; Dir in our coordinates):
-      spawn, teleport, loaded game (Reset: standing still), or the view
-      moved the camera (demo actions, console: velocity kept) }
+    { The local player was put here by code (Quake origin; Dir in our
+      coordinates): spawn, teleport, loaded game (Reset: standing still), or
+      the view moved the camera (demo actions, console: velocity kept) }
     procedure PlacePlayer(const QuakeOrigin, Dir: TVector3; const Reset: Boolean);
-    { Apply what the client sent }
+    { Apply what the clients sent }
     procedure ReadPackets;
-    { Text for the client's console (svc_print) or the middle of its screen
-      (svc_centerprint) }
-    procedure Print(const Text: String; const Center: Boolean = False);
-    { One game tick with the player's last known view }
+    { Text for a client's console (svc_print) or the middle of its screen
+      (svc_centerprint); nil: the local client }
+    procedure Print(const Text: String; const Center: Boolean = False; C: TServerClient = nil);
+    { One game tick with the players' last known views }
     procedure RunTick(const Seconds: Single);
-    { Send this tick's snapshot }
+    { Send this tick's snapshot to every client }
     procedure SendFrame;
-    { The snapshot sent last (to check the client's copy in one process) }
+    { The snapshot sent last to the local client (to check its copy) }
     function LastFrame: TNetFrame;
-    property PM: TQuakePMove read FPM;
-    { Placed since the last snapshot: send one before the client predicts }
-    property PlayerChanged: Boolean read FPlayerChanged;
-    property PlayerPos: TVector3 read FPlayerPos;
-    property PlayerDir: TVector3 read FPlayerDir;
-    property FrameNum: Integer read FFrameNum;
-    property Commands: Integer read FCommands;
-    property StringCommands: Integer read FStringCommands;
+    { The local client's }
+    property PM: TQuakePMove read GetPM;
+    property PlayerChanged: Boolean read GetPlayerChanged;
+    property PlayerPos: TVector3 read GetPlayerPos;
+    property PlayerDir: TVector3 read GetPlayerDir;
+    property Commands: Integer read GetCommands;
+    property StringCommands: Integer read GetStringCommands;
     { Size of the last snapshot message and the frame it was delta coded
       from (-1 = full) }
-    property LastBytes: Integer read FLastBytes;
-    property LastDelta: Integer read FLastDelta;
+    property LastBytes: Integer read GetLastBytes;
+    property LastDelta: Integer read GetLastDelta;
+    property FrameNum: Integer read FFrameNum;
+    property Clients[const Index: Integer]: TServerClient read GetClient;
+    property ClientCount: Integer read GetClientCount;
     { The client draws the models from the snapshots: the server's own md2
       scenes are hidden (they still simulate and collide) }
     property HideModels: Boolean read FHideModels write FHideModels;
@@ -140,67 +174,172 @@ begin
   end;
 end;
 
+{ TServerClient --------------------------------------------------------------- }
+
+constructor TServerClient.Create(const AChannel: TNetLoopback);
+begin
+  inherited Create;
+  Channel := AChannel;
+  PM := TQuakePMove.Create;
+  Ack := -1;
+  SendServerData := True;
+end;
+
+destructor TServerClient.Destroy;
+begin
+  FreeAndNil(PM);
+  inherited Destroy;
+end;
+
+procedure TServerClient.ResetFrames;
+var
+  I: Integer;
+begin
+  { Frame numbers go on, so an old acknowledgement finds no snapshot and
+    the next one is sent in full }
+  for I := 0 to UpdateBackup - 1 do
+    Frames[I] := Default(TNetFrame);
+  Ack := -1;
+  ModelsSent := 0;
+  SendServerData := True;
+end;
+
+{ TQuakeServer ---------------------------------------------------------------- }
+
 constructor TQuakeServer.Create(const AWorld: TQuakeWorld; const AChannel: TNetLoopback);
 begin
   inherited Create;
   FWorld := AWorld;
-  FChannel := AChannel;
   FMsg := TNetMessage.Create;
   FModels := TStringList.Create;
   FModelIndex := specialize TDictionary<String, Integer>.Create;
-  FNewModels := specialize TList<Integer>.Create;
   FSlots := specialize TDictionary<TObject, TNetSlot>.Create;
-  FAck := -1;
+  FClients := TServerClientList.Create(True);
   FNextNumber := MaxNetClients + 1;
-  FPlayerDir := Vector3(1, 0, 0);
-  FPM := TQuakePMove.Create;
+  FLocal := TServerClient.Create(AChannel);
+  FLocal.Local := True;
+  FLocal.Player := FWorld.Players[0];
+  FLocal.Player.Dir := Vector3(1, 0, 0);
+  FClients.Add(FLocal);
 end;
 
 destructor TQuakeServer.Destroy;
 begin
-  FPM.Free;
+  FClients.Free;
   FSlots.Free;
-  FNewModels.Free;
   FModelIndex.Free;
   FModels.Free;
   FMsg.Free;
   inherited Destroy;
 end;
 
+function TQuakeServer.GetPM: TQuakePMove;
+begin
+  Result := FLocal.PM;
+end;
+
+function TQuakeServer.GetPlayerChanged: Boolean;
+begin
+  Result := FLocal.PlayerChanged;
+end;
+
+function TQuakeServer.GetPlayerPos: TVector3;
+begin
+  Result := FLocal.Player.Pos;
+end;
+
+function TQuakeServer.GetPlayerDir: TVector3;
+begin
+  Result := FLocal.Player.Dir;
+end;
+
+function TQuakeServer.GetCommands: Integer;
+begin
+  Result := FLocal.Commands;
+end;
+
+function TQuakeServer.GetStringCommands: Integer;
+begin
+  Result := FLocal.StringCommands;
+end;
+
+function TQuakeServer.GetLastBytes: Integer;
+begin
+  Result := FLocal.LastBytes;
+end;
+
+function TQuakeServer.GetLastDelta: Integer;
+begin
+  Result := FLocal.LastDelta;
+end;
+
+function TQuakeServer.GetClient(const Index: Integer): TServerClient;
+begin
+  Result := FClients[Index];
+end;
+
+function TQuakeServer.GetClientCount: Integer;
+begin
+  Result := FClients.Count;
+end;
+
+function TQuakeServer.AddClient(const Channel: TNetLoopback): TServerClient;
+begin
+  if FClients.Count >= MaxNetClients then
+    Exit(nil);
+  Result := TServerClient.Create(Channel);
+  Result.PM.CopyParams(FLocal.PM);
+  FClients.Add(Result);
+  Result.Player := FWorld.AddPlayer(Result.PM);
+  UpdateEye(Result);
+end;
+
+procedure TQuakeServer.RemoveClient(const C: TServerClient);
+begin
+  if (C = nil) or C.Local then
+    Exit;
+  FWorld.RemovePlayer(C.Player);
+  C.Player := nil;
+  FClients.Remove(C);
+end;
+
 procedure TQuakeServer.NewMap(const MapName: String);
 var
-  I: Integer;
+  C: TServerClient;
 begin
   FMapName := MapName;
-  FSendServerData := True;
   FModels.Clear;
   FModelIndex.Clear;
-  FNewModels.Clear;
   FSlots.Clear;
   FillChar(FUsed, SizeOf(FUsed), 0);
   FNextNumber := MaxNetClients + 1;
-  { Frame numbers go on, so an old acknowledgement finds no snapshot and
-    the next one is sent in full }
-  for I := 0 to UpdateBackup - 1 do
-    FFrames[I] := Default(TNetFrame);
-  FAck := -1;
+  for C in FClients do
+  begin
+    C.ResetFrames;
+    if not C.Local then
+    begin
+      FWorld.SelectPlayer(C.Player);
+      FWorld.RespawnCurrent;
+      FWorld.SelectPlayer(FLocal.Player);
+    end;
+  end;
 end;
 
-procedure TQuakeServer.UpdateEye;
+procedure TQuakeServer.UpdateEye(const C: TServerClient);
 begin
-  FPlayerPos := QuakeToCge(FPM.Origin + Vector3(0, 0, FPM.ViewHeight));
+  C.Player.Pos := QuakeToCge(C.PM.Origin + Vector3(0, 0, C.PM.ViewHeight));
 end;
 
 procedure TQuakeServer.PlacePlayer(const QuakeOrigin, Dir: TVector3; const Reset: Boolean);
 begin
-  FPM.Origin := QuakeOrigin;
+  FLocal.PM.Origin := QuakeOrigin;
   if Reset then
-    FPM.ResetState;
+    FLocal.PM.ResetState;
   if not Dir.IsZero then
-    FPlayerDir := Dir.Normalize;
-  UpdateEye;
-  FPlacedSequence := FLastSequence;
-  FPlayerChanged := True;
+    FLocal.Player.Dir := Dir.Normalize;
+  UpdateEye(FLocal);
+  FLocal.PlacedSequence := FLocal.LastSequence;
+  FLocal.PlayerChanged := True;
 end;
 
 function TQuakeServer.ModelIndexOf(const Path: String): Integer;
@@ -214,7 +353,19 @@ begin
   FModels.Add(Path);
   Result := FModels.Count;
   FModelIndex.Add(Path, Result);
-  FNewModels.Add(Result);
+end;
+
+function TQuakeServer.PlayerModelPath: String;
+begin
+  { The demo has no player model: a soldier stands in for the others }
+  if FPlayerModel = '' then
+  begin
+    if Md2Manager.GetModel('players/male/tris.md2') <> nil then
+      FPlayerModel := 'players/male/tris.md2'
+    else
+      FPlayerModel := 'models/monsters/soldier/tris.md2';
+  end;
+  Result := FPlayerModel;
 end;
 
 function TQuakeServer.NumberOf(const Obj: TObject; const ModelIndex: Integer): Integer;
@@ -256,9 +407,24 @@ begin
   Result := 0;
 end;
 
-procedure TQuakeServer.BuildFrame(out F: TNetFrame);
+procedure TQuakeServer.BuildFrame(const C: TServerClient; out F: TNetFrame);
 var
   Count: Integer;
+
+  procedure Append(const S: TNetEntityState);
+  begin
+    if Count = Length(F.Entities) then
+      SetLength(F.Entities, 2 * Count + 32);
+    F.Entities[Count] := S;
+    Inc(Count);
+  end;
+
+  { What this client can see: the local one the PVS of the view (as
+    SV_BuildClientFrame), the others everything for now }
+  function Visible(const Box: TBox3D): Boolean;
+  begin
+    Result := (not C.Local) or FWorld.Geometry.BoxVisible(Box);
+  end;
 
   { Pose: the transform whose world matrix places the model (the model
     scene itself: offsets, the ceiling stalker's roll, MODEL_SCALE) }
@@ -272,8 +438,7 @@ var
   begin
     if (T = nil) or not T.Exists then
       Exit;
-    { Only what the player's PVS reaches (SV_BuildClientFrame) }
-    if not FWorld.Geometry.BoxVisible(Box) then
+    if not Visible(Box) then
       Exit;
     ModelIndex := ModelIndexOf(ModelPath);
     if ModelIndex = 0 then
@@ -297,10 +462,7 @@ var
     S.Angles := MatrixToQuakeAngles(M, S.Scale);
     S.Angles := Vector3(QuantizeAngle(S.Angles.X), QuantizeAngle(S.Angles.Y),
       QuantizeAngle(S.Angles.Z));
-    if Count = Length(F.Entities) then
-      SetLength(F.Entities, 2 * Count + 32);
-    F.Entities[Count] := S;
-    Inc(Count);
+    Append(S);
   end;
 
   function BoxOf(const T: TCastleTransform): TBox3D;
@@ -328,6 +490,29 @@ var
       Effects, ShellRenderFx(Model.ShellColor) or ExtraRenderFx, Model.ShownOldFrame, Model.ShownLerp);
   end;
 
+  { The other players (entity numbers 1 .. MaxNetClients) }
+  procedure AddPlayers;
+  var
+    P: TQuakePlayer;
+    S: TNetEntityState;
+    Org: TVector3;
+  begin
+    for P in FWorld.Players do
+    begin
+      if (P = C.Player) or P.Dead or (P.PM = nil) then
+        Continue;
+      Org := P.PM.Origin;
+      if not Visible(Box3DAroundPoint(QuakeToCge(Org), 32)) then
+        Continue;
+      S := NullEntityState(P.Number);
+      S.ModelIndex := ModelIndexOf(PlayerModelPath);
+      S.Origin := Org;
+      S.Angles := Vector3(0, QuantizeAngle(RadToDeg(ArcTan2(-P.Dir.Z, P.Dir.X))), 0);
+      S.Scale := 1;
+      Append(S);
+    end;
+  end;
+
 var
   Mover: TQuakeMover;
   Monster: TQuakeMonster;
@@ -336,8 +521,6 @@ var
   Proj: TQuakeProjectile;
   Stats: TQuakePlayerStats;
   Ammo: TAmmoType;
-  Gone: specialize TList<TObject>;
-  Pair: specialize TPair<TObject, TNetSlot>;
   Angles: TVector3;
   I, J: Integer;
   Tmp: TNetEntityState;
@@ -348,6 +531,7 @@ begin
   Count := 0;
   if (FWorld.Bsp <> nil) and (FWorld.Geometry <> nil) then
   begin
+    AddPlayers;
     for Mover in FWorld.Geometry.Movers do
       if Mover.ModelIndex > 0 then
         Add(Mover, Mover.Transform, Mover.Transform, Mover.WorldBox, '*' + IntToStr(Mover.ModelIndex), '',
@@ -383,42 +567,27 @@ begin
     F.Entities[J + 1] := Tmp;
   end;
 
-  { Numbers of entities not seen this frame are free again }
-  Gone := specialize TList<TObject>.Create;
-  try
-    for Pair in FSlots do
-      if Pair.Value.SeenFrame <> FFrameNum then
-        Gone.Add(Pair.Key);
-    for I := 0 to Gone.Count - 1 do
-    begin
-      FUsed[FSlots[Gone[I]].Number] := False;
-      FSlots.Remove(Gone[I]);
-    end;
-  finally
-    Gone.Free;
-  end;
-
   { player_state_t }
-  Stats := FWorld.Stats;
+  Stats := C.Player.Stats;
   F.Player.PmType := NetPmNormal;
-  if FWorld.Dead then
+  if C.Player.Dead then
   begin
-    if FWorld.PlayerGibbed then
+    if C.Player.Gibbed then
       F.Player.PmType := NetPmGib
     else
       F.Player.PmType := NetPmDead;
   end;
-  PMoveToNet(FPM, F.Player);
-  F.Player.CommandAck := FLastSequence;
+  PMoveToNet(C.PM, F.Player);
+  F.Player.CommandAck := C.LastSequence;
   { Placed after the last command: the client's prediction for it is moot }
-  if FPlacedSequence = FLastSequence then
+  if C.PlacedSequence = C.LastSequence then
     F.Player.PmFlags := F.Player.PmFlags or PmfTeleport;
-  Angles := Vector3(-RadToDeg(ArcSin(EnsureRange(FPlayerDir.Y, -1, 1))),
-    RadToDeg(ArcTan2(-FPlayerDir.Z, FPlayerDir.X)), 0);
+  Angles := Vector3(-RadToDeg(ArcSin(EnsureRange(C.Player.Dir.Y, -1, 1))),
+    RadToDeg(ArcTan2(-C.Player.Dir.Z, C.Player.Dir.X)), 0);
   F.Player.ViewAngles := Vector3(QuantizeAngle(Angles.X), QuantizeAngle(Angles.Y), 0);
-  if (FWorld.WeaponModel <> nil) and (FWorld.WeaponModel.Model <> nil) then
+  if C.Local and (FWorld.WeaponModel <> nil) and (FWorld.WeaponModel.Model <> nil) then
     F.Player.GunIndex := ModelIndexOf(FWorld.WeaponModel.Model.ModelPath);
-  F.Player.GunFrame := Max(0, FWorld.Gun.Frame);
+  F.Player.GunFrame := Max(0, C.Player.Gun.Frame);
   F.Player.Stats[StatHealth] := ClampShort(Stats.Health);
   F.Player.Stats[StatArmor] := ClampShort(Stats.Armor);
   F.Player.Stats[StatArmorType] := ClampShort(Stats.ArmorType);
@@ -445,29 +614,53 @@ begin
   F.Player.Stats[StatLevelSeconds] := ClampShort(Trunc(Stats.LevelTime));
 end;
 
-procedure TQuakeServer.ExecuteMove(const Cmd: TNetUserCmd; const Sequence: Integer);
+procedure TQuakeServer.FreeUnseenNumbers;
+var
+  Gone: specialize TList<TObject>;
+  Pair: specialize TPair<TObject, TNetSlot>;
+  I: Integer;
 begin
-  Inc(FCommands);
-  FLastCmd := Cmd;
-  FLastSequence := Sequence;
-  FPlayerDir := NetAnglesToDir(ShortToAngle(Cmd.Angles[0]), ShortToAngle(Cmd.Angles[1])).Normalize;
-  { ClientThink's Pmove: movers push the player first (PlayerBeforeMove) }
-  if (Cmd.Msec > 0) and not FWorld.Dead then
-  begin
-    if Assigned(FPM.OnBeforeMove) then
-      FPM.OnBeforeMove(FPM);
-    FPM.Move(UserCmdToPMoveInput(Cmd));
+  { Numbers of entities no client saw this frame are free again }
+  Gone := specialize TList<TObject>.Create;
+  try
+    for Pair in FSlots do
+      if Pair.Value.SeenFrame <> FFrameNum then
+        Gone.Add(Pair.Key);
+    for I := 0 to Gone.Count - 1 do
+    begin
+      FUsed[FSlots[Gone[I]].Number] := False;
+      FSlots.Remove(Gone[I]);
+    end;
+  finally
+    Gone.Free;
   end;
-  UpdateEye;
-  { Held fire is sent in every command (ClientThink latches BUTTON_ATTACK) }
-  if (Cmd.Buttons and NetButtonAttack) <> 0 then
-    FWorld.FireWeapon(FPlayerPos, FPlayerDir);
 end;
 
-procedure TQuakeServer.Print(const Text: String; const Center: Boolean);
+procedure TQuakeServer.ExecuteMove(const C: TServerClient; const Cmd: TNetUserCmd; const Sequence: Integer);
+begin
+  Inc(C.Commands);
+  C.LastCmd := Cmd;
+  C.LastSequence := Sequence;
+  C.Player.Dir := NetAnglesToDir(ShortToAngle(Cmd.Angles[0]), ShortToAngle(Cmd.Angles[1])).Normalize;
+  { ClientThink's Pmove: movers push the player first (PlayerBeforeMove) }
+  if (Cmd.Msec > 0) and not C.Player.Dead then
+  begin
+    if Assigned(C.PM.OnBeforeMove) then
+      C.PM.OnBeforeMove(C.PM);
+    C.PM.Move(UserCmdToPMoveInput(Cmd));
+  end;
+  UpdateEye(C);
+  { Held fire is sent in every command (ClientThink latches BUTTON_ATTACK) }
+  if (Cmd.Buttons and NetButtonAttack) <> 0 then
+    FWorld.FireWeapon(C.Player.Pos, C.Player.Dir);
+end;
+
+procedure TQuakeServer.Print(const Text: String; const Center: Boolean; C: TServerClient);
 var
   Msg: TNetMessage;
 begin
+  if C = nil then
+    C := FLocal;
   Msg := TNetMessage.Create;
   try
     if Center then
@@ -475,13 +668,13 @@ begin
     else
       Msg.WriteByte(SvcPrint);
     Msg.WriteString(Text);
-    FChannel.SendToClient(Msg);
+    C.Channel.SendToClient(Msg);
   finally
     Msg.Free;
   end;
 end;
 
-procedure TQuakeServer.SpawnCommand(const Args: String);
+procedure TQuakeServer.SpawnCommand(const C: TServerClient; const Args: String);
 var
   Words: TStringList;
   Ent: TQuakeEntity;
@@ -492,16 +685,16 @@ begin
   try
     if (Words.Count = 0) or (FWorld.Bsp = nil) then
     begin
-      Print('Usage: spawn <classname> [key value]...  e.g. spawn target_earthquake targetname q count 2');
+      Print('Usage: spawn <classname> [key value]...  e.g. spawn target_earthquake targetname q count 2', False, C);
       Exit;
     end;
     Ent := TQuakeEntity.Create;
     Ent.SetField('classname', Words[0]);
     { 96 units in front of the player, at the origin's height (24 above the
       feet), unless "origin" is given }
-    Org := CgeToQuake(FPlayerPos) +
-      CgeToQuake(Vector3(FPlayerDir.X, 0, FPlayerDir.Z).Normalize * 96);
-    Org.Z := FPM.Origin.Z;
+    Org := CgeToQuake(C.Player.Pos) +
+      CgeToQuake(Vector3(C.Player.Dir.X, 0, C.Player.Dir.Z).Normalize * 96);
+    Org.Z := C.PM.Origin.Z;
     Ent.SetField('origin', Format('%d %d %d', [Round(Org.X), Round(Org.Y), Round(Org.Z)]));
     I := 1;
     while I + 1 < Words.Count do
@@ -511,7 +704,7 @@ begin
     end;
     FWorld.Bsp.Entities.Add(Ent);
     FWorld.SpawnEntity(Ent);
-    Print(Format('Spawned %s at %s', [Ent.ClassName, Ent.GetField('origin')]));
+    Print(Format('Spawned %s at %s', [Ent.ClassName, Ent.GetField('origin')]), False, C);
     WritelnLog('Console', 'Spawned %s at %s', [Ent.ClassName, Ent.GetField('origin')]);
   finally
     Words.Free;
@@ -557,12 +750,12 @@ begin
       StrToFloatDef(Vals[2], 0), StrToFloatDef(Vals[3], 0)));
 end;
 
-procedure TQuakeServer.ExecuteString(const S: String);
+procedure TQuakeServer.ExecuteString(const C: TServerClient; const S: String);
 var
   Cmd, Args: String;
   P, Slot: Integer;
 begin
-  Inc(FStringCommands);
+  Inc(C.StringCommands);
   P := Pos(' ', S);
   if P > 0 then
   begin
@@ -577,7 +770,7 @@ begin
   if FWorld.Bsp = nil then
     Exit;
   if Cmd = 'use' then
-    FWorld.ActivateUse(FPlayerPos, FPlayerDir)
+    FWorld.ActivateUse(C.Player.Pos, C.Player.Dir)
   else
   if (Cmd = 'weapon') and TryStrToInt(Args, Slot) then
     FWorld.SelectWeapon(Slot)
@@ -599,7 +792,7 @@ begin
       FWorld.CheatPowerup(False)
     else
     if not FWorld.CheatGiveItem(Args) then
-      Print('Unknown item: ' + Args);
+      Print('Unknown item: ' + Args, False, C);
   end else
   if Cmd = 'powerarmor' then
     FWorld.TogglePowerArmor
@@ -607,16 +800,16 @@ begin
   if Cmd = 'notarget' then
   begin
     NoTarget := not NoTarget;
-    Print('notarget ' + Iff(NoTarget, 'ON', 'OFF'), True);
+    Print('notarget ' + Iff(NoTarget, 'ON', 'OFF'), True, C);
   end else
   if Cmd = 'noclip' then
-    FPM.Noclip := Args <> '0'
+    C.PM.Noclip := Args <> '0'
   else
   if Cmd = 'kill' then
     FWorld.Suicide
   else
   if Cmd = 'spawn' then
-    SpawnCommand(Args)
+    SpawnCommand(C, Args)
   else
   if Cmd = 'hurt' then
     HurtCommand(Args)
@@ -630,18 +823,18 @@ begin
   else
   begin
     WritelnWarning('QuakeServer', 'Unknown client command "%s"', [S]);
-    Print('Unknown command: ' + Cmd);
+    Print('Unknown command: ' + Cmd, False, C);
   end;
 end;
 
-procedure TQuakeServer.ReadPackets;
+procedure TQuakeServer.ReadClient(const C: TServerClient);
 var
   Data: TBytes;
   Msg: TNetMessage;
   Cmd: Byte;
   Sequence: Integer;
 begin
-  while FChannel.ReceiveOnServer(Data) do
+  while C.Channel.ReceiveOnServer(Data) do
   begin
     Msg := TNetMessage.CreateFrom(Data);
     try
@@ -651,12 +844,12 @@ begin
         case Cmd of
           ClcMove:
             begin
-              FAck := Msg.ReadLong;
+              C.Ack := Msg.ReadLong;
               Sequence := Msg.ReadLong;
-              ExecuteMove(ReadDeltaUserCmd(Msg, FLastCmd), Sequence);
+              ExecuteMove(C, ReadDeltaUserCmd(Msg, C.LastCmd), Sequence);
             end;
           ClcStringCmd:
-            ExecuteString(Msg.ReadString);
+            ExecuteString(C, Msg.ReadString);
           else
             begin
               WritelnWarning('QuakeServer', 'Bad client message %d', [Cmd]);
@@ -675,42 +868,58 @@ begin
   end;
 end;
 
-procedure TQuakeServer.RunTick(const Seconds: Single);
+procedure TQuakeServer.ReadPackets;
+var
+  C: TServerClient;
 begin
-  FWorld.Update(Seconds, FPlayerPos, FPlayerDir);
+  for C in FClients do
+  begin
+    { The world acts on this client's player while running its commands }
+    FWorld.SelectPlayer(C.Player);
+    try
+      ReadClient(C);
+    finally
+      FWorld.SelectPlayer(FLocal.Player);
+    end;
+  end;
 end;
 
-procedure TQuakeServer.SendFrame;
+procedure TQuakeServer.RunTick(const Seconds: Single);
+begin
+  FWorld.Update(Seconds);
+end;
+
+procedure TQuakeServer.SendFrameTo(const C: TServerClient);
 var
   F: TNetFrame;
   Base: TNetFrame;
   I: Integer;
 begin
-  Inc(FFrameNum);
-  BuildFrame(F);
+  BuildFrame(C, F);
   Base := Default(TNetFrame);
   F.DeltaFrame := -1;
-  if (FAck > 0) and (FFrameNum - FAck < UpdateBackup) and FFrames[FAck and UpdateMask].Valid and
-     (FFrames[FAck and UpdateMask].ServerFrame = FAck) then
+  if (C.Ack > 0) and (FFrameNum - C.Ack < UpdateBackup) and C.Frames[C.Ack and UpdateMask].Valid and
+     (C.Frames[C.Ack and UpdateMask].ServerFrame = C.Ack) then
   begin
-    Base := FFrames[FAck and UpdateMask];
-    F.DeltaFrame := FAck;
+    Base := C.Frames[C.Ack and UpdateMask];
+    F.DeltaFrame := C.Ack;
   end;
-  FPlayerChanged := False;
+  C.PlayerChanged := False;
   FMsg.Clear;
-  if FSendServerData then
+  if C.SendServerData then
   begin
     FMsg.WriteByte(SvcServerData);
     FMsg.WriteString(FMapName);
-    FSendServerData := False;
+    C.SendServerData := False;
   end;
-  for I := 0 to FNewModels.Count - 1 do
+  { The models this client doesn't know yet }
+  for I := C.ModelsSent + 1 to FModels.Count do
   begin
     FMsg.WriteByte(SvcConfigString);
-    FMsg.WriteWord(FNewModels[I]);
-    FMsg.WriteString(FModels[FNewModels[I] - 1]);
+    FMsg.WriteWord(I);
+    FMsg.WriteString(FModels[I - 1]);
   end;
-  FNewModels.Clear;
+  C.ModelsSent := FModels.Count;
   FMsg.WriteByte(SvcFrame);
   FMsg.WriteLong(F.ServerFrame);
   FMsg.WriteLong(F.DeltaFrame);
@@ -718,15 +927,25 @@ begin
   WriteDeltaPlayerState(FMsg, Base.Player, F.Player);
   FMsg.WriteByte(SvcPacketEntities);
   WritePacketEntities(FMsg, Base.Entities, F.Entities);
-  FChannel.SendToClient(FMsg);
-  FLastBytes := FMsg.Size;
-  FLastDelta := F.DeltaFrame;
-  FFrames[FFrameNum and UpdateMask] := F;
+  C.Channel.SendToClient(FMsg);
+  C.LastBytes := FMsg.Size;
+  C.LastDelta := F.DeltaFrame;
+  C.Frames[FFrameNum and UpdateMask] := F;
+end;
+
+procedure TQuakeServer.SendFrame;
+var
+  C: TServerClient;
+begin
+  Inc(FFrameNum);
+  for C in FClients do
+    SendFrameTo(C);
+  FreeUnseenNumbers;
 end;
 
 function TQuakeServer.LastFrame: TNetFrame;
 begin
-  Result := FFrames[FFrameNum and UpdateMask];
+  Result := FLocal.Frames[FFrameNum and UpdateMask];
 end;
 
 end.

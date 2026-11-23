@@ -87,6 +87,9 @@ type
     function NewPlaying(const Snd: TCastleSound; const Volume: Single;
       const Owner: TObject; const Channel: TQuakeSoundChannel): TQuakePlayingSound;
   public
+    { 2D sounds are another player's while the world acts on it: not played
+      (TQuakeWorld.SetCurrent) }
+    Mute2D: Boolean;
     constructor Create;
     destructor Destroy; override;
 
@@ -393,7 +396,7 @@ procedure TQuakeSounds.Play(const APath: String; const Volume: Single;
 var
   Snd: TCastleSound;
 begin
-  if not FEnabled or (SoundEngine = nil) then
+  if not FEnabled or (SoundEngine = nil) or Mute2D then
     Exit;
 
   try

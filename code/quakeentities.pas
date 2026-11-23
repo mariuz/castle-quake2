@@ -529,6 +529,8 @@ type
     Life: Single;
     FromPlayer: Boolean;
     Owner: TQuakeMonster;
+    { The player who fired it: its pmove (nil after loading a game) }
+    OwnerPlayer: TObject;
     { BFG ball: seconds to its next laser think (bfg_think, every 0.1 s) }
     LaserTimer: Single;
     { BFG ball that hit something: stopped and hidden, its "BFG effect"

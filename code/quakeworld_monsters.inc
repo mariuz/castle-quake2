@@ -143,7 +143,7 @@ begin
     { Drawn to just short of the player: particles at the eye fill the view }
     if PointsDistance(Eye, QuakeToCge(T.EndPos)) > 64 then
       Particles.SpawnBeam(Eye, QuakeToCge(T.EndPos) - Dir * 48, Vector3(1.0, 0.6, 0.2));
-    DamagePlayer(Monster.AttackDamage, Eye);
+    DamagePlayerHit(T.Ent, Monster.AttackDamage, Eye);
   end else
   begin
     Particles.SpawnBeam(Eye, QuakeToCge(T.EndPos), Vector3(1.0, 0.6, 0.2));
@@ -421,7 +421,7 @@ begin
       Break;
     if T.Ent is TQuakePMove then
     begin
-      DamagePlayer(Monster.AttackDamage, Eye);
+      DamagePlayerHit(T.Ent, Monster.AttackDamage, Eye);
       Result := True;
     end else
     if T.Ent is TQuakeMonster then

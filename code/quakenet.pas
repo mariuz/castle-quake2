@@ -33,7 +33,7 @@ const
   UpdateMask = UpdateBackup - 1;
   MaxNetEntities = 1024;
   { Entity numbers 1..MaxNetClients belong to players (edicts 1..maxclients) }
-  MaxNetClients = 1;
+  MaxNetClients = 8;
   MaxNetStats = 32;
   MaxNetModels = 256;
 

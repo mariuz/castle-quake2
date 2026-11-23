@@ -834,10 +834,15 @@ begin
   begin
     FBaseGravity := FCur.PM.GravityAcceleration;
     FCur.Gravity := 1;
-    FCur.PM.OnFallDamage := @PlayerFallDamage;
-    FCur.PM.OnPointContents := @PlayerPointContents;
-    FCur.PM.OnLandSound := @PlayerLanded;
-    FCur.PM.OnTrace := @PlayerTrace;
-    FCur.PM.OnBeforeMove := @PlayerBeforeMove;
+    WirePlayerMove(FCur.PM);
   end;
+end;
+
+procedure TQuakeWorld.WirePlayerMove(const PM: TQuakePMove);
+begin
+  PM.OnFallDamage := @PlayerFallDamage;
+  PM.OnPointContents := @PlayerPointContents;
+  PM.OnLandSound := @PlayerLanded;
+  PM.OnTrace := @PlayerTrace;
+  PM.OnBeforeMove := @PlayerBeforeMove;
 end;

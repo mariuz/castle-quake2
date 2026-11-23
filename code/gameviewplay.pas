@@ -9,7 +9,7 @@ unit GameViewPlay;
 interface
 
 uses
-  Classes, SysUtils, Math,
+  Classes, SysUtils, Math, Generics.Collections,
   CastleVectors, CastleUIControls, CastleControls, CastleKeysMouse,
   CastleViewport, CastleCameras, CastleTransform, CastleColors, CastleLog,
   CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene, CastleGLImages, CastleRectangles, CastleRenderContext,
@@ -20,6 +20,19 @@ uses
 
 type
   TCameraMode = (cmFirstPerson, cmNoclip);
+
+  { A client without a view (tests, later bots): its channel, client, a
+    pmove for its prediction (no traces: the server moves it) and inputs
+    held until changed }
+  TTestClient = class
+    Net: TNetLoopback;
+    Client: TQuakeClient;
+    PM: TQuakePMove;
+    Server: TServerClient;
+    Forward, Side, Yaw: Single;
+    Fire: Boolean;
+    destructor Destroy; override;
+  end;
 
   { The main gameplay view }
   TViewPlay = class(TCastleView)
@@ -77,6 +90,9 @@ type
     FClient: TQuakeClient;
     { The client's drawing of the snapshots' models (clientdraw) }
     FClientScene: TQuakeClientScene;
+    { Test clients (addclient): more players on the server, each with a
+      loopback channel and a client of its own, held inputs (clientinput) }
+    FTestClients: specialize TObjectList<TTestClient>;
     { A tapped shot (X, a recorded tap) for the next command }
     FNetAttackTap: Boolean;
     { Snapshots compared with the server's, and how many differed }
@@ -133,11 +149,17 @@ type
     procedure PredictMove(Sender: TObject; const Input: TPMoveInput; const PM: TQuakePMove);
     { The server's svc_print / svc_centerprint }
     procedure ClientPrint(const Text: String; const AtCenter: Boolean);
+    { The console's addclient / clientinput / removeclient }
+    procedure TestClientCommand(const Cmd, Args: String);
+    { Each test client reads its snapshots and sends its command }
+    procedure UpdateTestClients(const SecondsPassed: Single);
     { The client's copy of the last snapshot must be the server's }
     procedure CheckSnapshot;
     { Measure a replay's drift from the recorded position and put the
       player back on its path (after the move) }
     procedure ApplyDemoSync;
+    { V: the players and test clients }
+    procedure LogClients;
     { Player actions that a recording keeps }
     procedure DoSelectWeapon(const Slot: Integer);
     procedure DoUse;
@@ -574,6 +596,7 @@ begin
   PlayerMovement.OnPredict := @PredictMove;
   FClient.OnPrint := @ClientPrint;
   FClientScene := TQuakeClientScene.Create(MainViewport.Items);
+  FTestClients := specialize TObjectList<TTestClient>.Create(True);
   FClientScene.Enabled := ClientDrawAtStart;
   { Screenshots must not depend on random idle pauses of the view weapon }
   FWorld.Gun.RandomPauses := FAutoTestMap = '';
@@ -739,8 +762,19 @@ begin
   Particles.Camera := nil;
   Particles.SetParent(nil);
   FreeAndNil(FClientScene);
+  { Their server clients go with the server; their channels after it }
+  if FTestClients <> nil then
+    FTestClients.OwnsObjects := False;
   FreeAndNil(FClient);
   FreeAndNil(FServer);
+  if FTestClients <> nil then
+    while FTestClients.Count > 0 do
+    begin
+      FTestClients[0].Server := nil;
+      FTestClients[0].Free;
+      FTestClients.Delete(0);
+    end;
+  FreeAndNil(FTestClients);
   FreeAndNil(FNet);
   { The world references design components, which are freed by inherited Stop }
   FreeAndNil(FWorld);
@@ -1480,6 +1514,7 @@ begin
          FClient.PredictionChecks, FClient.PredictionErrors, FClient.MaxPredictionError]);
     WritelnLog('Demo', 'Client draws %d models from the snapshots%s',
       [FClientScene.Count, Iff(FClientScene.Enabled, '', ' (clientdraw off)')]);
+    LogClients;
     WritelnLog('Demo', 'Player: server origin %s velocity %s%s water %d, client origin %s%s',
       [FServer.PM.Origin.ToString, FServer.PM.QuakeVelocity.ToString,
        Iff(FServer.PM.Crouched, ' crouched', ''), FServer.PM.WaterLevel,
@@ -2201,7 +2236,121 @@ begin
   if FPredictValid then
     FPredictedView := PlayerMovement.AimPosition;
   FClient.SendMove(Attack, CgeToQuake(PlayerMovement.AimDirection));
+  UpdateTestClients(SecondsPassed);
   FServer.ReadPackets;
+end;
+
+destructor TTestClient.Destroy;
+begin
+  FreeAndNil(Client);
+  FreeAndNil(PM);
+  FreeAndNil(Net);
+  inherited Destroy;
+end;
+
+procedure TViewPlay.UpdateTestClients(const SecondsPassed: Single);
+var
+  T: TTestClient;
+  Input: TPMoveInput;
+begin
+  for T in FTestClients do
+  begin
+    T.Client.ReadPackets;
+    Input := Default(TPMoveInput);
+    Input.Forward := T.Forward;
+    Input.Side := T.Side;
+    Input.Dir := Vector3(Cos(DegToRad(T.Yaw)), Sin(DegToRad(T.Yaw)), 0);
+    Input.Dt := SecondsPassed;
+    T.Client.Predict(Input, T.PM);
+    T.Client.SendMove(T.Fire, Input.Dir);
+  end;
+end;
+
+procedure TViewPlay.TestClientCommand(const Cmd, Args: String);
+var
+  T: TTestClient;
+  Words: TStringList;
+  N: Integer;
+begin
+  Words := SplitArgs(Args);
+  try
+    if Cmd = 'addclient' then
+    begin
+      T := TTestClient.Create;
+      T.Net := TNetLoopback.Create;
+      T.Client := TQuakeClient.Create(T.Net);
+      T.PM := TQuakePMove.Create;
+      T.Server := FServer.AddClient(T.Net);
+      if T.Server = nil then
+      begin
+        T.Free;
+        Console.Print('No room for another client');
+        Exit;
+      end;
+      T.PM.CopyParams(PlayerMovement.PM);
+      T.Yaw := FWorld.SpawnAngle;
+      FTestClients.Add(T);
+      Console.Print(Format('Client %d added (player %d)', [FTestClients.Count, T.Server.Player.Number]));
+      WritelnLog('Net', 'Test client %d added: player %d', [FTestClients.Count, T.Server.Player.Number]);
+      Exit;
+    end;
+    N := -1;
+    if Words.Count > 0 then
+      N := StrToIntDef(Words[0], 0) - 1;
+    if (N < 0) or (N >= FTestClients.Count) then
+    begin
+      Console.Print('Usage: ' + Cmd + ' <client 1..' + IntToStr(FTestClients.Count) + '> ...');
+      Exit;
+    end;
+    T := FTestClients[N];
+    if Cmd = 'removeclient' then
+    begin
+      FServer.RemoveClient(T.Server);
+      T.Server := nil;
+      FTestClients.Delete(N);
+    end else
+    begin
+      { clientinput <n> <forward> <side> <yaw> [fire 0|1] }
+      if Words.Count >= 2 then
+        T.Forward := StrToFloatDef(Words[1], 0);
+      if Words.Count >= 3 then
+        T.Side := StrToFloatDef(Words[2], 0);
+      if Words.Count >= 4 then
+        T.Yaw := StrToFloatDef(Words[3], T.Yaw);
+      if Words.Count >= 5 then
+        T.Fire := Words[4] <> '0';
+    end;
+  finally
+    Words.Free;
+  end;
+end;
+
+procedure TViewPlay.LogClients;
+var
+  I, Seen: Integer;
+  T: TTestClient;
+  F: TNetFrame;
+  S: TNetEntityState;
+begin
+  { The players the view's snapshot shows (numbers 1 .. MaxNetClients) }
+  Seen := 0;
+  for S in FClient.Frame.Entities do
+    if S.Number <= MaxNetClients then
+      Inc(Seen);
+  WritelnLog('Demo', 'Clients: %d, players %d, the view sees %d other players',
+    [FServer.ClientCount, FWorld.Players.Count, Seen]);
+  for I := 0 to FTestClients.Count - 1 do
+  begin
+    T := FTestClients[I];
+    F := T.Client.Frame;
+    Seen := 0;
+    for S in F.Entities do
+      if S.Number <= MaxNetClients then
+        Inc(Seen);
+    WritelnLog('Demo', 'Client %d: player %d at %s health %d, frames %d (%d bad), sees %d entities and %d other players',
+      [I + 1, T.Server.Player.Number, T.Server.PM.Origin.ToString, T.Server.Player.Stats.Health,
+       T.Client.FramesReceived, T.Client.BadFrames, Length(F.Entities), Seen]);
+  end;
 end;
 
 procedure TViewPlay.ApplyDemoSync;
@@ -2428,6 +2577,9 @@ begin
   if (Cmd = 'spawn') or (Cmd = 'hurt') or (Cmd = 'god') or (Cmd = 'give') or
      (Cmd = 'powerarmor') or (Cmd = 'notarget') or (Cmd = 'kill') then
     FClient.AddCommand(Trim(Cmd + ' ' + Args))
+  else
+  if (Cmd = 'addclient') or (Cmd = 'clientinput') or (Cmd = 'removeclient') then
+    TestClientCommand(Cmd, Args)
   else
   if Cmd = 'clientdraw' then
   begin

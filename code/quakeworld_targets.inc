@@ -669,13 +669,13 @@ begin
     Laser.SetLength(Dist);
     if LaserTrace.Ent is TQuakeMonster then
       TQuakeMonster(LaserTrace.Ent).TakeDamage(Max(1, Laser.Damage div 10));
-    if LaserTrace.Ent = FCur.PM then
+    if (LaserTrace.Ent is TQuakePMove) and (PlayerOfEnt(LaserTrace.Ent) <> nil) then
     begin
-      FCur.HurtTimer := FCur.HurtTimer - SecondsPassed;
-      if FCur.HurtTimer <= 0 then
+      PlayerOfEnt(LaserTrace.Ent).HurtTimer := PlayerOfEnt(LaserTrace.Ent).HurtTimer - SecondsPassed;
+      if PlayerOfEnt(LaserTrace.Ent).HurtTimer <= 0 then
       begin
-        FCur.HurtTimer := 0.1;
-        DamagePlayer(Laser.Damage div 10, Laser.Origin);
+        PlayerOfEnt(LaserTrace.Ent).HurtTimer := 0.1;
+        DamagePlayerHit(LaserTrace.Ent, Laser.Damage div 10, Laser.Origin);
       end;
     end;
   end;
@@ -858,10 +858,10 @@ begin
       if Pulse then
         TQuakeMonster(T.Ent).TakeDamage(Laser.Damage);
     end else
-    if T.Ent = FCur.PM then
+    if T.Ent is TQuakePMove then
     begin
       if Pulse then
-        DamagePlayer(Laser.Damage, Laser.Origin);
+        DamagePlayerHit(T.Ent, Laser.Damage, Laser.Origin);
     end else
       Break;
     Ignore := T.Ent;
@@ -1017,7 +1017,9 @@ begin
   PBox := PlayerBox;
   for Trig in FTriggers do
   begin
-    Trig.Cooldown := Max(0, Trig.Cooldown - SecondsPassed);
+    { Once a tick: on the local player's pass }
+    if IsLocal then
+      Trig.Cooldown := Max(0, Trig.Cooldown - SecondsPassed);
     if (not Trig.Enabled) or (Trig.Cooldown > 0) or not Trig.Box.Collision(PBox) then
       Continue;
 
@@ -1045,10 +1047,22 @@ begin
           Dest := Dests[Random(Dests.Count)];
           if CName = 'misc_teleporter' then
             Dest := Dests[0];
-          FTeleportPending := True;
-          FTeleportPos := QuakeToCge(Dest.Origin) + Vector3(0, PlayerEyeHeight - 24 + 10, 0);
-          FTeleportAngle := Dest.Angle;
-          Particles.SpawnTeleport(FTeleportPos);
+          if IsLocal then
+          begin
+            { The view places the camera (and the server's player) }
+            FTeleportPending := True;
+            FTeleportPos := QuakeToCge(Dest.Origin) + Vector3(0, PlayerEyeHeight - 24 + 10, 0);
+            FTeleportAngle := Dest.Angle;
+          end else
+          if FCur.PM <> nil then
+          begin
+            { Another player: its pmove at once }
+            FCur.PM.Origin := Dest.Origin + Vector3(0, 0, 10);
+            FCur.PM.ResetState;
+            FCur.Pos := QuakeToCge(FCur.PM.Origin + Vector3(0, 0, FCur.PM.ViewHeight));
+            FCur.Dir := YawToCgeDir(Dest.Angle);
+          end;
+          Particles.SpawnTeleport(QuakeToCge(Dest.Origin) + Vector3(0, PlayerEyeHeight - 24 + 10, 0));
           Sounds.Play('sound/misc/tele1.wav');
           Trig.Cooldown := 1.0;
         end;

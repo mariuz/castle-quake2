@@ -26,6 +26,9 @@ end;
 
 procedure TQuakeWorld.UpdateWeaponModel;
 begin
+  { The view weapon is the local player's }
+  if not IsLocal then
+    Exit;
   if FWeaponModelSlot = FCur.Stats.CurrentWeapon then
     Exit;
   FWeaponModelSlot := FCur.Stats.CurrentWeapon;
@@ -382,7 +385,8 @@ begin
   if Def.AmmoType <> atNone then
     FCur.Stats.Ammo[Def.AmmoType] := Max(0, FCur.Stats.Ammo[Def.AmmoType] - Def.AmmoPerShot * Shots);
 
-  FWeaponKick := 1.0;
+  if IsLocal then
+    FWeaponKick := 1.0;
   Mult := DamageMultiplier;
   MuzzlePos := Origin + Dir * 16;
   if Slot <> 10 then { the BFG flashed on frame 9 }

@@ -85,7 +85,7 @@ begin
   end;
   FCur.Stats.Health := Min(FCur.Stats.Health, 0);
   { ps.gunindex = 0: no view weapon while dead }
-  if FWeaponTransform <> nil then
+  if (FWeaponTransform <> nil) and IsLocal then
     FWeaponTransform.Exists := False;
   if FHud <> nil then
     FHud.ShowMessage('You died. Restarting level...', 3);

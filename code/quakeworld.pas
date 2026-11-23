@@ -70,6 +70,8 @@ type
   public
     { 1 .. MaxNetClients }
     Number: Integer;
+    { The player of this program's view (HUD, view weapon, 2D sounds) }
+    Local: Boolean;
     Stats: TQuakePlayerStats;
     { Eye position and view direction (CGE coordinates) }
     Pos, Dir: TVector3;
@@ -150,7 +152,9 @@ type
       single player) }
     FPlayers: TQuakePlayerList;
     FCur: TQuakePlayer;
-    FHud: TQuakeHud;
+    { FHud / FViewPlayer are the view's while the world acts on the local
+      player, nil for the others (SetCurrent) }
+    FHud, FLocalHud: TQuakeHud;
     FTime: Single;
     FTrailTimer: Single;
     { Monsters that found the player this frame (Quake 2 level.sight_entity) }
@@ -189,7 +193,7 @@ type
     FUseSource: TQuakeEntity;
     FHelpPrimary, FHelpSecondary: String;
     { The view's movement behaviour (damage kicks) }
-    FViewPlayer: TQuakePlayerMovement;
+    FViewPlayer, FLocalViewPlayer: TQuakePlayerMovement;
     { Pickups spawned from the map; later ones are monsters' drops }
     FMapPickupCount: Integer;
     { Quake 2 game.serverflags: cross-level trigger bits, kept across maps of a unit }
@@ -252,6 +256,23 @@ type
     procedure KillBox(const Box: TBox3D);
     procedure UpdateLiquids(const SecondsPassed: Single);
     procedure SetPlayer(const Value: TQuakePMove);
+    procedure WirePlayerMove(const PM: TQuakePMove);
+    procedure SetHud(const Value: TQuakeHud);
+    procedure SetViewPlayer(const Value: TQuakePlayerMovement);
+    { Act on P from now on: its stats, pmove, gun... The view's HUD, view
+      kicks and 2D sounds only reach the local player }
+    procedure SetCurrent(const P: TQuakePlayer);
+    function IsLocal: Boolean;
+    { The player whose pmove Ent is (a trace hit), nil if none }
+    function PlayerOfEnt(const Ent: TObject): TQuakePlayer;
+    { The player a monster acts against: the nearest one alive }
+    function MonsterTarget(const M: TQuakeMonster): TQuakePlayer;
+    { Damage the player a trace hit (Ent: its pmove) }
+    procedure DamagePlayerHit(const Ent: TObject; const Amount: Integer; const FromPos: TVector3);
+    { The current player's per-tick timers (powerups, items, pain) }
+    procedure UpdatePlayerTimers(const SecondsPassed: Single);
+    { A player other than the local one died: back at a spawn point }
+    procedure RespawnPlayer;
     function GetPlayerPM: TQuakePMove;
     function GetStats: TQuakePlayerStats;
     function GetDead: Boolean;
@@ -436,7 +457,9 @@ type
 
     { Advance world simulation. PlayerPos is the camera (eye) position. }
     { One game tick (QuakeTick.TickSeconds): the simulation }
-    procedure Update(const SecondsPassed: Single; const PlayerPos, PlayerDir: TVector3);
+    { One tick. Each player's Pos / Dir are set before (the server's
+      commands) }
+    procedure Update(const SecondsPassed: Single);
     { Every frame, before the ticks: movers (they carry the player, who moves
       every frame), surface animation and particles }
     procedure UpdateFrame(const SecondsPassed: Single);
@@ -523,7 +546,7 @@ type
       False if the map has none. }
     function IntermissionSpot(out Pos: TVector3; out Yaw, Pitch: Single): Boolean;
 
-    property Hud: TQuakeHud read FHud write FHud;
+    property Hud: TQuakeHud read FLocalHud write SetHud;
     { Contents bits at a CGE position (liquids, exact ladders) }
     function PlayerPointContents(const CgePos: TVector3): Integer;
     function PlayerTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer): TQuakeTrace;
@@ -537,8 +560,16 @@ type
     { Every player; the world acts on CurrentPlayer (player 1 in single player) }
     property Players: TQuakePlayerList read FPlayers;
     property CurrentPlayer: TQuakePlayer read FCur;
+    { Another player (a client of the server) moved by PM (its pmove: the
+      server's, not owned), standing at a spawn point }
+    function AddPlayer(const PM: TQuakePMove): TQuakePlayer;
+    procedure RemovePlayer(const P: TQuakePlayer);
+    { Act on P (the server runs P's commands) }
+    procedure SelectPlayer(const P: TQuakePlayer);
+    { The current player (not the local one) back at a spawn point }
+    procedure RespawnCurrent;
     { The view's movement (view kicks on damage); may be nil }
-    property ViewPlayer: TQuakePlayerMovement read FViewPlayer write FViewPlayer;
+    property ViewPlayer: TQuakePlayerMovement read FLocalViewPlayer write SetViewPlayer;
     property Stats: TQuakePlayerStats read GetStats;
     property SpawnPoint: TVector3 read FSpawnPoint;
     property SpawnAngle: Single read FSpawnAngle;
@@ -770,6 +801,153 @@ end;
 
 { TQuakeWorld ------------------------------------------------------------------ }
 
+procedure TQuakeWorld.SetHud(const Value: TQuakeHud);
+begin
+  FLocalHud := Value;
+  if (FCur = nil) or FCur.Local then
+    FHud := Value;
+end;
+
+procedure TQuakeWorld.SetViewPlayer(const Value: TQuakePlayerMovement);
+begin
+  FLocalViewPlayer := Value;
+  if (FCur = nil) or FCur.Local then
+    FViewPlayer := Value;
+end;
+
+procedure TQuakeWorld.SetCurrent(const P: TQuakePlayer);
+begin
+  if (P = nil) or (P = FCur) then
+    Exit;
+  FCur := P;
+  if P.Local then
+  begin
+    FHud := FLocalHud;
+    FViewPlayer := FLocalViewPlayer;
+  end else
+  begin
+    FHud := nil;
+    FViewPlayer := nil;
+  end;
+  Sounds.Mute2D := not P.Local;
+end;
+
+procedure TQuakeWorld.SelectPlayer(const P: TQuakePlayer);
+begin
+  SetCurrent(P);
+end;
+
+procedure TQuakeWorld.RespawnCurrent;
+begin
+  if not IsLocal then
+    RespawnPlayer;
+end;
+
+function TQuakeWorld.IsLocal: Boolean;
+begin
+  Result := FCur.Local;
+end;
+
+function TQuakeWorld.PlayerOfEnt(const Ent: TObject): TQuakePlayer;
+var
+  P: TQuakePlayer;
+begin
+  for P in FPlayers do
+    if (P.PM <> nil) and (P.PM = Ent) then
+      Exit(P);
+  Result := nil;
+end;
+
+function TQuakeWorld.MonsterTarget(const M: TQuakeMonster): TQuakePlayer;
+var
+  P: TQuakePlayer;
+  D, Best: Single;
+begin
+  Result := FPlayers[0];
+  if FPlayers.Count = 1 then
+    Exit;
+  Best := MaxSingle;
+  for P in FPlayers do
+    if not P.Dead then
+    begin
+      D := PointsDistance(P.Pos, M.Transform.Translation);
+      if D < Best then
+      begin
+        Best := D;
+        Result := P;
+      end;
+    end;
+end;
+
+procedure TQuakeWorld.DamagePlayerHit(const Ent: TObject; const Amount: Integer; const FromPos: TVector3);
+var
+  Saved, P: TQuakePlayer;
+begin
+  P := PlayerOfEnt(Ent);
+  if P = nil then
+    P := FCur;
+  Saved := FCur;
+  SetCurrent(P);
+  try
+    DamagePlayer(Amount, FromPos);
+  finally
+    SetCurrent(Saved);
+  end;
+end;
+
+function TQuakeWorld.AddPlayer(const PM: TQuakePMove): TQuakePlayer;
+var
+  Saved: TQuakePlayer;
+begin
+  Result := TQuakePlayer.Create(FPlayers.Count + 1);
+  Result.PM := PM;
+  Result.Gun.OnEvent := @GunEvent;
+  Result.Gun.OnAmmo := @GunAmmo;
+  FPlayers.Add(Result);
+  WirePlayerMove(PM);
+  Saved := FCur;
+  SetCurrent(Result);
+  try
+    ResetStats;
+    RespawnPlayer;
+  finally
+    SetCurrent(Saved);
+  end;
+  WritelnLog('QuakeWorld', 'Player %d joined', [Result.Number]);
+end;
+
+procedure TQuakeWorld.RemovePlayer(const P: TQuakePlayer);
+begin
+  if (P = nil) or P.Local then
+    Exit;
+  if FCur = P then
+    SetCurrent(FPlayers[0]);
+  WritelnLog('QuakeWorld', 'Player %d left', [P.Number]);
+  FPlayers.Remove(P);
+end;
+
+procedure TQuakeWorld.RespawnPlayer;
+var
+  Org: TVector3;
+begin
+  { A spawn point beside the map's start, out of the other players }
+  FCur.Dead := False;
+  FCur.Gibbed := False;
+  if FCur.Stats.Health <= 0 then
+    ResetStats;
+  Org := CgeToQuake(FSpawnPoint) - Vector3(0, 0, PlayerEyeHeight - 24) +
+    Vector3(48 * (FCur.Number - 1), 0, 0);
+  if FCur.PM <> nil then
+  begin
+    FCur.PM.Origin := Org;
+    FCur.PM.ResetState;
+    FCur.PM.FindFree(128);
+    FCur.Pos := QuakeToCge(FCur.PM.Origin + Vector3(0, 0, FCur.PM.ViewHeight));
+  end;
+  FCur.Dir := YawToCgeDir(FSpawnAngle);
+  WritelnLog('QuakeWorld', 'Player %d spawns at %s', [FCur.Number, CgeToQuake(FCur.Pos).ToString]);
+end;
+
 function TQuakeWorld.GetPlayerPM: TQuakePMove;
 begin
   Result := FCur.PM;
@@ -820,6 +998,7 @@ begin
   MonsterWeldCycle := @WeldCycle;
   FPlayers := TQuakePlayerList.Create(True);
   FCur := TQuakePlayer.Create(1);
+  FCur.Local := True;
   FPlayers.Add(FCur);
   FCur.Gun.OnEvent := @GunEvent;
   FCur.Gun.OnAmmo := @GunAmmo;
@@ -960,22 +1139,8 @@ begin
     CullTransform(Laser.Transform, Laser.Transform.BoundingBox);
 end;
 
-procedure TQuakeWorld.Update(const SecondsPassed: Single; const PlayerPos, PlayerDir: TVector3);
-var
-  I: Integer;
-  M: TQuakeMonster;
-  D: TDelayedTarget;
-  Kick: Single;
-  Shell: TVector3;
-  A: TAmmoType;
+procedure TQuakeWorld.UpdatePlayerTimers(const SecondsPassed: Single);
 begin
-  if FBsp = nil then
-    Exit;
-  FCur.Pos := PlayerPos;
-  FCur.Dir := PlayerDir;
-  PlayerShowHostile := (FCur.LastFireTime > 0) and (FTime - FCur.LastFireTime < 1);
-  UpdatePlayerTrail(SecondsPassed);
-  FTime := FTime + SecondsPassed;
   FCur.Stats.LevelTime := FCur.Stats.LevelTime + SecondsPassed;
   FCur.Stats.QuadTime := Max(0, FCur.Stats.QuadTime - SecondsPassed);
   FCur.Stats.InvulnTime := Max(0, FCur.Stats.InvulnTime - SecondsPassed);
@@ -989,23 +1154,57 @@ begin
     Sounds.Play('sound/misc/ddamage2.wav', 1, chItem);
   FCur.Stats.DoubleTime := Max(0, FCur.Stats.DoubleTime - SecondsPassed);
   FCur.Stats.IRTime := Max(0, FCur.Stats.IRTime - SecondsPassed);
-  IRGogglesOn := FCur.Stats.IRTime > 0;
   UpdatePlayerItems(SecondsPassed);
-  UpdateDefender(SecondsPassed);
+  { The defender sphere is one object: the local player's }
+  if IsLocal then
+    UpdateDefender(SecondsPassed);
   FCur.PainSoundTimer := FCur.PainSoundTimer - SecondsPassed;
+end;
+
+procedure TQuakeWorld.Update(const SecondsPassed: Single);
+var
+  I: Integer;
+  M: TQuakeMonster;
+  D: TDelayedTarget;
+  Kick: Single;
+  Shell: TVector3;
+  A: TAmmoType;
+  P, Local: TQuakePlayer;
+begin
+  if FBsp = nil then
+    Exit;
+  Local := FPlayers[0];
+  SetCurrent(Local);
+  PlayerShowHostile := (FCur.LastFireTime > 0) and (FTime - FCur.LastFireTime < 1);
+  UpdatePlayerTrail(SecondsPassed);
+  FTime := FTime + SecondsPassed;
+  for P in FPlayers do
+  begin
+    SetCurrent(P);
+    UpdatePlayerTimers(SecondsPassed);
+  end;
+  SetCurrent(Local);
+  IRGogglesOn := FCur.Stats.IRTime > 0;
   { Projectile lights of the previous frame }
   Lighting.EndFrame;
   UpdateDynamicLights;
 
-  if FCur.Dead then
-  begin
-    FCur.DeadTimer := FCur.DeadTimer - SecondsPassed;
-    if FCur.DeadTimer <= 0 then
+  for P in FPlayers do
+    if P.Dead then
     begin
-      FRestartPending := True;
-      ResetStats;
+      SetCurrent(P);
+      FCur.DeadTimer := FCur.DeadTimer - SecondsPassed;
+      if FCur.DeadTimer <= 0 then
+      begin
+        if IsLocal then
+        begin
+          FRestartPending := True;
+          ResetStats;
+        end else
+          RespawnPlayer;
+      end;
     end;
-  end;
+  SetCurrent(Local);
 
   { Delayed target firing }
   for I := FDelayed.Count - 1 downto 0 do
@@ -1021,21 +1220,30 @@ begin
 
   for I := 0 to FPickups.Count - 1 do
     FPickups[I].UpdatePickup(SecondsPassed);
-  if not FCur.Dead then
+  for P in FPlayers do
   begin
-    CheckPickups;
-    CheckTriggers(SecondsPassed);
-    CheckMovers;
+    SetCurrent(P);
+    if not FCur.Dead then
+    begin
+      CheckPickups;
+      CheckTriggers(SecondsPassed);
+      CheckMovers;
+    end;
   end;
+  SetCurrent(Local);
 
   { Player-clip brushes only block the player (Quake 2 MASK_MONSTERSOLID) }
   FGeometry.ScenePlayerClip.Collides := False;
   for M in FMonsters do
   begin
+    { The monster acts against its target player: its attacks and the
+      world's callbacks see that one as the current player }
+    SetCurrent(MonsterTarget(M));
     if M.AngerActive then
       M.UpdateAI(SecondsPassed, M.AngerPos)
     else
       M.UpdateAI(SecondsPassed, FCur.Pos);
+    SetCurrent(Local);
     if (not M.IsAlive) and not M.KillCounted then
     begin
       M.KillCounted := True;
@@ -1066,8 +1274,13 @@ begin
 
   CheckMonsterTriggers;
   UpdateTimersAndLasers(SecondsPassed);
-  UpdateLiquids(SecondsPassed);
-  UpdateGun(SecondsPassed);
+  for P in FPlayers do
+  begin
+    SetCurrent(P);
+    UpdateLiquids(SecondsPassed);
+    UpdateGun(SecondsPassed);
+  end;
+  SetCurrent(Local);
   UpdateProjectiles(SecondsPassed);
   UpdateFallingProps(SecondsPassed);
   UpdateFallingObjects(SecondsPassed);
@@ -1207,6 +1420,7 @@ end;
 function TQuakeWorld.DoWorldTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer;
   const Ignore: TObject): TQuakeTrace;
 var
+  P: TQuakePlayer;
   Mover: TQuakeMover;
   Monster: TQuakeMonster;
   Prop: TQuakeProp;
@@ -1322,21 +1536,23 @@ begin
         Exit;
     end;
   end;
-  { The player's box (for monsters and their shots) }
-  if ((Mask and CONTENTS_MONSTER) <> 0) and (FCur.PM <> nil) and (Ignore <> FCur.PM) and (not FCur.Dead) then
-  begin
-    Org := FCur.PM.Origin;
-    if Overlaps(Org + FCur.PM.BoxMins, Org + FCur.PM.BoxMaxs) then
-    begin
-      T := BoxTraceAgainstBox(Start, Stop, Mins, Maxs, Org + FCur.PM.BoxMins, Org + FCur.PM.BoxMaxs,
-        CONTENTS_MONSTER);
-      if T.Hit then
+  { The players' boxes (for monsters, their shots and the other players) }
+  if (Mask and CONTENTS_MONSTER) <> 0 then
+    for P in FPlayers do
+      if (P.PM <> nil) and (Ignore <> P.PM) and not P.Dead then
       begin
-        T.Ent := FCur.PM;
-        CombineTrace(Result, T);
+        Org := P.PM.Origin;
+        if Overlaps(Org + P.PM.BoxMins, Org + P.PM.BoxMaxs) then
+        begin
+          T := BoxTraceAgainstBox(Start, Stop, Mins, Maxs, Org + P.PM.BoxMins, Org + P.PM.BoxMaxs,
+            CONTENTS_MONSTER);
+          if T.Hit then
+          begin
+            T.Ent := P.PM;
+            CombineTrace(Result, T);
+          end;
+        end;
       end;
-    end;
-  end;
 end;
 
 end.

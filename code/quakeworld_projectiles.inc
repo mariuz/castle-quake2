@@ -125,6 +125,9 @@ var
 begin
   Proj := TQuakeProjectile.Create(FItems, Kind, Origin, Dir * Speed, Damage, FromPlayer);
   Proj.Owner := Owner;
+  { The player who fired it (its pmove: traces ignore it) }
+  if FromPlayer then
+    Proj.OwnerPlayer := FCur.PM;
   { fire_blaster, fire_rocket and fire_bfg let the target dodge }
   if FromPlayer and (Kind in [pkBlasterBolt, pkRocket, pkBfg, pkRipper, pkPlasma]) then
     CheckDodge(Origin, Dir, Speed);
@@ -166,6 +169,7 @@ end;
 procedure TQuakeWorld.Explode(const Pos: TVector3; const Damage: Integer; const Radius: Single;
   const FromPlayer: Boolean; const ExplosionSound: Boolean);
 var
+  P: TQuakePlayer;
   M: TQuakeMonster;
   Mover: TQuakeMover;
   Prop: TQuakeProp;
@@ -211,15 +215,21 @@ begin
     end;
   end;
 
-  Dist := PointsDistance(FCur.Pos - Vector3(0, 22, 0), Pos);
-  if Dist < Radius then
+  { Every player in range }
+  for P in FPlayers do
   begin
-    Points := Round(Damage * (1 - 0.5 * Dist / Radius));
-    { Self damage is halved, like Quake 2 rockets }
-    if FromPlayer then
-      Points := Points div 2;
-    if Points > 0 then
-      DamagePlayer(Points, Pos);
+    if P.Dead then
+      Continue;
+    Dist := PointsDistance(P.Pos - Vector3(0, 22, 0), Pos);
+    if Dist < Radius then
+    begin
+      Points := Round(Damage * (1 - 0.5 * Dist / Radius));
+      { Self damage is halved, like Quake 2 rockets }
+      if FromPlayer then
+        Points := Points div 2;
+      if Points > 0 then
+        DamagePlayerHit(P.PM, Points, Pos);
+    end;
   end;
 end;
 
@@ -255,7 +265,7 @@ var
       if T.Ent is TQuakePMove then
       begin
         if not Proj.FromPlayer then
-          DamagePlayer(LaserDamage, QuakeToCge(Origin));
+          DamagePlayerHit(T.Ent, LaserDamage, QuakeToCge(Origin));
       end else
         Break;
       Ignore := T.Ent;
@@ -609,6 +619,9 @@ begin
 
     { Quake 2 MOVETYPE_FLYMISSILE / BOUNCE: a point trace along the step,
       ignoring the shooter }
+    if Proj.FromPlayer and (Proj.OwnerPlayer <> nil) then
+      Shooter := Proj.OwnerPlayer
+    else
     if Proj.FromPlayer then
       Shooter := FCur.PM
     else
@@ -700,9 +713,10 @@ begin
         end else
         if T.Ent is TQuakePMove then
         begin
-          FCur.DamageSource := Proj.Owner;
+          if PlayerOfEnt(T.Ent) <> nil then
+            PlayerOfEnt(T.Ent).DamageSource := Proj.Owner;
           if Proj.Kind in [pkBlasterBolt, pkBfg, pkRipper, pkBlueBolt, pkLoogie, pkPlasma] then
-            DamagePlayer(Proj.Damage, OldPos);
+            DamagePlayerHit(T.Ent, Proj.Damage, OldPos);
         end else
         if T.Ent is TQuakeMover then
           DamageMover(TQuakeMover(T.Ent), Proj.Damage)
