@@ -438,6 +438,17 @@ jobs:
           [ "$pvs_status" -eq 0 ] || status=1
           # ...and it culls: the first view draws only part of the level
           grep -m1 "Saved screenshot" test_output/compare/lvis_vis.log | grep -oE "[0-9]+ / [0-9]+ world regions" | awk '{ print "rand7 draws " $1 " of " $3 " world regions"; exit !($1 < $3) }' || { echo "::error::The random level's PVS culls nothing"; status=1; }
+          # The client draws the models from the snapshots (E.1): the same views drawn
+          # by the server's own models (--server-draw) must match
+          views="O:notarget,W:2,S,N:0,W:0.5,S,I:2,W:0.5,S,V,Q"
+          for mode in client server; do
+            extra=""; [ "$mode" = server ] && extra="--server-draw"
+            timeout 300 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 $extra --autotest demo1 "test_output/compare/draw_$mode" --demo "$views" > "test_output/compare/draw_$mode.log" 2>&1
+          done
+          grep -qE "Client draws [1-9][0-9]* models from the snapshots$" test_output/compare/draw_client.log || { echo "::error::The client drew no models"; status=1; }
+          for k in 1 2 3; do
+            (cd tests && ./castle-quake2-tests --compare "../test_output/compare/draw_server_$k.png" "../test_output/compare/draw_client_$k.png" "../test_output/compare/draw_diff_$k.png") || status=1
+          done
           # Sky rotation (worldspawn skyrotate, here set with the sky command):
           # two shots of the sky one second apart must differ
           timeout 300 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/compare/sky --demo "O:notarget,W:1,O:noclip,G:-1248 16 300,A:90,P:40,O:novis,O:sky unit1_ 90 0 0 1,W:0.5,S,W:1,S,Q" > test_output/compare/sky.log 2>&1

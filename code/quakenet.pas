@@ -56,6 +56,8 @@ const
   NetRfShellGreen = 2048;
   NetRfShellBlue = 4096;
   NetRfShellDouble = $10000;
+  { Full bright red through IR goggles (RF_IR_VISIBLE) }
+  NetRfIrVisible = $8000;
 
   { pmove_state_t pm_flags }
   PmfDucked = 1;
@@ -105,6 +107,9 @@ const
   USkin = 512;
   UEffects = 1024;
   URenderFx = 2048;
+  UScale = 4096;
+  UOldFrame = 8192;
+  ULerp = 16384;
   URemove = $8000;
 
 type
@@ -120,13 +125,17 @@ type
   TNetEntityState = record
     Number: Integer;
     ModelIndex, ModelIndex2: Integer;
-    Frame: Integer;
+    { Shown as OldFrame blended towards Frame by Lerp / 255 (the server's
+      models step 10 frames a second over 40 ticks) }
+    Frame, OldFrame, Lerp: Integer;
     Skin: Integer;
     Effects, RenderFx: Cardinal;
     { Quake coordinates }
     Origin: TVector3;
     { Pitch, yaw, roll in degrees, as sent (QuantizeAngle) }
     Angles: TVector3;
+    { The model's size (the remaster's scale; 0 = 1) }
+    Scale: Single;
   end;
   TNetEntityStates = array of TNetEntityState;
 
@@ -252,6 +261,8 @@ procedure NetToPMove(const P: TNetPlayerState; const PM: TQuakePMove);
   and back }
 function RotationToQuakeAngles(const Rotation: TVector4): TVector3;
 function QuakeAnglesToRotation(const Angles: TVector3): TVector4;
+{ Quake angles of a world matrix (our coordinates) and its scale }
+function MatrixToQuakeAngles(const M: TMatrix4; out Scale: Single): TVector3;
 
 implementation
 
@@ -533,15 +544,13 @@ begin
   Result := ShortToAngle(AngleToShort(Deg));
 end;
 
-function RotationToQuakeAngles(const Rotation: TVector4): TVector3;
+{ Quake angles of a model whose forward (its +X) and up (+Y) point along F
+  and U (unit length, our coordinates) }
+function DirectionsToQuakeAngles(const F, U: TVector3): TVector3;
 var
-  Q: TQuaternion;
-  F, U, U0, S0: TVector3;
+  U0, S0: TVector3;
   Yaw, Pitch: Single;
 begin
-  Q := QuatFromAxisAngle(Rotation, True);
-  F := Q.Rotate(Vector3(1, 0, 0));
-  U := Q.Rotate(Vector3(0, 1, 0));
   Yaw := ArcTan2(-F.Z, F.X);
   Pitch := -ArcSin(EnsureRange(F.Y, -1, 1));
   { The up and side vectors of the same yaw and pitch without roll }
@@ -549,6 +558,29 @@ begin
   S0 := Vector3(Sin(Yaw), 0, Cos(Yaw));
   Result := Vector3(RadToDeg(Pitch), RadToDeg(Yaw),
     RadToDeg(ArcTan2(TVector3.DotProduct(U, S0), TVector3.DotProduct(U, U0))));
+end;
+
+function RotationToQuakeAngles(const Rotation: TVector4): TVector3;
+var
+  Q: TQuaternion;
+begin
+  Q := QuatFromAxisAngle(Rotation, True);
+  Result := DirectionsToQuakeAngles(Q.Rotate(Vector3(1, 0, 0)), Q.Rotate(Vector3(0, 1, 0)));
+end;
+
+function MatrixToQuakeAngles(const M: TMatrix4; out Scale: Single): TVector3;
+var
+  F, U: TVector3;
+begin
+  F := M.MultDirection(Vector3(1, 0, 0));
+  U := M.MultDirection(Vector3(0, 1, 0));
+  Scale := F.Length;
+  if (Scale < 1e-6) or (U.Length < 1e-6) then
+  begin
+    Scale := 1;
+    Exit(TVector3.Zero);
+  end;
+  Result := DirectionsToQuakeAngles(F / Scale, U.Normalize);
 end;
 
 function QuakeAnglesToRotation(const Angles: TVector3): TVector4;
@@ -572,9 +604,11 @@ end;
 function EntityStatesEqual(const A, B: TNetEntityState): Boolean;
 begin
   Result := (A.Number = B.Number) and (A.ModelIndex = B.ModelIndex) and
-    (A.ModelIndex2 = B.ModelIndex2) and (A.Frame = B.Frame) and (A.Skin = B.Skin) and
+    (A.ModelIndex2 = B.ModelIndex2) and (A.Frame = B.Frame) and (A.OldFrame = B.OldFrame) and
+    (A.Lerp = B.Lerp) and (A.Skin = B.Skin) and
     (A.Effects = B.Effects) and (A.RenderFx = B.RenderFx) and
-    TVector3.PerfectlyEquals(A.Origin, B.Origin) and TVector3.PerfectlyEquals(A.Angles, B.Angles);
+TVector3.PerfectlyEquals(A.Origin, B.Origin) and TVector3.PerfectlyEquals(A.Angles, B.Angles) and
+    (A.Scale = B.Scale);
 end;
 
 function PlayerStatesEqual(const A, B: TNetPlayerState): Boolean;
@@ -676,6 +710,9 @@ begin
   if ToState.Skin <> From.Skin then Bits := Bits or USkin;
   if ToState.Effects <> From.Effects then Bits := Bits or UEffects;
   if ToState.RenderFx <> From.RenderFx then Bits := Bits or URenderFx;
+  if ToState.Scale <> From.Scale then Bits := Bits or UScale;
+  if ToState.OldFrame <> From.OldFrame then Bits := Bits or UOldFrame;
+  if ToState.Lerp <> From.Lerp then Bits := Bits or ULerp;
   if (Bits = 0) and not Force then
     Exit;
   Msg.WriteWord(ToState.Number);
@@ -686,6 +723,9 @@ begin
   if (Bits and USkin) <> 0 then Msg.WriteByte(ToState.Skin);
   if (Bits and UEffects) <> 0 then Msg.WriteLong(LongInt(ToState.Effects));
   if (Bits and URenderFx) <> 0 then Msg.WriteLong(LongInt(ToState.RenderFx));
+  if (Bits and UScale) <> 0 then Msg.WriteFloat(ToState.Scale);
+  if (Bits and UOldFrame) <> 0 then Msg.WriteWord(ToState.OldFrame);
+  if (Bits and ULerp) <> 0 then Msg.WriteByte(ToState.Lerp);
   if (Bits and UOrigin1) <> 0 then Msg.WriteFloat(ToState.Origin.X);
   if (Bits and UOrigin2) <> 0 then Msg.WriteFloat(ToState.Origin.Y);
   if (Bits and UOrigin3) <> 0 then Msg.WriteFloat(ToState.Origin.Z);
@@ -705,6 +745,9 @@ begin
   if (Bits and USkin) <> 0 then Result.Skin := Msg.ReadByte;
   if (Bits and UEffects) <> 0 then Result.Effects := Cardinal(Msg.ReadLong);
   if (Bits and URenderFx) <> 0 then Result.RenderFx := Cardinal(Msg.ReadLong);
+  if (Bits and UScale) <> 0 then Result.Scale := Msg.ReadFloat;
+  if (Bits and UOldFrame) <> 0 then Result.OldFrame := Msg.ReadWord;
+  if (Bits and ULerp) <> 0 then Result.Lerp := Msg.ReadByte;
   if (Bits and UOrigin1) <> 0 then Result.Origin.X := Msg.ReadFloat;
   if (Bits and UOrigin2) <> 0 then Result.Origin.Y := Msg.ReadFloat;
   if (Bits and UOrigin3) <> 0 then Result.Origin.Z := Msg.ReadFloat;

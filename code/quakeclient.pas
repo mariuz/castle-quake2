@@ -68,6 +68,8 @@ type
     procedure ReadPackets;
     { The latest snapshot (Valid False before the first one) }
     property Frame: TNetFrame read FFrame;
+    { A snapshot still kept (False: too old, or never got) }
+    function FrameAt(const ServerFrame: Integer; out F: TNetFrame): Boolean;
     property ModelNames[const Index: Integer]: String read GetModelName;
     property MapName: String read FMapName;
     property FramesReceived: Integer read FFramesReceived;
@@ -101,6 +103,12 @@ begin
   FStringCmds.Free;
   FMsg.Free;
   inherited Destroy;
+end;
+
+function TQuakeClient.FrameAt(const ServerFrame: Integer; out F: TNetFrame): Boolean;
+begin
+  F := FFrames[ServerFrame and UpdateMask];
+  Result := F.Valid and (F.ServerFrame = ServerFrame);
 end;
 
 function TQuakeClient.GetModelName(const Index: Integer): String;

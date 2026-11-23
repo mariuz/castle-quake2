@@ -74,6 +74,7 @@ On Linux without a display, run under `xvfb-run -a -s "-screen 0 1600x900x24"`, 
 | `B:key` | Press and release a key (`B:escape`, `B:down`, `B:enter`... to drive the menu) |
 | `GP:lx ly rx ry lt rt`, `GP:` | Hold a virtual gamepad's sticks and triggers; release them |
 | `GB:button`, `GH:button` | Press a gamepad button; hold / release one (`south`, `east`, `west`, `north`, `lb`, `rb`, `ls`, `rs`, `up`, `down`, `left`, `right`, `menu`, `view`, `share`) |
+| `O:clientdraw 0` / `O:clientdraw 1` | Draw the server's own models / the snapshots' (the default; `--server-draw` for a whole run; `V` logs `Client draws N models from the snapshots`) |
 | `O:renderscale N` | Draw the 3D view at N % of the window's resolution (`--render-scale N` for a whole run; the log says `Render scale N%: 3D view drawn at WxH`) |
 | `TD:x y finger`, `TM:x y finger`, `TU:finger` | Touch down / move / up (window fractions from the bottom left; run with `--touch` to show the touch controls) |
 | `IN:time yaw pitch forward side buttons [x y z]` | A recorded view and held inputs (see below) |
@@ -93,7 +94,7 @@ What the script holds:
 - one `IN:` line per change of the view or the held keys, timed on the script clock, so a slower machine doesn't fall behind;
 - weapon switches, use, the help computer and console commands.
 
-Each `IN` line also stores the player's position. On replay, the drift is logged (`Replay drift` in the `V` log), and the player is put back when more than 2 units off, so frame-rate differences don't add up. `SY:0` turns that correction off, to reproduce a movement bug exactly. Monsters can still act differently, since their random choices depend on the frames.
+Each `IN` line also stores the player's position. On replay, the drift is logged (`Replay drift` in the `V` log), and the player is put back when more than 2 units off (after that frame's move, since the position was recorded after it), so frame-rate differences don't add up. `SY:0` turns that correction off, to reproduce a movement bug exactly. Monsters can still act differently, since their random choices depend on the frames.
 
 Add `S` (screenshot) or `V` (state log) lines anywhere to turn the recording into a regression test.
 

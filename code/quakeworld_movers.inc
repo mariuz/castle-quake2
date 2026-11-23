@@ -477,8 +477,12 @@ var
     { Like a point fixed to the mover }
     NewQ := CgeToQuake(M.MultPoint(OldInv.MultPoint(QuakeToCge(AOrg))));
     { A push longer than 64 units in one frame is the box approximation of
-      a rotated model catching something far away: ignore it }
-    if PointsDistance(NewQ, AOrg) > 64 then
+      a rotated model catching something far away: ignore it. A spinning
+      brush moves a point near it a few units a frame, so from one a push
+      over 16 is such a catch too (a fan in demo1 threw the player 60
+      units). }
+    if (PointsDistance(NewQ, AOrg) > 64) or
+       ((Mover.Kind = mkRotating) and (PointsDistance(NewQ, AOrg) > 16)) then
       Exit;
     if not WorldTrace(NewQ, NewQ, AMins, AMaxs, Mask, Ent).StartSolid then
     begin

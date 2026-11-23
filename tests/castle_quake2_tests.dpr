@@ -29,7 +29,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeTick, QuakeWebParams, QuakeInstalls, QuakeInsane, QuakeHud, QuakeNet, QuakeServer, QuakeClient, QuakePMove, Zipper;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeTick, QuakeWebParams, QuakeInstalls, QuakeInsane, QuakeHud, QuakeNet, QuakeServer, QuakeClient, QuakeClientScene, QuakePMove, Zipper;
 
 var
   Passed, Failed: Integer;
@@ -3488,6 +3488,8 @@ var
   Size: Integer;
   Input: TPMoveInput;
   PM: TQuakePMove;
+  M: TMatrix4;
+  Scale: Single;
 
   function Ent(const Number, Model, Frame: Integer; const X: Single): TNetEntityState;
   begin
@@ -3496,6 +3498,9 @@ var
     Result.Frame := Frame;
     Result.Origin := Vector3(X, 2, 3);
     Result.Angles := Vector3(0, QuantizeAngle(45), 0);
+    Result.OldFrame := Frame;
+    Result.Lerp := 128;
+    Result.Scale := 1;
   end;
 
   { Read back what was written (or Bytes) }
@@ -3563,6 +3568,13 @@ begin
   B := RotationToQuakeAngles(QuakeAnglesToRotation(A));
   Check(TVector3.Equals(A, B, 0.01), 'Net: pitch / yaw / roll round trip: ' + B.ToString);
   Check(TVector3.Equals(NetAnglesToDir(0, 90), YawToCgeDir(90), 1e-5), 'Net: usercmd yaw 90 is YawToCgeDir(90)');
+  { A model scene's world matrix: rotated, scaled by 2 (MODEL_SCALE) }
+  M := TranslationMatrix(Vector3(1, 2, 3)) * RotationMatrixRad(QuakeAnglesToRotation(Vector3(10, 120, 180)).W,
+    QuakeAnglesToRotation(Vector3(10, 120, 180)).XYZ) * ScalingMatrix(Vector3(2, 2, 2));
+  A := MatrixToQuakeAngles(M, Scale);
+  Check(SameValue(Scale, 2, 1e-4) and SameValue(A.X, 10, 0.01) and SameValue(A.Y, 120, 0.01) and
+    SameValue(Abs(A.Z), 180, 0.01), 'Net: angles and scale of a matrix: ' + A.ToString);
+  Check(SameValue(LerpAngle(170, -170, 0.5), 180, 1e-3), 'Net: angles blend the short way round');
   Check(NetAnglesToDir(30, 0).Y < -0.49, 'Net: pitch down positive');
 
   { usercmd: only what changed }
@@ -3600,6 +3612,9 @@ begin
   { Packet entities: changed, new, unchanged and removed ones }
   Old := [Ent(2, 1, 0, 100), Ent(3, 1, 5, 200), Ent(5, 2, 0, 300)];
   New := [Ent(2, 1, 1, 104), Ent(4, 3, 0, 50), Ent(5, 2, 0, 300)];
+  New[0].OldFrame := 0;
+  New[0].Lerp := 200;
+  New[0].Scale := 2;
   Msg := TNetMessage.Create;
   try
     WritePacketEntities(Msg, Old, New);

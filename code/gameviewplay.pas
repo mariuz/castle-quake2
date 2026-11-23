@@ -16,7 +16,7 @@ uses
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound, QuakeMd2,
   QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad, QuakeTouch, QuakeExitWatchdog, QuakeBenchmark, CastleTimeUtils,
   X3DNodes, X3DFields, CastleRenderOptions,
-  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevel, QuakeLevelGen, QuakeLevelEditor, QuakeBspBuilder, QuakeTrace, QuakeTick, QuakeNet, QuakeServer, QuakeClient, QuakePMove, fpjson, jsonparser, CastleDownload, CastleUriUtils;
+  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevel, QuakeLevelGen, QuakeLevelEditor, QuakeBspBuilder, QuakeTrace, QuakeTick, QuakeNet, QuakeServer, QuakeClient, QuakeClientScene, QuakePMove, fpjson, jsonparser, CastleDownload, CastleUriUtils;
 
 type
   TCameraMode = (cmFirstPerson, cmNoclip);
@@ -75,10 +75,17 @@ type
     FNet: TNetLoopback;
     FServer: TQuakeServer;
     FClient: TQuakeClient;
+    { The client's drawing of the snapshots' models (clientdraw) }
+    FClientScene: TQuakeClientScene;
     { A tapped shot (X, a recorded tap) for the next command }
     FNetAttackTap: Boolean;
     { Snapshots compared with the server's, and how many differed }
     FNetChecked, FNetMismatches: Integer;
+    { A replayed IN's recorded position, checked after this frame's move
+      (the recorder samples after it) }
+    FDemoSyncPending: Boolean;
+    FDemoSyncOrigin: TVector3;
+    FDemoSyncTime: Single;
     { Where the last prediction left the view (a camera moved by code since
       moves the server's player there) }
     FPredictedView: TVector3;
@@ -128,6 +135,9 @@ type
     procedure ClientPrint(const Text: String; const AtCenter: Boolean);
     { The client's copy of the last snapshot must be the server's }
     procedure CheckSnapshot;
+    { Measure a replay's drift from the recorded position and put the
+      player back on its path (after the move) }
+    procedure ApplyDemoSync;
     { Player actions that a recording keeps }
     procedure DoSelectWeapon(const Slot: Integer);
     procedure DoUse;
@@ -195,6 +205,9 @@ type
     { --offscreen-shots: autotest screenshots drawn into a framebuffer, so a
       minimized or covered window still saves real images }
     OffscreenScreenshots: Boolean;
+    { The client draws the models from the snapshots (--server-draw: False;
+      the clientdraw console command toggles it) }
+    ClientDrawAtStart: Boolean;
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
 
@@ -560,6 +573,8 @@ begin
   PlayerMovement.OnPointContents := @FWorld.PlayerPointContents;
   PlayerMovement.OnPredict := @PredictMove;
   FClient.OnPrint := @ClientPrint;
+  FClientScene := TQuakeClientScene.Create(MainViewport.Items);
+  FClientScene.Enabled := ClientDrawAtStart;
   { Screenshots must not depend on random idle pauses of the view weapon }
   FWorld.Gun.RandomPauses := FAutoTestMap = '';
   Particles.SetParent(MainViewport.Items);
@@ -723,6 +738,7 @@ begin
   Sounds.StopMusic;
   Particles.Camera := nil;
   Particles.SetParent(nil);
+  FreeAndNil(FClientScene);
   FreeAndNil(FClient);
   FreeAndNil(FServer);
   FreeAndNil(FNet);
@@ -1118,23 +1134,13 @@ begin
       Inc(FDemoIndex);
     end;
     SetLook(Input.Yaw, Input.Pitch);
+    { The recorded position is after this frame's inputs moved the player:
+      compared after the move (ApplyDemoSync) }
     if Input.HasOrigin then
     begin
-      Val := PointsDistance(Input.Origin, CgeToQuake(MainViewport.Camera.Translation));
-      FDemoMaxDrift := Max(FDemoMaxDrift, Val);
-      if Val > 16 then
-        WritelnLog('Demo', 'Replay drift %.1f units at %.2f s', [Val, Input.Time]);
-      { Frame timing differs from the recording: put the player back on its
-        path (a few units are normal, more is a different outcome) }
-      if (Val > 2) and not FDemoNoSync then
-      begin
-        Dir := MainViewport.Camera.Translation;
-        MainViewport.Camera.Translation := QuakeToCge(Input.Origin);
-        { Not into a wall (when the map changed since the recording) }
-        if Assigned(EntityTrace) and EntityTrace(PlayerMovement.Origin, PlayerMovement.Origin,
-           PlayerMovement.BoxMins, PlayerMovement.BoxMaxs, MASK_PLAYERSOLID, FServer.PM).StartSolid then
-          MainViewport.Camera.Translation := Dir;
-      end;
+      FDemoSyncPending := True;
+      FDemoSyncOrigin := Input.Origin;
+      FDemoSyncTime := Input.Time;
     end;
     FDemoMoveForward := Input.Forward;
     FDemoMoveSide := Input.Side;
@@ -1472,6 +1478,8 @@ begin
          FNet.BytesToClient div FNet.PacketsToClient, FServer.Commands, FServer.StringCommands,
          FClient.FramesReceived, FClient.BadFrames, FNetMismatches, FNetChecked,
          FClient.PredictionChecks, FClient.PredictionErrors, FClient.MaxPredictionError]);
+    WritelnLog('Demo', 'Client draws %d models from the snapshots%s',
+      [FClientScene.Count, Iff(FClientScene.Enabled, '', ' (clientdraw off)')]);
     WritelnLog('Demo', 'Player: server origin %s velocity %s%s water %d, client origin %s%s',
       [FServer.PM.Origin.ToString, FServer.PM.QuakeVelocity.ToString,
        Iff(FServer.PM.Crouched, ' crouched', ''), FServer.PM.WaterLevel,
@@ -2123,6 +2131,10 @@ begin
     run by the server at once (ClientThink: the move, then fire) }
   MoveAndSend(Firing or FNetAttackTap, SecondsPassed);
   FNetAttackTap := False;
+  ApplyDemoSync;
+  { The snapshots' models, between the last two ticks like the server's }
+  FServer.HideModels := FClientScene.Enabled;
+  FClientScene.Update(FClient, FTickClock.Alpha, SecondsPassed);
   FWorld.SetGunAngles(PlayerMovement.GunAngles);
   FWorld.Geometry.UpdateVisibility(CgeToQuake(MainViewport.Camera.Translation));
   FWorld.CullEntities;
@@ -2190,6 +2202,33 @@ begin
     FPredictedView := PlayerMovement.AimPosition;
   FClient.SendMove(Attack, CgeToQuake(PlayerMovement.AimDirection));
   FServer.ReadPackets;
+end;
+
+procedure TViewPlay.ApplyDemoSync;
+var
+  Val: Single;
+  Old: TVector3;
+begin
+  if not FDemoSyncPending then
+    Exit;
+  FDemoSyncPending := False;
+  Val := PointsDistance(FDemoSyncOrigin, CgeToQuake(PlayerMovement.AimPosition));
+  FDemoMaxDrift := Max(FDemoMaxDrift, Val);
+  if Val > 16 then
+    WritelnLog('Demo', 'Replay drift %.1f units at %.2f s', [Val, FDemoSyncTime]);
+  { Frame timing differs from the recording: put the player back on its
+    path (a few units are normal, more is a different outcome); the server
+    takes it before the next move }
+  if (Val > 2) and not FDemoNoSync then
+  begin
+    PlayerMovement.ClearViewEffects;
+    Old := MainViewport.Camera.Translation;
+    MainViewport.Camera.Translation := QuakeToCge(FDemoSyncOrigin);
+    { Not into a wall (when the map changed since the recording) }
+    if Assigned(EntityTrace) and EntityTrace(PlayerMovement.Origin, PlayerMovement.Origin,
+       PlayerMovement.BoxMins, PlayerMovement.BoxMaxs, MASK_PLAYERSOLID, FServer.PM).StartSolid then
+      MainViewport.Camera.Translation := Old;
+  end;
 end;
 
 procedure TViewPlay.CheckSnapshot;
@@ -2390,6 +2429,15 @@ begin
      (Cmd = 'powerarmor') or (Cmd = 'notarget') or (Cmd = 'kill') then
     FClient.AddCommand(Trim(Cmd + ' ' + Args))
   else
+  if Cmd = 'clientdraw' then
+  begin
+    { clientdraw [0|1]: the client draws the models from the snapshots }
+    if Args = '' then
+      FClientScene.Enabled := not FClientScene.Enabled
+    else
+      FClientScene.Enabled := Args <> '0';
+    Hud.ShowMessage('clientdraw ' + Iff(FClientScene.Enabled, 'ON', 'OFF'), 2);
+  end else
   if Cmd = 'sky' then
   begin
     { sky <name> [rotate [axis x y z]], like Quake 2's sky console command }

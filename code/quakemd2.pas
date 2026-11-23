@@ -126,6 +126,8 @@ type
     property Model: TQuakeMd2 read FModel;
     { The frame shown (blended towards) and the skin, for snapshots }
     property ShownFrame: Integer read FLastB;
+    property ShownOldFrame: Integer read FLastA;
+    property ShownLerp: Single read FLastT;
     property SkinIndex: Integer read FSkinIndex;
     { True when a non-looping animation reached its last frame }
     property AnimDone: Boolean read FAnimDone;

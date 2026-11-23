@@ -49,6 +49,7 @@ type
       FNextNumber: Integer;
       FCommands, FStringCommands: Integer;
       FLastBytes, FLastDelta: Integer;
+      FHideModels: Boolean;
     function ModelIndexOf(const Path: String): Integer;
     function NumberOf(const Obj: TObject; const ModelIndex: Integer): Integer;
     procedure BuildFrame(out F: TNetFrame);
@@ -91,6 +92,9 @@ type
       from (-1 = full) }
     property LastBytes: Integer read FLastBytes;
     property LastDelta: Integer read FLastDelta;
+    { The client draws the models from the snapshots: the server's own md2
+      scenes are hidden (they still simulate and collide) }
+    property HideModels: Boolean read FHideModels write FHideModels;
   end;
 
 { The view direction of usercmd angles (pitch down positive, yaw; our
@@ -256,12 +260,15 @@ procedure TQuakeServer.BuildFrame(out F: TNetFrame);
 var
   Count: Integer;
 
-  procedure Add(const Obj: TObject; const T: TCastleTransform; const Box: TBox3D;
+  { Pose: the transform whose world matrix places the model (the model
+    scene itself: offsets, the ceiling stalker's roll, MODEL_SCALE) }
+  procedure Add(const Obj: TObject; const T, Pose: TCastleTransform; const Box: TBox3D;
     const ModelPath, ModelPath2: String; const Frame, Skin: Integer;
-    const Effects, RenderFx: Cardinal);
+    const Effects, RenderFx: Cardinal; const OldFrame: Integer = -1; const Lerp: Single = 1);
   var
     S: TNetEntityState;
     ModelIndex: Integer;
+    M: TMatrix4;
   begin
     if (T = nil) or not T.Exists then
       Exit;
@@ -277,11 +284,17 @@ var
     S.ModelIndex := ModelIndex;
     S.ModelIndex2 := ModelIndexOf(ModelPath2);
     S.Frame := Max(0, Frame);
+    if OldFrame >= 0 then
+      S.OldFrame := OldFrame
+    else
+      S.OldFrame := S.Frame;
+    S.Lerp := EnsureRange(Round(Lerp * 255), 0, 255);
     S.Skin := Max(0, Skin);
     S.Effects := Effects;
     S.RenderFx := RenderFx;
-    S.Origin := CgeToQuake(T.Translation);
-    S.Angles := RotationToQuakeAngles(T.Rotation);
+    M := Pose.WorldTransform;
+    S.Origin := CgeToQuake(M.MultPoint(TVector3.Zero));
+    S.Angles := MatrixToQuakeAngles(M, S.Scale);
     S.Angles := Vector3(QuantizeAngle(S.Angles.X), QuantizeAngle(S.Angles.Y),
       QuantizeAngle(S.Angles.Z));
     if Count = Length(F.Entities) then
@@ -298,17 +311,21 @@ var
   end;
 
   procedure AddModel(const Obj: TObject; const T: TCastleTransform; const Model: TQuakeMd2Instance;
-    const Effects: Cardinal);
+    const Effects: Cardinal; const ExtraRenderFx: Cardinal = 0);
   var
     Path2: String;
   begin
     if (Model = nil) or (T = nil) then
       Exit;
+    Model.Scene.Visible := not FHideModels;
     Path2 := '';
     if (Model.Follower <> nil) and (Model.Follower.Model <> nil) then
+    begin
       Path2 := Model.Follower.Model.ModelPath;
-    Add(Obj, T, BoxOf(T), Model.Model.ModelPath, Path2, Model.ShownFrame, Model.SkinIndex,
-      Effects, ShellRenderFx(Model.ShellColor));
+      Model.Follower.Scene.Visible := not FHideModels;
+    end;
+    Add(Obj, T, Model.Scene, BoxOf(T), Model.Model.ModelPath, Path2, Model.ShownFrame, Model.SkinIndex,
+      Effects, ShellRenderFx(Model.ShellColor) or ExtraRenderFx, Model.ShownOldFrame, Model.ShownLerp);
   end;
 
 var
@@ -333,11 +350,12 @@ begin
   begin
     for Mover in FWorld.Geometry.Movers do
       if Mover.ModelIndex > 0 then
-        Add(Mover, Mover.Transform, Mover.WorldBox, '*' + IntToStr(Mover.ModelIndex), '',
+        Add(Mover, Mover.Transform, Mover.Transform, Mover.WorldBox, '*' + IntToStr(Mover.ModelIndex), '',
           0, 0, 0, 0);
     for Monster in FWorld.Monsters do
       if not Monster.Dormant then
-        AddModel(Monster, Monster.Transform, Monster.Model, 0);
+        AddModel(Monster, Monster.Transform, Monster.Model, 0,
+          Iff(IRGogglesOn and Monster.IsAlive, NetRfIrVisible, 0));
     for Pickup in FWorld.Pickups do
       if not Pickup.Collected then
         AddModel(Pickup, Pickup.Transform, Pickup.Model, NetEfRotate);
@@ -348,7 +366,7 @@ begin
         AddModel(Proj, Proj.Transform, Proj.Model, ProjectileEffects(Proj.Kind))
       else
       if (Proj.Sprite <> nil) and (Proj.Transform <> nil) then
-        Add(Proj, Proj.Transform, BoxOf(Proj.Transform), Proj.Sprite.Sprite.Path, '', 0, 0,
+        Add(Proj, Proj.Transform, Proj.Transform, BoxOf(Proj.Transform), Proj.Sprite.Sprite.Path, '', 0, 0,
           ProjectileEffects(Proj.Kind), 0);
   end;
   SetLength(F.Entities, Count);

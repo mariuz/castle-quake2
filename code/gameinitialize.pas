@@ -38,6 +38,8 @@ var
   CmdNoDetect: Boolean;
   { --offscreen-shots: see TViewPlay.OffscreenScreenshots }
   CmdOffscreenShots: Boolean;
+  { --server-draw: the server's own models are drawn, not the snapshots' }
+  CmdServerDraw: Boolean;
   CmdPaks: TStringList;
   { -game <dir> / +set game <dir>: a mod folder loaded over baseq2 (e.g.
     q1q2, Call of the Void) }
@@ -228,6 +230,8 @@ begin
     { --no-sound: no audio device at all (quiet test runs) }
     if Parameters[I] = '--offscreen-shots' then
       CmdOffscreenShots := True;
+    if Parameters[I] = '--server-draw' then
+      CmdServerDraw := True;
     if Parameters[I] = '--no-sound' then
       SoundEngine.Enabled := False;
     if (Parameters[I] = '--demo') and (I + 1 <= Parameters.High) then
@@ -393,6 +397,7 @@ begin
   ViewPlay.ShowFpsAtStart := CmdShowFps;
   ViewPlay.RenderScaleOverride := CmdRenderScale;
   ViewPlay.OffscreenScreenshots := CmdOffscreenShots;
+  ViewPlay.ClientDrawAtStart := not CmdServerDraw;
 
   if AutoTestMap <> '' then
   begin
