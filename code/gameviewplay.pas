@@ -13,7 +13,7 @@ uses
   CastleVectors, CastleUIControls, CastleControls, CastleKeysMouse,
   CastleViewport, CastleCameras, CastleTransform, CastleColors, CastleLog,
   CastleApplicationProperties, CastleImages, CastleWindow, CastleUtils, CastleScene, CastleGLImages, CastleRectangles, CastleRenderContext,
-  QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound,
+  QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound, QuakeMd2,
   QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad, QuakeTouch, QuakeExitWatchdog, QuakeBenchmark, CastleTimeUtils,
   X3DNodes, X3DFields, CastleRenderOptions,
   QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevel, QuakeLevelGen, QuakeLevelEditor, QuakeBspBuilder, QuakeTrace, QuakeTick, fpjson, jsonparser, CastleDownload, CastleUriUtils;
@@ -554,7 +554,7 @@ begin
   end;
 
   FWorld := TQuakeWorld.Create(MainViewport.Items, QuakeMap);
-  FWorld.AttachWeaponToCamera(WeaponViewport.Camera);
+  FWorld.AttachWeaponToCamera(WeaponViewport.Camera, MainViewport.Camera);
   FWorld.Hud := Hud;
   FWorld.Player := PlayerMovement;
   { Screenshots must not depend on random idle pauses of the view weapon }
@@ -981,6 +981,17 @@ begin
 end;
 
 { What a trace hit, for logs: the world, a mover, monster, prop or the player }
+{ Model instances that have dynamic lights on them now }
+function ModelsLitCount: Integer;
+var
+  Inst: TQuakeMd2Instance;
+begin
+  Result := 0;
+  for Inst in Md2Instances do
+    if Inst.DynamicLightCount > 0 then
+      Inc(Result);
+end;
+
 function TraceHitName(const Ent: TObject): String;
 begin
   if Ent = nil then
@@ -1441,6 +1452,8 @@ begin
     WritelnLog('Demo', 'Projectiles: %d, delayed targets: %d, earthquakes: %d, player gravity %.2f, gibs: %d',
       [FWorld.ProjectileCount, FWorld.DelayedCount, FWorld.EarthquakeCount, FWorld.PlayerGravity, Particles.GibCount]);
     WritelnLog('Demo', 'Particles: %d (mesh uploads %d)', [Particles.ParticleCount, Particles.Uploads]);
+    WritelnLog('Demo', 'Model lights: %d of %d models lit by dynamic lights%s', [ModelsLitCount, Md2Instances.Count,
+      Iff((FWorld.WeaponModel <> nil) and (FWorld.WeaponModel.DynamicLightCount > 0), ', the gun too', '')]);
     WritelnLog('Demo', 'String: "%s"', [FWorld.LastString]);
     WritelnLog('Demo', 'Monster shots: %d, player health %d armor %d, player stuck %d', [FWorld.MonsterShots,
       FWorld.Stats.Health, FWorld.Stats.Armor, PlayerMovement.StuckCount]);

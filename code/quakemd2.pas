@@ -7,7 +7,7 @@ interface
 
 uses
   SysUtils, Classes, Generics.Collections, Math,
-  CastleVectors, CastleScene, CastleTransform, X3DNodes, CastleLog, CastleUtils, CastleRenderOptions,
+  CastleVectors, CastleScene, CastleTransform, X3DNodes, X3DFields, CastleLog, CastleUtils, CastleRenderOptions,
   QuakePak, QuakePalette, QuakeLight;
 
 type
@@ -80,6 +80,13 @@ type
     FShellColor: TVector3;
     FShellTemp: TVector3List;
     FFollower: TQuakeMd2Instance;
+    { Lighting effect: the tint and the nearest dynamic lights (model space) }
+    FTint: TVector3;
+    FTintField: TSFVec3f;
+    FLightPos: array[0..MaxSurfaceLights - 1] of TSFVec4f;
+    FLightColor: array[0..MaxSurfaceLights - 1] of TSFVec3f;
+    FLightCount: Integer;
+    function CreateLightEffect: TEffectNode;
     procedure CreateShell;
     procedure UpdateShell;
   public
@@ -97,6 +104,12 @@ type
     procedure ShowFrames(const A, B: Integer; const T: Single);
     { Lighting tint (0..1+, see TQuakeLighting.SampleLight) }
     procedure SetTint(const Color: TVector3);
+    { The nearest dynamic lights (world positions; Count 0 = none), lighting
+      each pixel by its distance like the world surfaces' lightmaps.
+      WorldToLocal maps world positions to this model's scene. }
+    procedure SetDynamicLights(const Lights: TQuakeSurfaceLights; const Count: Integer;
+      const WorldToLocal: TMatrix4);
+    property DynamicLightCount: Integer read FLightCount;
     { Switch to another skin of the model (ignored if missing) }
     procedure SetSkin(const SkinIndex: Integer);
     { 0 = opaque, 1 = invisible (switches to alpha blending) }
@@ -132,6 +145,8 @@ type
 
 var
   Md2Manager: TQuakeMd2Manager;
+  { Every live instance (for TQuakeWorld.UpdateModelLights) }
+  Md2Instances: specialize TList<TQuakeMd2Instance>;
 
 implementation
 
@@ -473,6 +488,11 @@ begin
   FMaterial.EmissiveColor := Vector3(1, 1, 1);
   App := TAppearanceNode.Create;
   App.Material := FMaterial;
+  { The tint is a shader uniform, not the emissive colour: values above 1
+    (overbright, dynamic lights) were clamped to 1 by Mesa 22 when drawing
+    into a texture }
+  FTint := Vector3(1, 1, 1);
+  App.SetEffects([CreateLightEffect]);
   FAppearance := App;
   FSkinIndex := SkinIndex;
 
@@ -506,10 +526,59 @@ begin
 
   Scene := TCastleScene.Create(nil);
   Scene.Load(Root, True);
+  Md2Instances.Add(Self);
+end;
+
+function TQuakeMd2Instance.CreateLightEffect: TEffectNode;
+var
+  VertexPart, FragmentPart: TEffectPartNode;
+  I: Integer;
+  Code, Sum: String;
+begin
+  Result := TEffectNode.Create;
+  Result.Language := slGLSL;
+  FTintField := TSFVec3f.Create(Result, True, 'q2_tint', FTint);
+  Result.AddCustomField(FTintField);
+  Code := 'varying highp vec3 q2_mpos;' + LineEnding + 'uniform vec3 q2_tint;' + LineEnding;
+  Sum := '';
+  for I := 0 to MaxSurfaceLights - 1 do
+  begin
+    { xyz = position in model space, w = radius there (0 = off) }
+    FLightPos[I] := TSFVec4f.Create(Result, True, Format('q2_mlight%d', [I]), TVector4.Zero);
+    Result.AddCustomField(FLightPos[I]);
+    FLightColor[I] := TSFVec3f.Create(Result, True, Format('q2_mcolor%d', [I]), TVector3.Zero);
+    Result.AddCustomField(FLightColor[I]);
+    Code := Code + Format('uniform vec4 q2_mlight%0:d;' + LineEnding + 'uniform vec3 q2_mcolor%0:d;' + LineEnding, [I]);
+    Sum := Sum + Format('  l += q2_mcolor%0:d * max(0.0, q2_mlight%0:d.w - distance(q2_mpos, q2_mlight%0:d.xyz));' + LineEnding, [I]);
+  end;
+
+  VertexPart := TEffectPartNode.Create;
+  VertexPart.ShaderType := stVertex;
+  VertexPart.Contents :=
+    'varying highp vec3 q2_mpos;' + LineEnding +
+    'void PLUG_vertex_object_space(const in vec4 vertex_object, const in vec3 normal_object)' + LineEnding +
+    '{' + LineEnding +
+    '  q2_mpos = vertex_object.xyz;' + LineEnding +
+    '}';
+
+  { The skin times the tint plus the dynamic lights (colours pre-scaled by
+    2 / 256, like TQuakeLighting.SampleLight), at most 1.6 or the tint }
+  FragmentPart := TEffectPartNode.Create;
+  FragmentPart.ShaderType := stFragment;
+  FragmentPart.Contents := Code +
+    'void PLUG_fragment_modify(inout vec4 fragment_color)' + LineEnding +
+    '{' + LineEnding +
+    '  vec3 l = q2_tint;' + LineEnding +
+    Sum +
+    '  fragment_color.rgb *= min(l, max(q2_tint, vec3(1.6)));' + LineEnding +
+    '}';
+  Result.SetParts([VertexPart, FragmentPart]);
 end;
 
 destructor TQuakeMd2Instance.Destroy;
 begin
+  if Md2Instances <> nil then
+    Md2Instances.Remove(Self);
   FTemp.Free;
   FShellTemp.Free;
   { Freeing the scene also removes it from its parent transform }
@@ -681,10 +750,36 @@ end;
 
 procedure TQuakeMd2Instance.SetTint(const Color: TVector3);
 begin
-  if not TVector3.Equals(FMaterial.EmissiveColor, Color, 0.02) then
-    FMaterial.EmissiveColor := Color;
+  if not TVector3.Equals(FTint, Color, 0.02) then
+  begin
+    FTint := Color;
+    FTintField.Send(Color);
+  end;
   if FFollower <> nil then
     FFollower.SetTint(Color);
+end;
+
+procedure TQuakeMd2Instance.SetDynamicLights(const Lights: TQuakeSurfaceLights;
+  const Count: Integer; const WorldToLocal: TMatrix4);
+var
+  I: Integer;
+  Scale: Single;
+begin
+  if (Count = 0) and (FLightCount = 0) then
+    Exit;
+  { Model units per world unit (MODEL_SCALE, the gun's viewport) }
+  Scale := WorldToLocal.MultDirection(Vector3(1, 0, 0)).Length;
+  for I := 0 to MaxSurfaceLights - 1 do
+    if I < Count then
+    begin
+      FLightPos[I].Send(Vector4(WorldToLocal.MultPoint(Lights[I].Position),
+        Lights[I].CurrentRadius * Scale));
+      { Falloff in world units: (radius - distance) / Scale }
+      FLightColor[I].Send(Lights[I].Color * (2.0 / 256 / Max(Scale, 0.0001)));
+    end else
+    if I < FLightCount then
+      FLightPos[I].Send(TVector4.Zero);
+  FLightCount := Count;
 end;
 
 { TQuakeMd2Manager }
@@ -739,7 +834,9 @@ end;
 
 initialization
   Md2Manager := TQuakeMd2Manager.Create;
+  Md2Instances := specialize TList<TQuakeMd2Instance>.Create;
 
 finalization
   FreeAndNil(Md2Manager);
+  FreeAndNil(Md2Instances);
 end.

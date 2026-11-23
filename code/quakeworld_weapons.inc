@@ -1,8 +1,9 @@
 { The player's weapons: the gun model and frames, firing, switching.
   Part of the implementation of TQuakeWorld (unit QuakeWorld). }
 
-procedure TQuakeWorld.AttachWeaponToCamera(const Camera: TCastleTransform);
+procedure TQuakeWorld.AttachWeaponToCamera(const Camera, ViewCamera: TCastleTransform);
 begin
+  FViewCamera := ViewCamera;
   if FWeaponTransform.Parent <> nil then
     FWeaponTransform.Parent.Remove(FWeaponTransform);
   Camera.Add(FWeaponTransform);

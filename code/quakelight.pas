@@ -241,7 +241,6 @@ end;
 function TQuakeLighting.SampleLight(const CgePos: TVector3): TVector3;
 var
   C: TVector3;
-  L: TQuakeDynLight;
   Samples: TLightPointSamples;
   I: Integer;
 begin
@@ -260,11 +259,8 @@ begin
   { Never fully black, so silhouettes stay readable }
   Result := Vector3(Max(Result.X, 0.18), Max(Result.Y, 0.18), Max(Result.Z, 0.18));
 
-  { Same falloff as on the world surfaces (see TQuakeGeometry) }
-  for L in FLights do
-    Result := Result + L.Color *
-      (2.0 * Max(0, L.CurrentRadius - PointsDistance(CgePos, L.Position)) / 256);
-
+  { Dynamic lights are added per pixel by the models' shader effect
+    (TQuakeMd2Instance.SetDynamicLights, TQuakeWorld.UpdateModelLights) }
   Result := Vector3(Min(Result.X, 1.6), Min(Result.Y, 1.6), Min(Result.Z, 1.6));
 end;
 

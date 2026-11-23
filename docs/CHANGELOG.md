@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Dynamic lights on models: muzzle flashes, rockets, explosions and the remaster's `dynamic_light` now light monsters, items, props and the gun per pixel, every frame, brightest on the side facing the light (the 4 nearest lights, like the walls). Before, a model took one flat colour updated ten times a second, so short flashes were often missed.
+
 ## v0.33.0 — 2026-11-22
 
 - Fixed: with a render scale below 100 % the world could be drawn at half its light on some OpenGL drivers (Mesa 22): the lightmaps' 2× overbright is now applied to the lightmap sample in the shader instead of through a material colour above 1.

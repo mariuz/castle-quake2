@@ -66,6 +66,7 @@ type
   { World simulation manager }
   TQuakeWorld = class
   private
+    FViewCamera: TCastleTransform;
     FTurrets: TQuakeTurretList;
     { turret_invisible_brain entities not linked to their breach yet }
     FBrainEnts: TQuakeEntityList;
@@ -471,7 +472,11 @@ type
     function CheatGiveItem(const AName: String): Boolean;
 
     { Attach the view weapon to the camera }
-    procedure AttachWeaponToCamera(const Camera: TCastleTransform);
+    { Put the view weapon under the weapon viewport's Camera; ViewCamera is
+      the main viewport's (dynamic lights on the gun are placed through it) }
+    procedure AttachWeaponToCamera(const Camera, ViewCamera: TCastleTransform);
+    { Send every visible model its nearest dynamic lights (each frame) }
+    procedure UpdateModelLights;
     { View weapon bob and lag: degrees, X pitch down, Y yaw left, Z roll }
     procedure SetGunAngles(const Angles: TVector3);
 
@@ -522,6 +527,7 @@ type
       god mode) }
     procedure Suicide;
     property Monsters: TQuakeMonsterList read FMonsters;
+    property WeaponModel: TQuakeMd2Instance read FWeaponModel;
     function ProjectileCount: Integer;
     function DelayedCount: Integer;
     property Pickups: TQuakePickupList read FPickups;
@@ -988,6 +994,7 @@ begin
   AddProjectileLights;
   Lighting.Update(SecondsPassed);
   SetSurfaceLights;
+  UpdateModelLights;
 
   { View weapon: gun frames, kick and lighting }
   FWeaponKick := Max(0, FWeaponKick - SecondsPassed * 6);
@@ -1027,6 +1034,50 @@ begin
     Exit;
   FGeometry.Update(SecondsPassed);
   Particles.Update(SecondsPassed);
+end;
+
+procedure TQuakeWorld.UpdateModelLights;
+
+  function ShownInWorld(T: TCastleTransform): Boolean;
+  begin
+    while T <> nil do
+    begin
+      if not (T.Exists and T.Visible) then
+        Exit(False);
+      T := T.Parent;
+    end;
+    Result := True;
+  end;
+
+var
+  Inst: TQuakeMd2Instance;
+  Lights: TQuakeSurfaceLights;
+  Count: Integer;
+  Pos: TVector3;
+  ToLocal: TMatrix4;
+  WeaponView: Boolean;
+begin
+  for Inst in Md2Instances do
+  begin
+    if (Inst.Scene = nil) or (Inst.Scene.World = nil) or not ShownInWorld(Inst.Scene) then
+      Continue;
+    { The gun is drawn by its own viewport, in front of its camera }
+    WeaponView := (Inst = FWeaponModel) and (FViewCamera <> nil) and
+      (FWeaponTransform.Parent <> nil);
+    if WeaponView then
+      Pos := FPlayerPos
+    else
+      Pos := Inst.Scene.WorldTransform.MultPoint(TVector3.Zero);
+    Count := Lighting.NearestLights(Pos, Lights);
+    if (Count = 0) and (Inst.DynamicLightCount = 0) then
+      Continue;
+    if WeaponView then
+      ToLocal := Inst.Scene.WorldInverseTransform *
+        FWeaponTransform.Parent.WorldTransform * FViewCamera.WorldInverseTransform
+    else
+      ToLocal := Inst.Scene.WorldInverseTransform;
+    Inst.SetDynamicLights(Lights, Count, ToLocal);
+  end;
 end;
 
 procedure TQuakeWorld.CollectMovingTransforms(const List: TCastleTransformList);
