@@ -5,10 +5,10 @@ function TQuakeWorld.PlayerBox: TBox3D;
 var
   Feet: Single;
 begin
-  Feet := FPlayerPos.Y - PlayerEyeHeight;
+  Feet := FCur.Pos.Y - PlayerEyeHeight;
   Result := Box3D(
-    Vector3(FPlayerPos.X - 16, Feet, FPlayerPos.Z - 16),
-    Vector3(FPlayerPos.X + 16, Feet + 56, FPlayerPos.Z + 16));
+    Vector3(FCur.Pos.X - 16, Feet, FCur.Pos.Z - 16),
+    Vector3(FCur.Pos.X + 16, Feet + 56, FCur.Pos.Z + 16));
 end;
 
 function TQuakeWorld.GiveItem(const Def: PQuakeItemDef): Boolean;
@@ -18,8 +18,8 @@ var
 
   function AddAmmo(const AType: TAmmoType; const Count: Integer): Boolean;
   begin
-    Result := FStats.Ammo[AType] < FStats.MaxAmmo[AType];
-    FStats.Ammo[AType] := Min(FStats.MaxAmmo[AType], FStats.Ammo[AType] + Count);
+    Result := FCur.Stats.Ammo[AType] < FCur.Stats.MaxAmmo[AType];
+    FCur.Stats.Ammo[AType] := Min(FCur.Stats.MaxAmmo[AType], FCur.Stats.Ammo[AType] + Count);
   end;
 
 begin
@@ -27,10 +27,10 @@ begin
   case Def^.Category of
     icWeapon:
       begin
-        FStats.WeaponMask := FStats.WeaponMask or (1 shl Def^.Weapon);
+        FCur.Stats.WeaponMask := FCur.Stats.WeaponMask or (1 shl Def^.Weapon);
         AddAmmo(Def^.AmmoType, Def^.Amount);
         { Quake 2 auto-switches away from the blaster }
-        if FStats.CurrentWeapon = 1 then
+        if FCur.Stats.CurrentWeapon = 1 then
           SelectWeapon(Def^.Weapon);
       end;
     icAmmo:
@@ -38,75 +38,75 @@ begin
         Result := AddAmmo(Def^.AmmoType, Def^.Amount);
         { Grenades are both ammo and the hand grenade weapon }
         if Result and (Def^.Weapon <> 0) then
-          FStats.WeaponMask := FStats.WeaponMask or (1 shl Def^.Weapon);
+          FCur.Stats.WeaponMask := FCur.Stats.WeaponMask or (1 shl Def^.Weapon);
       end;
     icHealth:
       begin
-        if (Def^.Param = 0) and (FStats.Health >= FStats.MaxHealth) then
+        if (Def^.Param = 0) and (FCur.Stats.Health >= FCur.Stats.MaxHealth) then
           Exit(False);
         if Def^.Param = 0 then
-          FStats.Health := Min(FStats.MaxHealth, FStats.Health + Def^.Amount)
+          FCur.Stats.Health := Min(FCur.Stats.MaxHealth, FCur.Stats.Health + Def^.Amount)
         else
-          FStats.Health := Min(250, FStats.Health + Def^.Amount);
+          FCur.Stats.Health := Min(250, FCur.Stats.Health + Def^.Amount);
       end;
     icArmor:
       begin
         if Def^.Param = 0 then
         begin
           { Shard: +2 of the current type }
-          if FStats.ArmorType = 0 then
-            FStats.ArmorType := 1;
-          FStats.Armor := FStats.Armor + Def^.Amount;
+          if FCur.Stats.ArmorType = 0 then
+            FCur.Stats.ArmorType := 1;
+          FCur.Stats.Armor := FCur.Stats.Armor + Def^.Amount;
         end else
         begin
-          OldType := FStats.ArmorType;
+          OldType := FCur.Stats.ArmorType;
           if OldType = 0 then
           begin
-            FStats.ArmorType := Def^.Param;
-            FStats.Armor := Def^.Amount;
+            FCur.Stats.ArmorType := Def^.Param;
+            FCur.Stats.Armor := Def^.Amount;
           end else
           if ArmorProtection[Def^.Param] > ArmorProtection[OldType] then
           begin
             { Upgrade: salvage the old armor at the new protection rate }
-            Salvage := Round(FStats.Armor * ArmorProtection[OldType] / ArmorProtection[Def^.Param]);
-            FStats.ArmorType := Def^.Param;
-            FStats.Armor := Min(ArmorMax[Def^.Param], Def^.Amount + Salvage);
+            Salvage := Round(FCur.Stats.Armor * ArmorProtection[OldType] / ArmorProtection[Def^.Param]);
+            FCur.Stats.ArmorType := Def^.Param;
+            FCur.Stats.Armor := Min(ArmorMax[Def^.Param], Def^.Amount + Salvage);
           end else
           begin
             Salvage := Round(Def^.Amount * ArmorProtection[Def^.Param] / ArmorProtection[OldType]);
-            if FStats.Armor >= ArmorMax[OldType] then
+            if FCur.Stats.Armor >= ArmorMax[OldType] then
               Exit(False);
-            FStats.Armor := Min(ArmorMax[OldType], FStats.Armor + Salvage);
+            FCur.Stats.Armor := Min(ArmorMax[OldType], FCur.Stats.Armor + Salvage);
           end;
         end;
       end;
     icPowerup:
       case Def^.Param of
-        POWERUP_QUAD: FStats.QuadTime := FStats.QuadTime + Def^.Amount;
+        POWERUP_QUAD: FCur.Stats.QuadTime := FCur.Stats.QuadTime + Def^.Amount;
         { Use_QuadFire: 30 s more of DualFire }
         POWERUP_QUADFIRE:
           begin
-            FStats.QuadFireTime := FStats.QuadFireTime + Def^.Amount;
+            FCur.Stats.QuadFireTime := FCur.Stats.QuadFireTime + Def^.Amount;
             Sounds.Play('sound/items/quadfire1.wav', 1, chItem);
           end;
-        POWERUP_INVULN: FStats.InvulnTime := FStats.InvulnTime + Def^.Amount;
+        POWERUP_INVULN: FCur.Stats.InvulnTime := FCur.Stats.InvulnTime + Def^.Amount;
         { Ground Zero, used on pickup: Use_Double (30 s), Use_IR (60 s),
           Use_Defender (one sphere at a time: Pickup_Sphere refuses) }
         POWERUP_DOUBLE:
           begin
-            FStats.DoubleTime := FStats.DoubleTime + Def^.Amount;
+            FCur.Stats.DoubleTime := FCur.Stats.DoubleTime + Def^.Amount;
             Sounds.Play('sound/misc/ddamage1.wav', 1, chItem);
           end;
         POWERUP_IR:
           begin
-            FStats.IRTime := FStats.IRTime + Def^.Amount;
+            FCur.Stats.IRTime := FCur.Stats.IRTime + Def^.Amount;
             Sounds.Play('sound/misc/ir_start.wav', 1, chItem);
           end;
         POWERUP_DEFENDER:
           begin
-            if FStats.DefenderTime > 0 then
+            if FCur.Stats.DefenderTime > 0 then
               Exit(False);
-            FStats.DefenderTime := Def^.Amount;
+            FCur.Stats.DefenderTime := Def^.Amount;
             FDefenderEnemy := nil;
             WritelnLog('QuakeWorld', 'Defender sphere out');
           end;
@@ -114,61 +114,61 @@ begin
           inventory until used): Use_Breather, Use_Envirosuit, Use_Silencer }
         POWERUP_OTHER:
           if Def^.ClassName = 'item_breather' then
-            FStats.BreatherTime := FStats.BreatherTime + 30
+            FCur.Stats.BreatherTime := FCur.Stats.BreatherTime + 30
           else
           if Def^.ClassName = 'item_enviro' then
-            FStats.EnviroTime := FStats.EnviroTime + 30
+            FCur.Stats.EnviroTime := FCur.Stats.EnviroTime + 30
           else
           if Def^.ClassName = 'item_silencer' then
-            Inc(FStats.SilencerShots, 30)
+            Inc(FCur.Stats.SilencerShots, 30)
           else
           if (Def^.ClassName = 'item_power_screen') or (Def^.ClassName = 'item_power_shield') then
           begin
             if Def^.ClassName = 'item_power_screen' then
-              Inc(FStats.PowerScreens)
+              Inc(FCur.Stats.PowerScreens)
             else
-              Inc(FStats.PowerShields);
+              Inc(FCur.Stats.PowerShields);
             { Switched on with the first one, like Quake 2 deathmatch's
               auto-use; the powerarmor command switches it }
-            if not FStats.PowerArmorOn then
+            if not FCur.Stats.PowerArmorOn then
               TogglePowerArmor;
           end;
         POWERUP_ADRENALINE:
           begin
-            Inc(FStats.MaxHealth);
-            FStats.Health := Max(FStats.Health, FStats.MaxHealth);
+            Inc(FCur.Stats.MaxHealth);
+            FCur.Stats.Health := Max(FCur.Stats.Health, FCur.Stats.MaxHealth);
           end;
         POWERUP_ANCIENT_HEAD:
-          Inc(FStats.MaxHealth, 2);
+          Inc(FCur.Stats.MaxHealth, 2);
         POWERUP_BANDOLIER, POWERUP_PACK:
           begin
             if Def^.Param = POWERUP_PACK then
             begin
-              FStats.MaxAmmo[atShells] := Max(FStats.MaxAmmo[atShells], 200);
-              FStats.MaxAmmo[atBullets] := Max(FStats.MaxAmmo[atBullets], 300);
-              FStats.MaxAmmo[atGrenades] := Max(FStats.MaxAmmo[atGrenades], 100);
-              FStats.MaxAmmo[atRockets] := Max(FStats.MaxAmmo[atRockets], 100);
-              FStats.MaxAmmo[atCells] := Max(FStats.MaxAmmo[atCells], 300);
-              FStats.MaxAmmo[atSlugs] := Max(FStats.MaxAmmo[atSlugs], 100);
-              FStats.MaxAmmo[atMagSlugs] := Max(FStats.MaxAmmo[atMagSlugs], 100);
-              FStats.MaxAmmo[atFlechettes] := Max(FStats.MaxAmmo[atFlechettes], 300);
+              FCur.Stats.MaxAmmo[atShells] := Max(FCur.Stats.MaxAmmo[atShells], 200);
+              FCur.Stats.MaxAmmo[atBullets] := Max(FCur.Stats.MaxAmmo[atBullets], 300);
+              FCur.Stats.MaxAmmo[atGrenades] := Max(FCur.Stats.MaxAmmo[atGrenades], 100);
+              FCur.Stats.MaxAmmo[atRockets] := Max(FCur.Stats.MaxAmmo[atRockets], 100);
+              FCur.Stats.MaxAmmo[atCells] := Max(FCur.Stats.MaxAmmo[atCells], 300);
+              FCur.Stats.MaxAmmo[atSlugs] := Max(FCur.Stats.MaxAmmo[atSlugs], 100);
+              FCur.Stats.MaxAmmo[atMagSlugs] := Max(FCur.Stats.MaxAmmo[atMagSlugs], 100);
+              FCur.Stats.MaxAmmo[atFlechettes] := Max(FCur.Stats.MaxAmmo[atFlechettes], 300);
               AddAmmo(atMagSlugs, 10);
               AddAmmo(atFlechettes, 50);
             end else
             begin
-              FStats.MaxAmmo[atShells] := Max(FStats.MaxAmmo[atShells], 150);
-              FStats.MaxAmmo[atBullets] := Max(FStats.MaxAmmo[atBullets], 250);
-              FStats.MaxAmmo[atCells] := Max(FStats.MaxAmmo[atCells], 250);
-              FStats.MaxAmmo[atSlugs] := Max(FStats.MaxAmmo[atSlugs], 75);
-              FStats.MaxAmmo[atMagSlugs] := Max(FStats.MaxAmmo[atMagSlugs], 75);
-              FStats.MaxAmmo[atFlechettes] := Max(FStats.MaxAmmo[atFlechettes], 250);
+              FCur.Stats.MaxAmmo[atShells] := Max(FCur.Stats.MaxAmmo[atShells], 150);
+              FCur.Stats.MaxAmmo[atBullets] := Max(FCur.Stats.MaxAmmo[atBullets], 250);
+              FCur.Stats.MaxAmmo[atCells] := Max(FCur.Stats.MaxAmmo[atCells], 250);
+              FCur.Stats.MaxAmmo[atSlugs] := Max(FCur.Stats.MaxAmmo[atSlugs], 75);
+              FCur.Stats.MaxAmmo[atMagSlugs] := Max(FCur.Stats.MaxAmmo[atMagSlugs], 75);
+              FCur.Stats.MaxAmmo[atFlechettes] := Max(FCur.Stats.MaxAmmo[atFlechettes], 250);
             end;
             for A := atShells to atSlugs do
               AddAmmo(A, 10);
           end;
       end;
     icKey:
-      FStats.Keys := FStats.Keys or Cardinal(Def^.Amount);
+      FCur.Stats.Keys := FCur.Stats.Keys or Cardinal(Def^.Amount);
   end;
 end;
 
@@ -182,7 +182,7 @@ begin
   begin
     if P.Collected then
       Continue;
-    Delta := P.Origin - FPlayerPos;
+    Delta := P.Origin - FCur.Pos;
     if (Sqr(Delta.X) + Sqr(Delta.Z) < Sqr(40)) and (Delta.Y > -PlayerEyeHeight - 20) and (Delta.Y < 20) then
     begin
       if P.Def^.ClassName = 'item_foodcube' then
@@ -190,7 +190,7 @@ begin
         { A trap's food cube: its count in health, over the maximum
           (HEALTH_IGNORE_MAX), the sound by the amount }
         Amount := Max(1, P.Entity.GetInt('count', 2));
-        FStats.Health := FStats.Health + Amount;
+        FCur.Stats.Health := FCur.Stats.Health + Amount;
         P.Collected := True;
         if Amount < 10 then
           Sounds.Play('sound/items/s_health.wav', 1, chItem)
@@ -259,17 +259,17 @@ procedure TQuakeWorld.UpdateDefender(const SecondsPassed: Single);
 var
   Goal, Dir: TVector3;
 begin
-  if (FStats.DefenderTime <= 0) or FDead then
+  if (FCur.Stats.DefenderTime <= 0) or FCur.Dead then
   begin
     if FDefender <> nil then
       WritelnLog('QuakeWorld', 'Defender sphere gone');
     RemoveDefender(FDefender <> nil);
-    FStats.DefenderTime := 0;
+    FCur.Stats.DefenderTime := 0;
     Exit;
   end;
-  FStats.DefenderTime := Max(0, FStats.DefenderTime - SecondsPassed);
+  FCur.Stats.DefenderTime := Max(0, FCur.Stats.DefenderTime - SecondsPassed);
   { Above the player's head (4 over the top of the box) }
-  Goal := FPlayerPos + Vector3(0, 32 - 22 + 4, 0);
+  Goal := FCur.Pos + Vector3(0, 32 - 22 + 4, 0);
   if FDefender = nil then
   begin
     FDefender := TCastleTransform.Create(nil);
@@ -319,10 +319,10 @@ end;
 function TQuakeWorld.DamageMultiplier: Integer;
 begin
   { P_DamageModifier: quad 4, else double damage 2 }
-  if FStats.QuadTime > 0 then
+  if FCur.Stats.QuadTime > 0 then
     Result := 4
   else
-  if FStats.DoubleTime > 0 then
+  if FCur.Stats.DoubleTime > 0 then
     Result := 2
   else
     Result := 1;
@@ -341,12 +341,12 @@ procedure TQuakeWorld.UpdatePlayerItems(const SecondsPassed: Single);
   end;
 
 begin
-  Tick(FStats.EnviroTime);
-  Tick(FStats.BreatherTime);
+  Tick(FCur.Stats.EnviroTime);
+  Tick(FCur.Stats.BreatherTime);
   { G_SetStats: power armor goes off when the cells run out }
-  if FStats.PowerArmorOn and (FStats.Ammo[atCells] <= 0) then
+  if FCur.Stats.PowerArmorOn and (FCur.Stats.Ammo[atCells] <= 0) then
   begin
-    FStats.PowerArmorOn := False;
+    FCur.Stats.PowerArmorOn := False;
     Sounds.Play('sound/misc/power2.wav', 1, chItem);
   end;
 end;
@@ -359,18 +359,18 @@ begin
   { Quake 2 CheckPowerArmor for a client: the shield if carried, else the
     screen, which only stops hits from the front; cells pay for it }
   Result := 0;
-  Cells := FStats.Ammo[atCells];
-  if not FStats.PowerArmorOn or (Cells <= 0) or (Damage <= 0) then
+  Cells := FCur.Stats.Ammo[atCells];
+  if not FCur.Stats.PowerArmorOn or (Cells <= 0) or (Damage <= 0) then
     Exit;
-  if FStats.PowerShields > 0 then
+  if FCur.Stats.PowerShields > 0 then
   begin
     DamagePerCell := 2;
     Part := (2 * Damage) div 3;
   end else
-  if FStats.PowerScreens > 0 then
+  if FCur.Stats.PowerScreens > 0 then
   begin
-    Forward := Vector3(FPlayerDir.X, 0, FPlayerDir.Z);
-    ToHit := FromPos - FPlayerPos;
+    Forward := Vector3(FCur.Dir.X, 0, FCur.Dir.Z);
+    ToHit := FromPos - FCur.Pos;
     ToHit.Y := 0;
     if Forward.IsZero or ToHit.IsZero or
        (TVector3.DotProduct(ToHit.Normalize, Forward.Normalize) <= 0.3) then
@@ -382,27 +382,27 @@ begin
   Result := Min(Cells * DamagePerCell, Part);
   if Result <= 0 then
     Exit;
-  FStats.Ammo[atCells] := Max(0, Cells - Result div DamagePerCell);
+  FCur.Stats.Ammo[atCells] := Max(0, Cells - Result div DamagePerCell);
   { TE_SCREEN_SPARKS / TE_SHIELD_SPARKS }
   Sounds.Play('sound/weapons/lashit.wav', 1, chAuto);
 end;
 
 procedure TQuakeWorld.TogglePowerArmor;
 begin
-  if (FStats.PowerScreens = 0) and (FStats.PowerShields = 0) then
+  if (FCur.Stats.PowerScreens = 0) and (FCur.Stats.PowerShields = 0) then
     Exit;
-  if FStats.PowerArmorOn then
+  if FCur.Stats.PowerArmorOn then
   begin
-    FStats.PowerArmorOn := False;
+    FCur.Stats.PowerArmorOn := False;
     Sounds.Play('sound/misc/power2.wav', 1, chAuto);
   end else
-  if FStats.Ammo[atCells] <= 0 then
+  if FCur.Stats.Ammo[atCells] <= 0 then
   begin
     if FHud <> nil then
       FHud.ShowMessage('No cells for power armor.', 2);
   end else
   begin
-    FStats.PowerArmorOn := True;
+    FCur.Stats.PowerArmorOn := True;
     Sounds.Play('sound/misc/power1.wav', 1, chAuto);
   end;
 end;
@@ -412,22 +412,22 @@ var
   A: TAmmoType;
   I: Integer;
 begin
-  FStats.WeaponMask := ((1 shl (HandGrenadeSlot + 1)) - 1) and not 1; { slots 1..11 }
+  FCur.Stats.WeaponMask := ((1 shl (HandGrenadeSlot + 1)) - 1) and not 1; { slots 1..11 }
   for A := atShells to atSlugs do
-    FStats.Ammo[A] := FStats.MaxAmmo[A];
+    FCur.Stats.Ammo[A] := FCur.Stats.MaxAmmo[A];
   { The Reckoning's weapons when their models are there (-game xatrix) }
   { and Ground Zero's (-game rogue) }
   for I := IonRipperSlot to TeslaSlot do
     if Pak.FileExists(WeaponDefs[I].ViewModel) then
     begin
-      FStats.WeaponMask := FStats.WeaponMask or (1 shl I);
+      FCur.Stats.WeaponMask := FCur.Stats.WeaponMask or (1 shl I);
       if WeaponDefs[I].AmmoType <> atNone then
-        FStats.Ammo[WeaponDefs[I].AmmoType] := FStats.MaxAmmo[WeaponDefs[I].AmmoType];
+        FCur.Stats.Ammo[WeaponDefs[I].AmmoType] := FCur.Stats.MaxAmmo[WeaponDefs[I].AmmoType];
     end;
-  FStats.ArmorType := 3;
-  FStats.Armor := 200;
-  FStats.Health := Max(FStats.Health, 100);
-  FStats.Keys := $1FF;
+  FCur.Stats.ArmorType := 3;
+  FCur.Stats.Armor := 200;
+  FCur.Stats.Health := Max(FCur.Stats.Health, 100);
+  FCur.Stats.Keys := $1FF;
   if FHud <> nil then
     FHud.ShowMessage('All weapons, ammo, armor and keys');
 end;
@@ -457,9 +457,9 @@ end;
 
 procedure TQuakeWorld.CheatGodMode;
 begin
-  FStats.GodMode := not FStats.GodMode;
+  FCur.Stats.GodMode := not FCur.Stats.GodMode;
   if FHud <> nil then
-    if FStats.GodMode then
+    if FCur.Stats.GodMode then
       FHud.ShowMessage('god ON')
     else
       FHud.ShowMessage('god OFF');

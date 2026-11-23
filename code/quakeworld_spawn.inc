@@ -3,23 +3,23 @@
 
 procedure TQuakeWorld.ResetStats;
 begin
-  FillChar(FStats, SizeOf(FStats), 0);
-  FStats.Health := 100;
-  FStats.MaxHealth := 100;
-  FStats.MaxAmmo[atShells] := 100;
-  FStats.MaxAmmo[atBullets] := 200;
-  FStats.MaxAmmo[atGrenades] := 50;
-  FStats.MaxAmmo[atRockets] := 50;
-  FStats.MaxAmmo[atCells] := 200;
-  FStats.MaxAmmo[atSlugs] := 50;
-  FStats.MaxAmmo[atMagSlugs] := 50;
-  FStats.MaxAmmo[atTraps] := 5;
+  FillChar(FCur.Stats, SizeOf(FCur.Stats), 0);
+  FCur.Stats.Health := 100;
+  FCur.Stats.MaxHealth := 100;
+  FCur.Stats.MaxAmmo[atShells] := 100;
+  FCur.Stats.MaxAmmo[atBullets] := 200;
+  FCur.Stats.MaxAmmo[atGrenades] := 50;
+  FCur.Stats.MaxAmmo[atRockets] := 50;
+  FCur.Stats.MaxAmmo[atCells] := 200;
+  FCur.Stats.MaxAmmo[atSlugs] := 50;
+  FCur.Stats.MaxAmmo[atMagSlugs] := 50;
+  FCur.Stats.MaxAmmo[atTraps] := 5;
   { Ground Zero's InitClientPersistant }
-  FStats.MaxAmmo[atFlechettes] := 200;
-  FStats.MaxAmmo[atProx] := 50;
-  FStats.MaxAmmo[atTesla] := 50;
-  FStats.WeaponMask := 1 shl 1; { Blaster }
-  FStats.CurrentWeapon := 1;
+  FCur.Stats.MaxAmmo[atFlechettes] := 200;
+  FCur.Stats.MaxAmmo[atProx] := 50;
+  FCur.Stats.MaxAmmo[atTesla] := 50;
+  FCur.Stats.WeaponMask := 1 shl 1; { Blaster }
+  FCur.Stats.CurrentWeapon := 1;
 end;
 
 procedure TQuakeWorld.ClearLevel;
@@ -44,7 +44,7 @@ begin
   FSteam.Clear;
   PlayerDisguised := False;
   RemoveDefender(False);
-  FDamageSource := nil;
+  FCur.DamageSource := nil;
   FDelayed.Clear;
   FCounters.Clear;
   FDynamicLights.Clear;
@@ -219,7 +219,7 @@ begin
     if Monster.Model <> nil then
       Monster.Model.PlayAnim('stand', True, 10);
     FMonsters.Add(Monster);
-    Inc(FStats.TotalKills);
+    Inc(FCur.Stats.TotalKills);
     Exit;
   end;
 
@@ -277,7 +277,7 @@ begin
     Monster.OnRevived := @MonsterRevived;
     Monster.ResolveTargets;
     FMonsters.Add(Monster);
-    Inc(FStats.TotalKills);
+    Inc(FCur.Stats.TotalKills);
     Exit;
   end;
 
@@ -453,10 +453,10 @@ begin
       FClocks[High(FClocks)].NextThink := FTime + 1;
   end else
   if CName = 'target_secret' then
-    Inc(FStats.TotalSecrets)
+    Inc(FCur.Stats.TotalSecrets)
   else
   if CName = 'target_goal' then
-    Inc(FStats.TotalGoals)
+    Inc(FCur.Stats.TotalGoals)
   else
   if CName = 'trigger_counter' then
     FCounters.AddOrSetValue(Ent, Ent.GetInt('count', 2))
@@ -539,7 +539,7 @@ begin
       if (Disabled <> 0) or ((Flags and POI_DUMMY) <> 0) or
          ((E.GetInt('count', 0) > 0) and (E.GetInt('count', 0) < FPoiStage)) then
         Continue;
-      Dist := PointsDistance(E.Origin, CgeToQuake(FPlayerPos));
+      Dist := PointsDistance(E.Origin, CgeToQuake(FCur.Pos));
       if (E.GetInt('style', 0) < BestStyle) or
          ((E.GetInt('style', 0) = BestStyle) and (((Flags and POI_NEAREST) = 0) or (Dist < BestDist))) then
       begin
@@ -640,8 +640,8 @@ begin
   { A new TQuakeBsp may reuse the old one's address: never keep the
     collision of the previous map }
   FreeAndNil(FCollision);
-  FPlayerGibbed := False;
-  FHasKiller := False;
+  FCur.Gibbed := False;
+  FCur.HasKiller := False;
   if FWeaponTransform <> nil then
     FWeaponTransform.Exists := True;
   FClocks := nil;
@@ -652,15 +652,15 @@ begin
   FLevelExited := False;
   FNextMap := '';
   FTeleportPending := False;
-  FDead := False;
+  FCur.Dead := False;
   FRestartPending := False;
-  FStats.LevelTime := 0;
-  FStats.Kills := 0;
-  FStats.TotalKills := 0;
-  FStats.Secrets := 0;
-  FStats.TotalSecrets := 0;
-  FStats.Goals := 0;
-  FStats.TotalGoals := 0;
+  FCur.Stats.LevelTime := 0;
+  FCur.Stats.Kills := 0;
+  FCur.Stats.TotalKills := 0;
+  FCur.Stats.Secrets := 0;
+  FCur.Stats.TotalSecrets := 0;
+  FCur.Stats.Goals := 0;
+  FCur.Stats.TotalGoals := 0;
   FSpawnPoint := Vector3(0, PlayerEyeHeight, 0);
   FSpawnAngle := 0;
 
@@ -683,7 +683,7 @@ begin
     WritelnLog('QuakeWorld', 'Restored remembered state of "%s"', [FBsp.MapName]);
   end;
   { Raise the weapon (Quake 2 starts levels with the activate frames) }
-  FGun.Reset(FStats.CurrentWeapon);
+  FCur.Gun.Reset(FCur.Stats.CurrentWeapon);
   UpdateWeaponModel;
 
   World := FBsp.FindEntity('worldspawn');
@@ -812,7 +812,7 @@ var
   A: TVector3;
 begin
   Result := False;
-  Pos := FPlayerPos;
+  Pos := FCur.Pos;
   Yaw := 0;
   Pitch := 0;
   if FBsp = nil then
@@ -829,15 +829,15 @@ end;
 
 procedure TQuakeWorld.SetPlayer(const Value: TQuakePMove);
 begin
-  FPlayer := Value;
-  if FPlayer <> nil then
+  FCur.PM := Value;
+  if FCur.PM <> nil then
   begin
-    FBaseGravity := FPlayer.GravityAcceleration;
-    FPlayerGravity := 1;
-    FPlayer.OnFallDamage := @PlayerFallDamage;
-    FPlayer.OnPointContents := @PlayerPointContents;
-    FPlayer.OnLandSound := @PlayerLanded;
-    FPlayer.OnTrace := @PlayerTrace;
-    FPlayer.OnBeforeMove := @PlayerBeforeMove;
+    FBaseGravity := FCur.PM.GravityAcceleration;
+    FCur.Gravity := 1;
+    FCur.PM.OnFallDamage := @PlayerFallDamage;
+    FCur.PM.OnPointContents := @PlayerPointContents;
+    FCur.PM.OnLandSound := @PlayerLanded;
+    FCur.PM.OnTrace := @PlayerTrace;
+    FCur.PM.OnBeforeMove := @PlayerBeforeMove;
   end;
 end;

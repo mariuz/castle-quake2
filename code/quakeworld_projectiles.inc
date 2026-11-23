@@ -211,7 +211,7 @@ begin
     end;
   end;
 
-  Dist := PointsDistance(FPlayerPos - Vector3(0, 22, 0), Pos);
+  Dist := PointsDistance(FCur.Pos - Vector3(0, 22, 0), Pos);
   if Dist < Radius then
   begin
     Points := Round(Damage * (1 - 0.5 * Dist / Radius));
@@ -276,9 +276,9 @@ begin
       if PointsDistance(Center, Origin) <= 256 then
         LaserAt(Center);
     end;
-  if not Proj.FromPlayer and not FDead then
+  if not Proj.FromPlayer and not FCur.Dead then
   begin
-    Center := CgeToQuake(FPlayerPos - Vector3(0, 22, 0));
+    Center := CgeToQuake(FCur.Pos - Vector3(0, 22, 0));
     if PointsDistance(Center, Origin) <= 256 then
       LaserAt(Center);
   end;
@@ -320,7 +320,7 @@ var
 begin
   Origin := CgeToQuake(Proj.Transform.Translation);
   if Proj.FromPlayer then
-    Shooter := CgeToQuake(FPlayerPos)
+    Shooter := CgeToQuake(FCur.Pos)
   else
   if Proj.Owner <> nil then
     Shooter := MonsterCenter(Proj.Owner)
@@ -335,12 +335,12 @@ begin
       HitEffect(M.Transform.Translation);
       M.TakeDamage(N);
     end;
-  if not Proj.FromPlayer and not FDead then
+  if not Proj.FromPlayer and not FCur.Dead then
   begin
-    N := Points(CgeToQuake(FPlayerPos - Vector3(0, 22, 0)));
+    N := Points(CgeToQuake(FCur.Pos - Vector3(0, 22, 0)));
     if N > 0 then
     begin
-      HitEffect(FPlayerPos - Vector3(0, 22, 0));
+      HitEffect(FCur.Pos - Vector3(0, 22, 0));
       DamagePlayer(N, Proj.Transform.Translation);
     end;
   end;
@@ -610,7 +610,7 @@ begin
     { Quake 2 MOVETYPE_FLYMISSILE / BOUNCE: a point trace along the step,
       ignoring the shooter }
     if Proj.FromPlayer then
-      Shooter := FPlayer
+      Shooter := FCur.PM
     else
       Shooter := Proj.Owner;
     T := WorldTrace(CgeToQuake(OldPos), CgeToQuake(NewPos), TVector3.Zero, TVector3.Zero, MASK_SHOT, Shooter);
@@ -700,7 +700,7 @@ begin
         end else
         if T.Ent is TQuakePMove then
         begin
-          FDamageSource := Proj.Owner;
+          FCur.DamageSource := Proj.Owner;
           if Proj.Kind in [pkBlasterBolt, pkBfg, pkRipper, pkBlueBolt, pkLoogie, pkPlasma] then
             DamagePlayer(Proj.Damage, OldPos);
         end else
@@ -759,12 +759,12 @@ begin
   { heat_think: towards the player when he is alive, in sight and within
     1024 (the only client here), every 0.025 s by HeatTurn of the way:
     over SecondsPassed that is 1 - (1 - HeatTurn) ^ (SecondsPassed / 0.025) }
-  if FDead then
+  if FCur.Dead then
     Exit;
   Pos := Proj.Transform.Translation;
-  ToTarget := (FPlayerPos - Vector3(0, 12, 0)) - Pos;
+  ToTarget := (FCur.Pos - Vector3(0, 12, 0)) - Pos;
   if (ToTarget.Length > 1024) or (ToTarget.Length < 1) or
-     (WorldTrace(CgeToQuake(Pos), CgeToQuake(FPlayerPos), TVector3.Zero, TVector3.Zero,
+     (WorldTrace(CgeToQuake(Pos), CgeToQuake(FCur.Pos), TVector3.Zero, TVector3.Zero,
       CONTENTS_SOLID or CONTENTS_WINDOW, nil).Fraction < 1) then
     Exit;
   Speed := Proj.Velocity.Length;

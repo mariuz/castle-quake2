@@ -30,36 +30,36 @@ begin
   Result.Add('skill', GameSkill);
   { Player inventory }
   O := TJSONObject.Create;
-  O.Add('health', FStats.Health);
-  O.Add('maxHealth', FStats.MaxHealth);
-  O.Add('armor', FStats.Armor);
-  O.Add('armorType', FStats.ArmorType);
-  O.Add('weaponMask', Int64(FStats.WeaponMask));
-  O.Add('weapon', FStats.CurrentWeapon);
-  O.Add('keys', Int64(FStats.Keys));
-  O.Add('kills', FStats.Kills);
-  O.Add('secrets', FStats.Secrets);
-  O.Add('goals', FStats.Goals);
-  O.Add('levelTime', FStats.LevelTime);
-  O.Add('quad', FStats.QuadTime);
-  O.Add('quadFire', FStats.QuadFireTime);
-  O.Add('double', FStats.DoubleTime);
-  O.Add('ir', FStats.IRTime);
-  O.Add('defender', FStats.DefenderTime);
-  O.Add('invuln', FStats.InvulnTime);
-  O.Add('breather', FStats.BreatherTime);
-  O.Add('enviro', FStats.EnviroTime);
-  O.Add('silencer', FStats.SilencerShots);
-  O.Add('powerScreens', FStats.PowerScreens);
-  O.Add('powerShields', FStats.PowerShields);
-  O.Add('powerArmorOn', FStats.PowerArmorOn);
+  O.Add('health', FCur.Stats.Health);
+  O.Add('maxHealth', FCur.Stats.MaxHealth);
+  O.Add('armor', FCur.Stats.Armor);
+  O.Add('armorType', FCur.Stats.ArmorType);
+  O.Add('weaponMask', Int64(FCur.Stats.WeaponMask));
+  O.Add('weapon', FCur.Stats.CurrentWeapon);
+  O.Add('keys', Int64(FCur.Stats.Keys));
+  O.Add('kills', FCur.Stats.Kills);
+  O.Add('secrets', FCur.Stats.Secrets);
+  O.Add('goals', FCur.Stats.Goals);
+  O.Add('levelTime', FCur.Stats.LevelTime);
+  O.Add('quad', FCur.Stats.QuadTime);
+  O.Add('quadFire', FCur.Stats.QuadFireTime);
+  O.Add('double', FCur.Stats.DoubleTime);
+  O.Add('ir', FCur.Stats.IRTime);
+  O.Add('defender', FCur.Stats.DefenderTime);
+  O.Add('invuln', FCur.Stats.InvulnTime);
+  O.Add('breather', FCur.Stats.BreatherTime);
+  O.Add('enviro', FCur.Stats.EnviroTime);
+  O.Add('silencer', FCur.Stats.SilencerShots);
+  O.Add('powerScreens', FCur.Stats.PowerScreens);
+  O.Add('powerShields', FCur.Stats.PowerShields);
+  O.Add('powerArmorOn', FCur.Stats.PowerArmorOn);
   Arr := TJSONArray.Create;
   for A := Low(TAmmoType) to High(TAmmoType) do
-    Arr.Add(FStats.Ammo[A]);
+    Arr.Add(FCur.Stats.Ammo[A]);
   O.Add('ammo', Arr);
   Arr := TJSONArray.Create;
   for A := Low(TAmmoType) to High(TAmmoType) do
-    Arr.Add(FStats.MaxAmmo[A]);
+    Arr.Add(FCur.Stats.MaxAmmo[A]);
   O.Add('maxAmmo', Arr);
   O.Add('helpPrimary', FHelpPrimary);
   O.Add('serverFlags', FServerFlags);
@@ -251,45 +251,45 @@ begin
   if (O <> nil) and not IncludePlayer then
   begin
     { Level counters belong to the level }
-    FStats.Kills := O.Get('kills', 0);
-    FStats.Secrets := O.Get('secrets', 0);
-    FStats.Goals := O.Get('goals', 0);
+    FCur.Stats.Kills := O.Get('kills', 0);
+    FCur.Stats.Secrets := O.Get('secrets', 0);
+    FCur.Stats.Goals := O.Get('goals', 0);
     O := nil;
   end;
   if O <> nil then
   begin
-    FStats.Health := O.Get('health', FStats.Health);
-    FStats.MaxHealth := O.Get('maxHealth', FStats.MaxHealth);
-    FStats.Armor := O.Get('armor', FStats.Armor);
-    FStats.ArmorType := O.Get('armorType', FStats.ArmorType);
-    FStats.WeaponMask := O.Get('weaponMask', Int64(FStats.WeaponMask));
-    FStats.Keys := O.Get('keys', Int64(FStats.Keys));
-    FStats.Kills := O.Get('kills', 0);
-    FStats.Secrets := O.Get('secrets', 0);
-    FStats.Goals := O.Get('goals', 0);
-    FStats.LevelTime := O.Get('levelTime', 0.0);
-    FStats.QuadTime := O.Get('quad', 0.0);
-    FStats.QuadFireTime := O.Get('quadFire', 0.0);
-    FStats.DoubleTime := O.Get('double', 0.0);
-    FStats.IRTime := O.Get('ir', 0.0);
-    FStats.DefenderTime := O.Get('defender', 0.0);
-    FStats.InvulnTime := O.Get('invuln', 0.0);
-    FStats.BreatherTime := O.Get('breather', 0.0);
-    FStats.EnviroTime := O.Get('enviro', 0.0);
-    FStats.SilencerShots := O.Get('silencer', 0);
-    FStats.PowerScreens := O.Get('powerScreens', 0);
-    FStats.PowerShields := O.Get('powerShields', 0);
-    FStats.PowerArmorOn := O.Get('powerArmorOn', False);
+    FCur.Stats.Health := O.Get('health', FCur.Stats.Health);
+    FCur.Stats.MaxHealth := O.Get('maxHealth', FCur.Stats.MaxHealth);
+    FCur.Stats.Armor := O.Get('armor', FCur.Stats.Armor);
+    FCur.Stats.ArmorType := O.Get('armorType', FCur.Stats.ArmorType);
+    FCur.Stats.WeaponMask := O.Get('weaponMask', Int64(FCur.Stats.WeaponMask));
+    FCur.Stats.Keys := O.Get('keys', Int64(FCur.Stats.Keys));
+    FCur.Stats.Kills := O.Get('kills', 0);
+    FCur.Stats.Secrets := O.Get('secrets', 0);
+    FCur.Stats.Goals := O.Get('goals', 0);
+    FCur.Stats.LevelTime := O.Get('levelTime', 0.0);
+    FCur.Stats.QuadTime := O.Get('quad', 0.0);
+    FCur.Stats.QuadFireTime := O.Get('quadFire', 0.0);
+    FCur.Stats.DoubleTime := O.Get('double', 0.0);
+    FCur.Stats.IRTime := O.Get('ir', 0.0);
+    FCur.Stats.DefenderTime := O.Get('defender', 0.0);
+    FCur.Stats.InvulnTime := O.Get('invuln', 0.0);
+    FCur.Stats.BreatherTime := O.Get('breather', 0.0);
+    FCur.Stats.EnviroTime := O.Get('enviro', 0.0);
+    FCur.Stats.SilencerShots := O.Get('silencer', 0);
+    FCur.Stats.PowerScreens := O.Get('powerScreens', 0);
+    FCur.Stats.PowerShields := O.Get('powerShields', 0);
+    FCur.Stats.PowerArmorOn := O.Get('powerArmorOn', False);
     Arr := O.Get('ammo', TJSONArray(nil));
     if Arr <> nil then
       for A := Low(TAmmoType) to High(TAmmoType) do
         if Ord(A) < Arr.Count then
-          FStats.Ammo[A] := Arr.Integers[Ord(A)];
+          FCur.Stats.Ammo[A] := Arr.Integers[Ord(A)];
     Arr := O.Get('maxAmmo', TJSONArray(nil));
     if Arr <> nil then
       for A := Low(TAmmoType) to High(TAmmoType) do
         if Ord(A) < Arr.Count then
-          FStats.MaxAmmo[A] := Arr.Integers[Ord(A)];
+          FCur.Stats.MaxAmmo[A] := Arr.Integers[Ord(A)];
     FHelpPrimary := O.Get('helpPrimary', '');
     FServerFlags := O.Get('serverFlags', 0);
     FHelpSecondary := O.Get('helpSecondary', '');
@@ -299,10 +299,10 @@ begin
       FHud.HelpSecondary := FHelpSecondary;
     end;
     I := O.Get('weapon', 1);
-    if (I < 1) or (I > WeaponSlots) or ((FStats.WeaponMask and (1 shl I)) = 0) then
+    if (I < 1) or (I > WeaponSlots) or ((FCur.Stats.WeaponMask and (1 shl I)) = 0) then
       I := 1;
-    FStats.CurrentWeapon := I;
-    FGun.Reset(I, False);
+    FCur.Stats.CurrentWeapon := I;
+    FCur.Gun.Reset(I, False);
     UpdateWeaponModel;
   end;
 

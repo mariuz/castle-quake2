@@ -63,6 +63,49 @@ type
   end;
   TQuakeTurretList = specialize TObjectList<TQuakeTurret>;
 
+  { One player's state in the world (E.2): stats and inventory, view, pmove,
+    gun, death and the timers that hurt or warn them. TQuakeWorld acts on
+    its CurrentPlayer (player 1 in single player). }
+  TQuakePlayer = class
+  public
+    { 1 .. MaxNetClients }
+    Number: Integer;
+    Stats: TQuakePlayerStats;
+    { Eye position and view direction (CGE coordinates) }
+    Pos, Dir: TVector3;
+    { The player's pmove (the server's: TQuakeServer.PM; not owned) }
+    PM: TQuakePMove;
+    { Quake 2's weapon frame state machine (owned) }
+    Gun: TQuakeGun;
+    { Fire held this frame (FireWeapon is called every frame while held) and
+      in the previous one (to latch new presses) }
+    FireHeld, PrevFireHeld: Boolean;
+    { Last time the player fired (Quake 2 show_hostile lasts 1 s) }
+    LastFireTime: Single;
+    Dead: Boolean;
+    DeadTimer: Single;
+    { How the player died: gibbed (health below -40), and where the killing
+      blow came from (CGE coordinates; the death view turns to it) }
+    Gibbed: Boolean;
+    KillerPos: TVector3;
+    HasKiller: Boolean;
+    PainSoundTimer, HurtTimer: Single;
+    { The monster that fired the shot hurting the player now (for the
+      defender sphere) }
+    DamageSource: TQuakeMonster;
+    { Air and liquids }
+    LastWaterLevel: Integer;
+    AirFinished, LiquidDamageTimer: Single;
+    { Rebreather / environment suit breathing sounds (u_breath1 / 2) }
+    BreathTimer: Single;
+    BreathSound: Boolean;
+    { trigger_gravity's factor of the player's gravity }
+    Gravity: Single;
+    constructor Create(const ANumber: Integer);
+    destructor Destroy; override;
+  end;
+  TQuakePlayerList = specialize TObjectList<TQuakePlayer>;
+
   { World simulation manager }
   TQuakeWorld = class
   private
@@ -95,9 +138,7 @@ type
     { target_steam's sustained effects: until (level time) and the next puff }
     FSteam: specialize TDictionary<TQuakeEntity, TVector2>;
     FHintPaths: TQuakeHintPaths;
-    { The monster that fired the shot hurting the player now (for the
-      defender sphere); the sphere, its enemy, its next shot }
-    FDamageSource: TQuakeMonster;
+    { The defender sphere, its enemy, its next shot }
     FDefender: TCastleTransform;
     FDefenderModel, FDefenderShell: TQuakeMd2Instance;
     FDefenderEnemy: TQuakeMonster;
@@ -105,13 +146,12 @@ type
     { Quake II Remastered dynamic_light entities (not owned; on / off in
       FCounters: 1 / 0) }
     FDynamicLights: TQuakeEntityList;
-    FStats: TQuakePlayerStats;
+    { The players (E.2): FCur is the one the world acts on now (player 1 in
+      single player) }
+    FPlayers: TQuakePlayerList;
+    FCur: TQuakePlayer;
     FHud: TQuakeHud;
-    FPlayerPos: TVector3;
-    FPlayerDir: TVector3;
     FTime: Single;
-    { Last time the player fired (Quake 2 show_hostile lasts 1 s) }
-    FLastFireTime: Single;
     FTrailTimer: Single;
     { Monsters that found the player this frame (Quake 2 level.sight_entity) }
     FSightEntities: specialize TList<TQuakeMonster>;
@@ -119,11 +159,6 @@ type
     FWeaponModel: TQuakeMd2Instance;
     FWeaponModelSlot: Integer;
     FWeaponKick: Single;
-    { The player's gun: Quake 2's weapon frame state machine }
-    FGun: TQuakeGun;
-    { Fire held this frame (FireWeapon is called every frame while held) and
-      in the previous one (to latch new presses) }
-    FFireHeld, FPrevFireHeld: Boolean;
     { Monster shots fired (demo log) }
     FMonsterShots: Integer;
     { Brush collision of the current map (player box traces) }
@@ -146,25 +181,14 @@ type
     FTeleportPending: Boolean;
     FTeleportPos: TVector3;
     FTeleportAngle: Single;
-    FDead: Boolean;
-    FDeadTimer: Single;
-    { How the player died: gibbed (health below -40), and where the killing
-      blow came from (CGE coordinates; the death view turns to it) }
-    FPlayerGibbed: Boolean;
-    FKillerPos: TVector3;
-    FHasKiller: Boolean;
     FRestartPending: Boolean;
-    FPainSoundTimer: Single;
-    FHurtTimer: Single;
     FKeyIcons: TStringList;
     FUseDepth: Integer;
     { The entity whose targets are being used (Quake 2's "other" in use
       functions: trigger_elevator reads its pathtarget); nil if unknown }
     FUseSource: TQuakeEntity;
     FHelpPrimary, FHelpSecondary: String;
-    { The player's pmove (the server's: TQuakeServer.PM) and the view's
-      movement behaviour (damage kicks) }
-    FPlayer: TQuakePMove;
+    { The view's movement behaviour (damage kicks) }
     FViewPlayer: TQuakePlayerMovement;
     { Pickups spawned from the map; later ones are monsters' drops }
     FMapPickupCount: Integer;
@@ -172,9 +196,6 @@ type
     FServerFlags: Integer;
     { States of levels left through a changelevel in the current unit, by map name }
     FLevelStates: TJSONObject;
-    FLastWaterLevel: Integer;
-    FAirFinished: Single;
-    FLiquidDamageTimer: Single;
     { Bosses blowing up (BossExplode): the next explosion's time, how many }
     FBossExplosions: array of record
       Monster: TQuakeMonster;
@@ -189,16 +210,13 @@ type
       Yaw: Single;
       Target: String;
     end;
-    { Rebreather / environment suit breathing sounds (u_breath1 / 2) }
-    FBreathTimer: Single;
-    FBreathSound: Boolean;
     { target_earthquake shakes: entity -> end time; time of the next shove /
       sound per quake }
     FQuakes: array of record
       Entity: TQuakeEntity;
       EndTime, NextShove, NextSound: Single;
     end;
-    FPlayerGravity, FBaseGravity: Single;
+    FBaseGravity: Single;
     { func_clock timers (Health counts, Wait is the end; NextThink < 0: off) }
     FClocks: array of record
       Entity, Display: TQuakeEntity;
@@ -234,6 +252,12 @@ type
     procedure KillBox(const Box: TBox3D);
     procedure UpdateLiquids(const SecondsPassed: Single);
     procedure SetPlayer(const Value: TQuakePMove);
+    function GetPlayerPM: TQuakePMove;
+    function GetStats: TQuakePlayerStats;
+    function GetDead: Boolean;
+    function GetPlayerGibbed: Boolean;
+    function GetGun: TQuakeGun;
+    function GetPlayerGravity: Single;
     procedure PlayerFallDamage(const Damage: Integer);
     procedure PlayerLanded(Sender: TObject);
     procedure ChooseSpawnPoint(const SpawnName: String);
@@ -430,7 +454,7 @@ type
     { Entities shown / considered by the last CullEntities }
     property VisibleEntities: Integer read FVisibleEntities;
     { The player's gun (weapon frames); autotests turn off its random idle pauses }
-    property Gun: TQuakeGun read FGun;
+    property Gun: TQuakeGun read GetGun;
     { Monster shots / hits fired since the level started (demo log) }
     property MonsterShots: Integer read FMonsterShots;
     property CulledEntities: Integer read FCulledEntities;
@@ -457,7 +481,7 @@ type
     { Last text a target_string showed (for the V log) }
     property LastString: String read FLastString;
     { Gravity multiplier set by trigger_gravity (1 = normal) }
-    property PlayerGravity: Single read FPlayerGravity;
+    property PlayerGravity: Single read GetPlayerGravity;
 
     { Damage the player (armor absorbs part of it) }
     { NoArmor: Quake 2 DAMAGE_NO_ARMOR (drowning): armor and power armor don't help }
@@ -509,10 +533,13 @@ type
       const Ignore: TObject): TQuakeTrace;
     procedure PlayerBeforeMove(Sender: TObject);
     { Player movement (pmove), for falling damage and jump pads; may be nil }
-    property Player: TQuakePMove read FPlayer write SetPlayer;
+    property Player: TQuakePMove read GetPlayerPM write SetPlayer;
+    { Every player; the world acts on CurrentPlayer (player 1 in single player) }
+    property Players: TQuakePlayerList read FPlayers;
+    property CurrentPlayer: TQuakePlayer read FCur;
     { The view's movement (view kicks on damage); may be nil }
     property ViewPlayer: TQuakePlayerMovement read FViewPlayer write FViewPlayer;
-    property Stats: TQuakePlayerStats read FStats;
+    property Stats: TQuakePlayerStats read GetStats;
     property SpawnPoint: TVector3 read FSpawnPoint;
     property SpawnAngle: Single read FSpawnAngle;
     { target_poi: a point of interest was set, and where (Quake coordinates) }
@@ -524,8 +551,8 @@ type
     property TeleportPos: TVector3 read FTeleportPos;
     property TeleportAngle: Single read FTeleportAngle;
     property RestartPending: Boolean read FRestartPending;
-    property Dead: Boolean read FDead;
-    property PlayerGibbed: Boolean read FPlayerGibbed;
+    property Dead: Boolean read GetDead;
+    property PlayerGibbed: Boolean read GetPlayerGibbed;
     { The killer's position, when the death had one (LookAtKiller) }
     function KillerPosition(out Pos: TVector3): Boolean;
     { The "kill" console command: health 0 and player_die (no gibs, also in
@@ -725,6 +752,54 @@ end;
 {$I quakeworld_player.inc}
 {$I quakeworld_save.inc}
 
+{ TQuakePlayer ----------------------------------------------------------------- }
+
+constructor TQuakePlayer.Create(const ANumber: Integer);
+begin
+  inherited Create;
+  Number := ANumber;
+  Gun := TQuakeGun.Create;
+  Gravity := 1;
+end;
+
+destructor TQuakePlayer.Destroy;
+begin
+  FreeAndNil(Gun);
+  inherited Destroy;
+end;
+
+{ TQuakeWorld ------------------------------------------------------------------ }
+
+function TQuakeWorld.GetPlayerPM: TQuakePMove;
+begin
+  Result := FCur.PM;
+end;
+
+function TQuakeWorld.GetStats: TQuakePlayerStats;
+begin
+  Result := FCur.Stats;
+end;
+
+function TQuakeWorld.GetDead: Boolean;
+begin
+  Result := FCur.Dead;
+end;
+
+function TQuakeWorld.GetPlayerGibbed: Boolean;
+begin
+  Result := FCur.Gibbed;
+end;
+
+function TQuakeWorld.GetGun: TQuakeGun;
+begin
+  Result := FCur.Gun;
+end;
+
+function TQuakeWorld.GetPlayerGravity: Single;
+begin
+  Result := FCur.Gravity;
+end;
+
 constructor TQuakeWorld.Create(const AItems: TCastleAbstractRootTransform; const AMap: TQuakeMap);
 begin
   inherited Create;
@@ -743,9 +818,11 @@ begin
   EntityPointContents := @MonsterPointContents;
   HintSight := @HintPointsVisible;
   MonsterWeldCycle := @WeldCycle;
-  FGun := TQuakeGun.Create;
-  FGun.OnEvent := @GunEvent;
-  FGun.OnAmmo := @GunAmmo;
+  FPlayers := TQuakePlayerList.Create(True);
+  FCur := TQuakePlayer.Create(1);
+  FPlayers.Add(FCur);
+  FCur.Gun.OnEvent := @GunEvent;
+  FCur.Gun.OnAmmo := @GunAmmo;
   PlayerTrail := TQuakePlayerTrail.Create;
   FProjectiles := TQuakeProjectileList.Create(True);
   FTriggers := TQuakeTriggerList.Create(True);
@@ -776,7 +853,8 @@ begin
   ClearLevel;
   FreeAndNil(FWeaponModel);
   FreeAndNil(FWeaponTransform);
-  FreeAndNil(FGun);
+  FCur := nil;
+  FreeAndNil(FPlayers);
   FreeAndNil(FMoverPoses);
   EntityTrace := nil;
   EntitySightPossible := nil;
@@ -853,8 +931,8 @@ begin
         Sounds.AddLoop('sound/weapons/traploop.wav', Proj.Transform.Translation);
     end;
   { The player's weapon sound (chaingun / hyperblaster spin, grenade fuse) }
-  if (FGun.LoopSound <> '') and not FDead then
-    Sounds.AddLoop(FGun.LoopSound, Listener);
+  if (FCur.Gun.LoopSound <> '') and not FCur.Dead then
+    Sounds.AddLoop(FCur.Gun.LoopSound, Listener);
   Sounds.EndLoops;
 end;
 
@@ -893,36 +971,36 @@ var
 begin
   if FBsp = nil then
     Exit;
-  FPlayerPos := PlayerPos;
-  FPlayerDir := PlayerDir;
-  PlayerShowHostile := (FLastFireTime > 0) and (FTime - FLastFireTime < 1);
+  FCur.Pos := PlayerPos;
+  FCur.Dir := PlayerDir;
+  PlayerShowHostile := (FCur.LastFireTime > 0) and (FTime - FCur.LastFireTime < 1);
   UpdatePlayerTrail(SecondsPassed);
   FTime := FTime + SecondsPassed;
-  FStats.LevelTime := FStats.LevelTime + SecondsPassed;
-  FStats.QuadTime := Max(0, FStats.QuadTime - SecondsPassed);
-  FStats.InvulnTime := Max(0, FStats.InvulnTime - SecondsPassed);
+  FCur.Stats.LevelTime := FCur.Stats.LevelTime + SecondsPassed;
+  FCur.Stats.QuadTime := Max(0, FCur.Stats.QuadTime - SecondsPassed);
+  FCur.Stats.InvulnTime := Max(0, FCur.Stats.InvulnTime - SecondsPassed);
   { DualFire: quadfire2.wav as it starts to fade (3 s left) }
-  if (FStats.QuadFireTime > 3) and (FStats.QuadFireTime - SecondsPassed <= 3) then
+  if (FCur.Stats.QuadFireTime > 3) and (FCur.Stats.QuadFireTime - SecondsPassed <= 3) then
     Sounds.Play('sound/items/quadfire2.wav', 1, chItem);
-  FStats.QuadFireTime := Max(0, FStats.QuadFireTime - SecondsPassed);
-  FGun.Haste := FStats.QuadFireTime > 0;
+  FCur.Stats.QuadFireTime := Max(0, FCur.Stats.QuadFireTime - SecondsPassed);
+  FCur.Gun.Haste := FCur.Stats.QuadFireTime > 0;
   { Double damage: ddamage2.wav 3 s before it ends }
-  if (FStats.DoubleTime > 3) and (FStats.DoubleTime - SecondsPassed <= 3) then
+  if (FCur.Stats.DoubleTime > 3) and (FCur.Stats.DoubleTime - SecondsPassed <= 3) then
     Sounds.Play('sound/misc/ddamage2.wav', 1, chItem);
-  FStats.DoubleTime := Max(0, FStats.DoubleTime - SecondsPassed);
-  FStats.IRTime := Max(0, FStats.IRTime - SecondsPassed);
-  IRGogglesOn := FStats.IRTime > 0;
+  FCur.Stats.DoubleTime := Max(0, FCur.Stats.DoubleTime - SecondsPassed);
+  FCur.Stats.IRTime := Max(0, FCur.Stats.IRTime - SecondsPassed);
+  IRGogglesOn := FCur.Stats.IRTime > 0;
   UpdatePlayerItems(SecondsPassed);
   UpdateDefender(SecondsPassed);
-  FPainSoundTimer := FPainSoundTimer - SecondsPassed;
+  FCur.PainSoundTimer := FCur.PainSoundTimer - SecondsPassed;
   { Projectile lights of the previous frame }
   Lighting.EndFrame;
   UpdateDynamicLights;
 
-  if FDead then
+  if FCur.Dead then
   begin
-    FDeadTimer := FDeadTimer - SecondsPassed;
-    if FDeadTimer <= 0 then
+    FCur.DeadTimer := FCur.DeadTimer - SecondsPassed;
+    if FCur.DeadTimer <= 0 then
     begin
       FRestartPending := True;
       ResetStats;
@@ -943,7 +1021,7 @@ begin
 
   for I := 0 to FPickups.Count - 1 do
     FPickups[I].UpdatePickup(SecondsPassed);
-  if not FDead then
+  if not FCur.Dead then
   begin
     CheckPickups;
     CheckTriggers(SecondsPassed);
@@ -957,12 +1035,12 @@ begin
     if M.AngerActive then
       M.UpdateAI(SecondsPassed, M.AngerPos)
     else
-      M.UpdateAI(SecondsPassed, FPlayerPos);
+      M.UpdateAI(SecondsPassed, FCur.Pos);
     if (not M.IsAlive) and not M.KillCounted then
     begin
       M.KillCounted := True;
       if not (M.GoodGuy or M.DoNotCount) then
-        Inc(FStats.Kills);
+        Inc(FCur.Stats.Kills);
       { monster_death_use: a monster with an "item" drops it (Drop_Item) }
       if M.Entity.GetField('item') <> '' then
         DropMonsterItem(M);
@@ -995,7 +1073,7 @@ begin
   UpdateFallingObjects(SecondsPassed);
   UpdateClocks;
   UpdateMedics(SecondsPassed);
-  FMap.UpdateSkyRotation(FStats.LevelTime);
+  FMap.UpdateSkyRotation(FCur.Stats.LevelTime);
   UpdateEarthquakes;
   AddProjectileLights;
   Lighting.Update(SecondsPassed);
@@ -1006,18 +1084,18 @@ begin
   FWeaponKick := Max(0, FWeaponKick - SecondsPassed * 6);
   if FWeaponModel <> nil then
   begin
-    FWeaponModel.ShowFrames(FGun.OldFrame, FGun.Frame, FGun.FrameLerp);
-    FWeaponModel.SetTint(Lighting.SampleLight(FPlayerPos - Vector3(0, 20, 0)));
+    FWeaponModel.ShowFrames(FCur.Gun.OldFrame, FCur.Gun.Frame, FCur.Gun.FrameLerp);
+    FWeaponModel.SetTint(Lighting.SampleLight(FCur.Pos - Vector3(0, 20, 0)));
     { Powerup shells: quad RF_SHELL_BLUE, invulnerability RF_SHELL_RED;
       they blink in the last 3 seconds, like the Quake 2 HUD icons }
     Shell := TVector3.Zero;
-    if (FStats.QuadTime > 3) or ((FStats.QuadTime > 0) and (Frac(FTime * 4) < 0.5)) then
+    if (FCur.Stats.QuadTime > 3) or ((FCur.Stats.QuadTime > 0) and (Frac(FTime * 4) < 0.5)) then
       Shell := Shell + Vector3(0, 0, 1)
     else
     { EF_DOUBLE: a gold shell }
-    if (FStats.DoubleTime > 3) or ((FStats.DoubleTime > 0) and (Frac(FTime * 4) < 0.5)) then
+    if (FCur.Stats.DoubleTime > 3) or ((FCur.Stats.DoubleTime > 0) and (Frac(FTime * 4) < 0.5)) then
       Shell := Shell + Vector3(0.6, 0.45, 0);
-    if (FStats.InvulnTime > 3) or ((FStats.InvulnTime > 0) and (Frac(FTime * 4) < 0.5)) then
+    if (FCur.Stats.InvulnTime > 3) or ((FCur.Stats.InvulnTime > 0) and (Frac(FTime * 4) < 0.5)) then
       Shell := Shell + Vector3(1, 0, 0);
     FWeaponModel.SetShell(Shell);
   end;
@@ -1027,11 +1105,11 @@ begin
   { Inventory to HUD }
   FKeyIcons.Clear;
   for I := 0 to High(KeyIconNames) do
-    if (FStats.Keys and (1 shl I)) <> 0 then
+    if (FCur.Stats.Keys and (1 shl I)) <> 0 then
       FKeyIcons.Add(KeyIconNames[I]);
-  A := WeaponDefs[FStats.CurrentWeapon].AmmoType;
+  A := WeaponDefs[FCur.Stats.CurrentWeapon].AmmoType;
   if FHud <> nil then
-    FHud.Update(SecondsPassed, FStats, WeaponDefs[FStats.CurrentWeapon].Icon, AmmoIcons[A], FKeyIcons);
+    FHud.Update(SecondsPassed, FCur.Stats, WeaponDefs[FCur.Stats.CurrentWeapon].Icon, AmmoIcons[A], FKeyIcons);
 end;
 
 procedure TQuakeWorld.UpdateFrame(const SecondsPassed: Single);
@@ -1071,7 +1149,7 @@ begin
     WeaponView := (Inst = FWeaponModel) and (FViewCamera <> nil) and
       (FWeaponTransform.Parent <> nil);
     if WeaponView then
-      Pos := FPlayerPos
+      Pos := FCur.Pos
     else
       Pos := Inst.Scene.WorldTransform.MultPoint(TVector3.Zero);
     Count := Lighting.NearestLights(Pos, Lights);
@@ -1245,16 +1323,16 @@ begin
     end;
   end;
   { The player's box (for monsters and their shots) }
-  if ((Mask and CONTENTS_MONSTER) <> 0) and (FPlayer <> nil) and (Ignore <> FPlayer) and (not FDead) then
+  if ((Mask and CONTENTS_MONSTER) <> 0) and (FCur.PM <> nil) and (Ignore <> FCur.PM) and (not FCur.Dead) then
   begin
-    Org := FPlayer.Origin;
-    if Overlaps(Org + FPlayer.BoxMins, Org + FPlayer.BoxMaxs) then
+    Org := FCur.PM.Origin;
+    if Overlaps(Org + FCur.PM.BoxMins, Org + FCur.PM.BoxMaxs) then
     begin
-      T := BoxTraceAgainstBox(Start, Stop, Mins, Maxs, Org + FPlayer.BoxMins, Org + FPlayer.BoxMaxs,
+      T := BoxTraceAgainstBox(Start, Stop, Mins, Maxs, Org + FCur.PM.BoxMins, Org + FCur.PM.BoxMaxs,
         CONTENTS_MONSTER);
       if T.Hit then
       begin
-        T.Ent := FPlayer;
+        T.Ent := FCur.PM;
         CombineTrace(Result, T);
       end;
     end;

@@ -7,13 +7,13 @@ var
   Save, Take: Integer;
 begin
   { The defender sphere goes after whoever hurt the player (defender_pain) }
-  if (FStats.DefenderTime > 0) and (FDamageSource <> nil) and FDamageSource.IsAlive then
-    FDefenderEnemy := FDamageSource;
-  if FDead or FStats.GodMode or (FStats.InvulnTime > 0) or (Amount <= 0) then
+  if (FCur.Stats.DefenderTime > 0) and (FCur.DamageSource <> nil) and FCur.DamageSource.IsAlive then
+    FDefenderEnemy := FCur.DamageSource;
+  if FCur.Dead or FCur.Stats.GodMode or (FCur.Stats.InvulnTime > 0) or (Amount <= 0) then
     Exit;
   Take := Amount;
   { T_Damage: half damage while a defender sphere is out }
-  if FStats.DefenderTime > 0 then
+  if FCur.Stats.DefenderTime > 0 then
     Take := Max(1, Take div 2);
   { Quake 2 T_Damage: half damage on easy }
   if GameSkill = 0 then
@@ -21,38 +21,38 @@ begin
   { Power armor first, then armor (T_Damage: CheckPowerArmor, CheckArmor) }
   if not NoArmor then
     Take := Take - AbsorbPlayerPowerArmor(Take, FromPos);
-  if (not NoArmor) and (FStats.Armor > 0) and (FStats.ArmorType > 0) then
+  if (not NoArmor) and (FCur.Stats.Armor > 0) and (FCur.Stats.ArmorType > 0) then
   begin
-    Save := Min(FStats.Armor, Ceil(ArmorProtection[FStats.ArmorType] * Take));
-    FStats.Armor := FStats.Armor - Save;
+    Save := Min(FCur.Stats.Armor, Ceil(ArmorProtection[FCur.Stats.ArmorType] * Take));
+    FCur.Stats.Armor := FCur.Stats.Armor - Save;
     Take := Take - Save;
-    if FStats.Armor <= 0 then
-      FStats.ArmorType := 0;
+    if FCur.Stats.Armor <= 0 then
+      FCur.Stats.ArmorType := 0;
   end;
-  FStats.Health := FStats.Health - Take;
+  FCur.Stats.Health := FCur.Stats.Health - Take;
   if FHud <> nil then
     FHud.FlashDamage(Amount);
   if FViewPlayer <> nil then
-    FViewPlayer.DamageKick(Amount, FromPos, FStats.Health);
+    FViewPlayer.DamageKick(Amount, FromPos, FCur.Stats.Health);
 
-  if FStats.Health <= 0 then
+  if FCur.Stats.Health <= 0 then
   begin
-    FKillerPos := FromPos;
-    FHasKiller := PointsDistance(FromPos, FPlayerPos) > 1;
+    FCur.KillerPos := FromPos;
+    FCur.HasKiller := PointsDistance(FromPos, FCur.Pos) > 1;
     KillPlayer;
     Exit;
   end;
 
-  if FPainSoundTimer <= 0 then
+  if FCur.PainSoundTimer <= 0 then
   begin
-    FPainSoundTimer := 0.7;
-    if FStats.Health < 25 then
+    FCur.PainSoundTimer := 0.7;
+    if FCur.Stats.Health < 25 then
       Sounds.Play('sound/player/male/pain25_1.wav', 1, chVoice)
     else
-    if FStats.Health < 50 then
+    if FCur.Stats.Health < 50 then
       Sounds.Play('sound/player/male/pain50_1.wav', 1, chVoice)
     else
-    if FStats.Health < 75 then
+    if FCur.Stats.Health < 75 then
       Sounds.Play('sound/player/male/pain75_1.wav', 1, chVoice)
     else
       Sounds.Play('sound/player/male/pain100_1.wav', 1, chVoice);
@@ -64,26 +64,26 @@ var
   Pieces: array[0..0] of TGibPiece;
   Org: TVector3;
 begin
-  FDead := True;
-  FDeadTimer := 3.0;
+  FCur.Dead := True;
+  FCur.DeadTimer := 3.0;
   { player_die: below -40 health the body is gibbed (4 meat + the head the
     view stays in), else the death sound }
-  FPlayerGibbed := FStats.Health < -40;
-  if FPlayerGibbed then
+  FCur.Gibbed := FCur.Stats.Health < -40;
+  if FCur.Gibbed then
   begin
     Sounds.Play('sound/misc/udeath.wav', 1, chBody);
     Pieces[0].Model := 'models/objects/gibs/sm_meat/tris.md2';
     Pieces[0].Count := 4;
     Pieces[0].Metallic := False;
-    Org := FPlayerPos - Vector3(0, PlayerEyeHeight - 24, 0);
-    Particles.ThrowGibs(Org + Vector3(-16, -24, -16), Org + Vector3(16, 32, 16), Pieces, -FStats.Health);
-    WritelnLog('QuakeWorld', 'Player gibbed (health %d)', [FStats.Health]);
+    Org := FCur.Pos - Vector3(0, PlayerEyeHeight - 24, 0);
+    Particles.ThrowGibs(Org + Vector3(-16, -24, -16), Org + Vector3(16, 32, 16), Pieces, -FCur.Stats.Health);
+    WritelnLog('QuakeWorld', 'Player gibbed (health %d)', [FCur.Stats.Health]);
   end else
   begin
     Sounds.Play('sound/player/male/death' + IntToStr(1 + Random(4)) + '.wav', 1, chVoice);
-    WritelnLog('QuakeWorld', 'Player died (health %d)', [FStats.Health]);
+    WritelnLog('QuakeWorld', 'Player died (health %d)', [FCur.Stats.Health]);
   end;
-  FStats.Health := Min(FStats.Health, 0);
+  FCur.Stats.Health := Min(FCur.Stats.Health, 0);
   { ps.gunindex = 0: no view weapon while dead }
   if FWeaponTransform <> nil then
     FWeaponTransform.Exists := False;
@@ -93,22 +93,22 @@ end;
 
 function TQuakeWorld.KillerPosition(out Pos: TVector3): Boolean;
 begin
-  Pos := FKillerPos;
-  Result := FDead and FHasKiller;
+  Pos := FCur.KillerPos;
+  Result := FCur.Dead and FCur.HasKiller;
 end;
 
 procedure TQuakeWorld.Suicide;
 begin
-  if FDead then
+  if FCur.Dead then
     Exit;
-  FStats.Health := 0;
-  FHasKiller := False;
+  FCur.Stats.Health := 0;
+  FCur.HasKiller := False;
   KillPlayer;
 end;
 
 function TQuakeWorld.PlayerTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer): TQuakeTrace;
 begin
-  Result := WorldTrace(Start, Stop, Mins, Maxs, Mask, FPlayer);
+  Result := WorldTrace(Start, Stop, Mins, Maxs, Mask, FCur.PM);
 end;
 
 procedure TQuakeWorld.PlayerBeforeMove(Sender: TObject);
@@ -119,12 +119,12 @@ begin
     Exit;
   PushPlayerByMovers;
   { For monster moves: the player's box in CGE space }
-  if FDead then
+  if FCur.Dead then
     PlayerBlockBox := TBox3D.Empty
   else
   begin
-    Org := FPlayer.Origin;
-    PlayerBlockBox := QuakeBoxToCge(Org + FPlayer.BoxMins, Org + FPlayer.BoxMaxs);
+    Org := FCur.PM.Origin;
+    PlayerBlockBox := QuakeBoxToCge(Org + FCur.PM.BoxMins, Org + FCur.PM.BoxMaxs);
   end;
 end;
 
@@ -142,56 +142,56 @@ procedure TQuakeWorld.UpdateLiquids(const SecondsPassed: Single);
 var
   Level, WType: Integer;
 begin
-  if (FPlayer = nil) or FDead then
+  if (FCur.PM = nil) or FCur.Dead then
     Exit;
-  Level := FPlayer.WaterLevel;
-  WType := FPlayer.WaterType;
+  Level := FCur.PM.WaterLevel;
+  WType := FCur.PM.WaterType;
 
   { P_WorldEffects: enter / leave sounds }
-  if (FLastWaterLevel = 0) and (Level > 0) then
+  if (FCur.LastWaterLevel = 0) and (Level > 0) then
   begin
     if (WType and CONTENTS_LAVA) <> 0 then
       Sounds.Play('sound/player/lava_in.wav', 1, chBody)
     else
       Sounds.Play('sound/player/watr_in.wav', 1, chBody);
   end else
-  if (FLastWaterLevel > 0) and (Level = 0) then
+  if (FCur.LastWaterLevel > 0) and (Level = 0) then
     Sounds.Play('sound/player/watr_out.wav', 1, chBody)
   else
-  if (FLastWaterLevel < 3) and (Level = 3) then
+  if (FCur.LastWaterLevel < 3) and (Level = 3) then
     Sounds.Play('sound/player/watr_un.wav', 1, chBody);
-  if (FLastWaterLevel = 3) and (Level < 3) and (FAirFinished < FTime + 7) then
+  if (FCur.LastWaterLevel = 3) and (Level < 3) and (FCur.AirFinished < FTime + 7) then
     Sounds.Play('sound/player/gasp1.wav', 1, chVoice);
 
   { Drowning: 12 seconds of air, then 2 damage per second, increasing;
     the rebreather and environment suit give air (P_WorldEffects) }
   if Level < 3 then
-    FAirFinished := FTime + 12
+    FCur.AirFinished := FTime + 12
   else
   begin
-    if (FStats.BreatherTime > 0) or (FStats.EnviroTime > 0) then
+    if (FCur.Stats.BreatherTime > 0) or (FCur.Stats.EnviroTime > 0) then
     begin
-      FAirFinished := FTime + 10;
+      FCur.AirFinished := FTime + 10;
       { u_breath1 / u_breath2 every 2.5 s }
-      FBreathTimer := FBreathTimer - SecondsPassed;
-      if FBreathTimer <= 0 then
+      FCur.BreathTimer := FCur.BreathTimer - SecondsPassed;
+      if FCur.BreathTimer <= 0 then
       begin
-        FBreathTimer := 2.5;
-        FBreathSound := not FBreathSound;
-        if FBreathSound then
+        FCur.BreathTimer := 2.5;
+        FCur.BreathSound := not FCur.BreathSound;
+        if FCur.BreathSound then
           Sounds.Play('sound/player/u_breath1.wav', 1, chAuto)
         else
           Sounds.Play('sound/player/u_breath2.wav', 1, chAuto);
-        PlayerNoise(FPlayerPos);
+        PlayerNoise(FCur.Pos);
       end;
     end;
-    if FTime > FAirFinished then
+    if FTime > FCur.AirFinished then
     begin
-      FLiquidDamageTimer := FLiquidDamageTimer - SecondsPassed;
-      if FLiquidDamageTimer <= 0 then
+      FCur.LiquidDamageTimer := FCur.LiquidDamageTimer - SecondsPassed;
+      if FCur.LiquidDamageTimer <= 0 then
       begin
-        FLiquidDamageTimer := 1;
-        DamagePlayer(Min(15, 2 + 2 * Trunc(FTime - FAirFinished)), FPlayerPos, True);
+        FCur.LiquidDamageTimer := 1;
+        DamagePlayer(Min(15, 2 + 2 * Trunc(FTime - FCur.AirFinished)), FCur.Pos, True);
       end;
     end;
   end;
@@ -200,23 +200,23 @@ begin
     none with the suit }
   if (Level > 0) and ((WType and (CONTENTS_LAVA or CONTENTS_SLIME)) <> 0) then
   begin
-    FLiquidDamageTimer := FLiquidDamageTimer - SecondsPassed;
-    if FLiquidDamageTimer <= 0 then
+    FCur.LiquidDamageTimer := FCur.LiquidDamageTimer - SecondsPassed;
+    if FCur.LiquidDamageTimer <= 0 then
     begin
-      FLiquidDamageTimer := 0.1;
+      FCur.LiquidDamageTimer := 0.1;
       if (WType and CONTENTS_LAVA) <> 0 then
       begin
-        if FStats.EnviroTime > 0 then
-          DamagePlayer(Level, FPlayerPos)
+        if FCur.Stats.EnviroTime > 0 then
+          DamagePlayer(Level, FCur.Pos)
         else
-          DamagePlayer(3 * Level, FPlayerPos);
+          DamagePlayer(3 * Level, FCur.Pos);
       end else
-      if FStats.EnviroTime <= 0 then
-        DamagePlayer(Level, FPlayerPos);
+      if FCur.Stats.EnviroTime <= 0 then
+        DamagePlayer(Level, FCur.Pos);
     end;
   end;
 
-  FLastWaterLevel := Level;
+  FCur.LastWaterLevel := Level;
   if FHud <> nil then
   begin
     if Level = 3 then
@@ -232,7 +232,7 @@ begin
     Sounds.Play('sound/player/male/fall1.wav', 1, chVoice)
   else
     Sounds.Play('sound/player/male/fall2.wav', 1, chVoice);
-  DamagePlayer(Damage, FPlayerPos);
+  DamagePlayer(Damage, FCur.Pos);
 end;
 
 procedure TQuakeWorld.PlayerLanded(Sender: TObject);

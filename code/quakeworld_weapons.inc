@@ -26,17 +26,17 @@ end;
 
 procedure TQuakeWorld.UpdateWeaponModel;
 begin
-  if FWeaponModelSlot = FStats.CurrentWeapon then
+  if FWeaponModelSlot = FCur.Stats.CurrentWeapon then
     Exit;
-  FWeaponModelSlot := FStats.CurrentWeapon;
+  FWeaponModelSlot := FCur.Stats.CurrentWeapon;
   FreeAndNil(FWeaponModel);
-  FWeaponModel := Md2Manager.CreateInstance(WeaponDefs[FStats.CurrentWeapon].ViewModel);
+  FWeaponModel := Md2Manager.CreateInstance(WeaponDefs[FCur.Stats.CurrentWeapon].ViewModel);
   if FWeaponModel <> nil then
   begin
     FWeaponModel.Scene.Collides := False;
     FWeaponModel.Scene.Pickable := False;
     FWeaponTransform.Add(FWeaponModel.Scene);
-    FWeaponModel.ShowFrames(FGun.OldFrame, FGun.Frame, FGun.FrameLerp);
+    FWeaponModel.ShowFrames(FCur.Gun.OldFrame, FCur.Gun.Frame, FCur.Gun.FrameLerp);
   end;
 end;
 
@@ -58,7 +58,7 @@ begin
     goes on through monsters (ignoring the one it just hit) }
   Start := CgeToQuake(Origin);
   Stop := Start + CgeToQuake(ShotDir) * 8192;
-  Ignore := FPlayer;
+  Ignore := FCur.PM;
   for Pierce := 0 to 4 do
   begin
     T := WorldTrace(Start, Stop, TVector3.Zero, TVector3.Zero, MASK_SHOT, Ignore);
@@ -100,9 +100,9 @@ const
   MinSpeed = 400;
   MaxSpeed = 800;
 begin
-  if FStats.Ammo[atGrenades] > 0 then
-    Dec(FStats.Ammo[atGrenades]);
-  SpawnProjectile(pkHandGrenade, FPlayerPos + FPlayerDir * 16, (FPlayerDir + Vector3(0, 0.1, 0)).Normalize,
+  if FCur.Stats.Ammo[atGrenades] > 0 then
+    Dec(FCur.Stats.Ammo[atGrenades]);
+  SpawnProjectile(pkHandGrenade, FCur.Pos + FCur.Dir * 16, (FCur.Dir + Vector3(0, 0.1, 0)).Normalize,
     MinSpeed + (GrenadeTimer - Fuse) * (MaxSpeed - MinSpeed) / GrenadeTimer, 125 * DamageMultiplier, True);
   FProjectiles.Last.Life := Max(0.1, Fuse);
   Sounds.Play('sound/weapons/hgrent1a.wav', 1, chWeapon);
@@ -116,18 +116,18 @@ var
   Speed: Single;
   Right, Vel: TVector3;
 begin
-  if FStats.Ammo[atTesla] > 0 then
-    Dec(FStats.Ammo[atTesla]);
+  if FCur.Stats.Ammo[atTesla] > 0 then
+    Dec(FCur.Stats.Ammo[atTesla]);
   { weapon_tesla_fire: a grenade's 400 .. 800 by the time it was held,
     from 22 below the eyes; fire_tesla: up 200 (+- 10), a little sideways }
   Speed := EnsureRange(MinSpeed + (GrenadeTimer - Fuse) * (MaxSpeed - MinSpeed) / GrenadeTimer, MinSpeed, MaxSpeed);
-  Right := TVector3.CrossProduct(FPlayerDir, Vector3(0, 1, 0));
+  Right := TVector3.CrossProduct(FCur.Dir, Vector3(0, 1, 0));
   if Right.IsZero then
     Right := Vector3(1, 0, 0);
   Right := Right.Normalize;
-  Vel := FPlayerDir * Speed + Vector3(0, 200 + (Random * 2 - 1) * 10, 0) + Right * ((Random * 2 - 1) * 10);
+  Vel := FCur.Dir * Speed + Vector3(0, 200 + (Random * 2 - 1) * 10, 0) + Right * ((Random * 2 - 1) * 10);
   { The damage: TESLA_DAMAGE 3 times the multiplier at the throw }
-  SpawnProjectile(pkTesla, FPlayerPos - Vector3(0, 22, 0) - Right * 4, Vel.Normalize, Vel.Length,
+  SpawnProjectile(pkTesla, FCur.Pos - Vector3(0, 22, 0) - Right * 4, Vel.Normalize, Vel.Length,
     3 * DamageMultiplier, True);
   Sounds.Play('sound/weapons/hgrent1a.wav', 1, chWeapon);
   WritelnLog('QuakeWorld', 'Tesla thrown at %.0f units/s', [Speed]);
@@ -144,35 +144,35 @@ var
   Speed: Single;
   Right, Vel: TVector3;
 begin
-  if FStats.Ammo[atTraps] > 0 then
-    Dec(FStats.Ammo[atTraps]);
+  if FCur.Stats.Ammo[atTraps] > 0 then
+    Dec(FCur.Stats.Ammo[atTraps]);
   Speed := Min(MinSpeed + (TrapTimer - Fuse) * (MaxSpeed - MinSpeed) / TrapTimer, MaxSpeed);
   { fire_trap: up 200 (+- 10) and a little sideways on top }
-  Right := TVector3.CrossProduct(FPlayerDir, Vector3(0, 1, 0));
+  Right := TVector3.CrossProduct(FCur.Dir, Vector3(0, 1, 0));
   if Right.IsZero then
     Right := Vector3(1, 0, 0);
   Right := Right.Normalize;
-  Vel := FPlayerDir * Speed + Vector3(0, 200 + (Random * 2 - 1) * 10, 0) + Right * ((Random * 2 - 1) * 10);
-  SpawnProjectile(pkTrap, FPlayerPos + FPlayerDir * 8 - Vector3(0, 8, 0), Vel.Normalize, Vel.Length, 0, True);
+  Vel := FCur.Dir * Speed + Vector3(0, 200 + (Random * 2 - 1) * 10, 0) + Right * ((Random * 2 - 1) * 10);
+  SpawnProjectile(pkTrap, FCur.Pos + FCur.Dir * 8 - Vector3(0, 8, 0), Vel.Normalize, Vel.Length, 0, True);
   WritelnLog('QuakeWorld', 'Trap thrown at %.0f units/s', [Speed]);
 end;
 
 procedure TQuakeWorld.UpdateGun(const SecondsPassed: Single);
 begin
-  if FDead then
+  if FCur.Dead then
   begin
-    FGun.Attack := False;
-    FGun.AttackLatched := False;
-    FFireHeld := False;
-    FPrevFireHeld := False;
+    FCur.Gun.Attack := False;
+    FCur.Gun.AttackLatched := False;
+    FCur.FireHeld := False;
+    FCur.PrevFireHeld := False;
     Exit;
   end;
-  { FireWeapon of the previous frame set FFireHeld }
-  FGun.Attack := FFireHeld;
-  FGun.Update(SecondsPassed);
-  FPrevFireHeld := FFireHeld;
-  FFireHeld := False;
-  FGun.Attack := False;
+  { FireWeapon of the previous frame set FCur.FireHeld }
+  FCur.Gun.Attack := FCur.FireHeld;
+  FCur.Gun.Update(SecondsPassed);
+  FCur.PrevFireHeld := FCur.FireHeld;
+  FCur.FireHeld := False;
+  FCur.Gun.Attack := False;
 end;
 
 function TQuakeWorld.GunAmmo(const Slot: Integer): Integer;
@@ -183,14 +183,14 @@ begin
   if (Def.AmmoType = atNone) or (Def.AmmoPerShot <= 0) then
     Result := MaxInt
   else
-    Result := FStats.Ammo[Def.AmmoType] div Def.AmmoPerShot;
+    Result := FCur.Stats.Ammo[Def.AmmoType] div Def.AmmoPerShot;
 end;
 
 procedure TQuakeWorld.NoAmmoWeaponChange;
 
   function Has(const Slot: Integer; const Ammo: TAmmoType; const Count: Integer): Boolean;
   begin
-    Result := ((FStats.WeaponMask and (1 shl Slot)) <> 0) and (FStats.Ammo[Ammo] >= Count);
+    Result := ((FCur.Stats.WeaponMask and (1 shl Slot)) <> 0) and (FCur.Stats.Ammo[Ammo] >= Count);
   end;
 
 begin
@@ -230,7 +230,7 @@ end;
 
 function TQuakeWorld.SilencedVolume: Single;
 begin
-  if FStats.SilencerShots > 0 then
+  if FCur.Stats.SilencerShots > 0 then
     Result := 0.2
   else
     Result := 1;
@@ -238,10 +238,10 @@ end;
 
 procedure TQuakeWorld.WeaponNoise;
 begin
-  if FStats.SilencerShots > 0 then
-    Dec(FStats.SilencerShots)
+  if FCur.Stats.SilencerShots > 0 then
+    Dec(FCur.Stats.SilencerShots)
   else
-    PlayerNoise(FPlayerPos);
+    PlayerNoise(FCur.Pos);
 end;
 
 procedure TQuakeWorld.GunEvent(const Event: TGunEvent);
@@ -252,42 +252,42 @@ begin
       begin
         { weapon_bfg_fire frame 9: flash and sound, the ball follows on frame 17 }
         Sounds.Play(WeaponDefs[10].Sound, SilencedVolume, chWeapon);
-        Lighting.TriggerMuzzleFlash(FPlayerPos + FPlayerDir * 16);
-        FLastFireTime := FTime;
+        Lighting.TriggerMuzzleFlash(FCur.Pos + FCur.Dir * 16);
+        FCur.LastFireTime := FTime;
         WeaponNoise;
       end;
     geNoAmmo:
       begin
         Sounds.Play('sound/weapons/noammo.wav', 1, chVoice);
         if FHud <> nil then
-          FHud.ShowMessage('No ammo for ' + WeaponDefs[FGun.Slot].Name, 1.5);
+          FHud.ShowMessage('No ammo for ' + WeaponDefs[FCur.Gun.Slot].Name, 1.5);
         NoAmmoWeaponChange;
       end;
     geChangeWeapon:
       begin
-        if FGun.PendingSlot <> 0 then
-          FStats.CurrentWeapon := FGun.PendingSlot;
+        if FCur.Gun.PendingSlot <> 0 then
+          FCur.Stats.CurrentWeapon := FCur.Gun.PendingSlot;
         UpdateWeaponModel;
       end;
     geGrenadePin:
-      if FGun.Slot = TrapSlot then
+      if FCur.Gun.Slot = TrapSlot then
         Sounds.Play('sound/weapons/trapcock.wav', 1, chWeapon)
       else
         Sounds.Play('sound/weapons/hgrena1b.wav', 1, chWeapon);
     geGrenadeThrow:
-      if FGun.Slot = TrapSlot then
-        ThrowTrap(FGun.Fuse)
+      if FCur.Gun.Slot = TrapSlot then
+        ThrowTrap(FCur.Gun.Fuse)
       else
-      if FGun.Slot = TeslaSlot then
-        ThrowTesla(FGun.Fuse)
+      if FCur.Gun.Slot = TeslaSlot then
+        ThrowTesla(FCur.Gun.Fuse)
       else
-        ThrowHandGrenade(FGun.Fuse);
+        ThrowHandGrenade(FCur.Gun.Fuse);
     geGrenadeBlowUp:
       begin
         { Held too long: it goes off in the hand }
-        if FStats.Ammo[atGrenades] > 0 then
-          Dec(FStats.Ammo[atGrenades]);
-        Explode(FPlayerPos + FPlayerDir * 16, 125 * DamageMultiplier, 165, True);
+        if FCur.Stats.Ammo[atGrenades] > 0 then
+          Dec(FCur.Stats.Ammo[atGrenades]);
+        Explode(FCur.Pos + FCur.Dir * 16, 125 * DamageMultiplier, 165, True);
       end;
     geChaingunUp: Sounds.Play('sound/weapons/chngnu1a.wav');
     geChaingunDown: Sounds.Play('sound/weapons/chngnd1a.wav');
@@ -302,7 +302,7 @@ var
 
   function Owned(const S: Integer): Boolean;
   begin
-    Result := (FStats.WeaponMask and (1 shl S)) <> 0;
+    Result := (FCur.Stats.WeaponMask and (1 shl S)) <> 0;
   end;
 
 begin
@@ -323,14 +323,14 @@ begin
   Result := Slot;
   Cur := -1;
   for I := 0 to High(Chain) do
-    if Chain[I] = FStats.CurrentWeapon then
+    if Chain[I] = FCur.Stats.CurrentWeapon then
       Cur := I;
   if Cur >= 0 then
   begin
     for I := 1 to High(Chain) do
       if Owned(Chain[(Cur + I) mod Length(Chain)]) then
         Exit(Chain[(Cur + I) mod Length(Chain)]);
-    Exit(FStats.CurrentWeapon);
+    Exit(FCur.Stats.CurrentWeapon);
   end;
   for I := 0 to High(Chain) do
     if Owned(Chain[I]) then
@@ -339,27 +339,27 @@ end;
 
 procedure TQuakeWorld.SelectWeapon(const Slot: Integer);
 begin
-  if (Slot < 1) or (Slot > WeaponSlots) or ((FStats.WeaponMask and (1 shl Slot)) = 0) then
+  if (Slot < 1) or (Slot > WeaponSlots) or ((FCur.Stats.WeaponMask and (1 shl Slot)) = 0) then
     Exit;
-  if Slot = FStats.CurrentWeapon then
+  if Slot = FCur.Stats.CurrentWeapon then
     Exit;
   { Put the current weapon away, then raise this one (Quake 2 newweapon) }
-  FGun.Select(Slot);
+  FCur.Gun.Select(Slot);
 end;
 
 procedure TQuakeWorld.FireWeapon(const Origin, Dir: TVector3);
 begin
-  FPlayerPos := Origin;
-  FPlayerDir := Dir;
-  if (FBsp = nil) or FDead then
+  FCur.Pos := Origin;
+  FCur.Dir := Dir;
+  if (FBsp = nil) or FCur.Dead then
     Exit;
   { A new press is latched (a short tap still fires) and thinks at once }
-  if not FFireHeld and not FPrevFireHeld then
-    FGun.AttackLatched := True;
-  FFireHeld := True;
-  FGun.Attack := True;
-  FGun.Update(0);
-  FGun.Attack := False;
+  if not FCur.FireHeld and not FCur.PrevFireHeld then
+    FCur.Gun.AttackLatched := True;
+  FCur.FireHeld := True;
+  FCur.Gun.Attack := True;
+  FCur.Gun.Update(0);
+  FCur.Gun.Attack := False;
 end;
 
 procedure TQuakeWorld.FireGun;
@@ -369,18 +369,18 @@ var
   Origin, Dir, MuzzlePos, Right, Up: TVector3;
   Angle: Single;
 begin
-  Origin := FPlayerPos;
-  Dir := FPlayerDir;
-  Slot := FGun.Slot;
+  Origin := FCur.Pos;
+  Dir := FCur.Dir;
+  Slot := FCur.Gun.Slot;
   Def := WeaponDefs[Slot];
   Shots := 1;
   if Slot = 5 then
-    Shots := FGun.Shots;
+    Shots := FCur.Gun.Shots;
   { weapon_phalanx_fire: one mag slug for both balls, taken on frame 8 }
-  if (Slot = PhalanxSlot) and (FGun.Frame <> 8) then
+  if (Slot = PhalanxSlot) and (FCur.Gun.Frame <> 8) then
     Shots := 0;
   if Def.AmmoType <> atNone then
-    FStats.Ammo[Def.AmmoType] := Max(0, FStats.Ammo[Def.AmmoType] - Def.AmmoPerShot * Shots);
+    FCur.Stats.Ammo[Def.AmmoType] := Max(0, FCur.Stats.Ammo[Def.AmmoType] - Def.AmmoPerShot * Shots);
 
   FWeaponKick := 1.0;
   Mult := DamageMultiplier;
@@ -401,7 +401,7 @@ begin
     Sounds.Play('sound/items/damage3.wav', 1, chItem);
 
   { Firing makes noise (PNOISE_WEAPON) and shows the player hostile }
-  FLastFireTime := FTime;
+  FCur.LastFireTime := FTime;
   WeaponNoise;
 
   case Slot of
@@ -419,7 +419,7 @@ begin
     8:
       begin
         { Weapon_HyperBlaster_Fire: the bolt origin circles the muzzle }
-        Angle := (FGun.Frame - 5) * 2 * Pi / 6;
+        Angle := (FCur.Gun.Frame - 5) * 2 * Pi / 6;
         Right := TVector3.CrossProduct(Dir, Vector3(0, 1, 0));
         if Right.IsZero then
           Right := Vector3(1, 0, 0);
@@ -445,7 +445,7 @@ begin
         if Right.IsZero then
           Right := Vector3(1, 0, 0);
         Right := Right.Normalize;
-        if FGun.Frame = 7 then
+        if FCur.Gun.Frame = 7 then
           SpawnProjectile(pkFlechette, Origin + Dir * 15 + Right * 8 - Vector3(0, 8, 0), Dir, 750, 10 * Mult, True)
         else
           SpawnProjectile(pkFlechette, Origin + Dir * 15 + Right * 6 - Vector3(0, 8, 0), Dir, 750, 10 * Mult, True);
@@ -460,12 +460,12 @@ begin
       PlasmaBeam(Origin, Dir, 15 * Mult);
     PhalanxSlot:
       begin
-        if FGun.Frame = 8 then
+        if FCur.Gun.Frame = 8 then
           SpawnProjectile(pkPlasma, MuzzlePos, YawTurned(Dir, -1.5), 725, (70 + Random(10)) * Mult, True)
         else
           SpawnProjectile(pkPlasma, MuzzlePos, YawTurned(Dir, 1.5), 725, (70 + Random(10)) * Mult, True);
         FProjectiles.Last.SplashRadius := 120;
-        if FGun.Frame = 8 then
+        if FCur.Gun.Frame = 8 then
           FProjectiles.Last.SplashDamage := 30 * Mult
         else
           FProjectiles.Last.SplashDamage := 120 * Mult;
@@ -481,7 +481,7 @@ begin
   { chainfist_fire / fire_player_melee: a trace of 64 (CHAINFIST_REACH);
     a hit pushes the player forward and up 75; walls get sparks }
   T := WorldTrace(CgeToQuake(Origin), CgeToQuake(Origin + Dir * 64), TVector3.Zero, TVector3.Zero,
-    MASK_SHOT, FPlayer);
+    MASK_SHOT, FCur.PM);
   if not T.Hit then
     Exit;
   HitPos := QuakeToCge(T.EndPos);
@@ -489,8 +489,8 @@ begin
   begin
     TQuakeMonster(T.Ent).TakeDamage(Damage);
     Particles.SpawnBlood(HitPos, -Dir);
-    if FPlayer <> nil then
-      FPlayer.AddVelocity(Vector3(Dir.X, 0, Dir.Z) * 75 + Vector3(0, 75, 0));
+    if FCur.PM <> nil then
+      FCur.PM.AddVelocity(Vector3(Dir.X, 0, Dir.Z) * 75 + Vector3(0, 75, 0));
   end else
   begin
     if T.Ent is TQuakeMover then
@@ -514,11 +514,11 @@ begin
   Dmg := Damage;
   Start := CgeToQuake(Origin);
   Stop := Start + CgeToQuake(Dir) * 8192;
-  T := WorldTrace(Start, Stop, TVector3.Zero, TVector3.Zero, MASK_SHOT or 8 or 16 or 32, FPlayer);
+  T := WorldTrace(Start, Stop, TVector3.Zero, TVector3.Zero, MASK_SHOT or 8 or 16 or 32, FCur.PM);
   if T.Hit and ((T.Contents and (8 or 16 or 32)) <> 0) then
   begin
     Dmg := Dmg div 2;
-    T := WorldTrace(T.EndPos + CgeToQuake(Dir), Stop, TVector3.Zero, TVector3.Zero, MASK_SHOT, FPlayer);
+    T := WorldTrace(T.EndPos + CgeToQuake(Dir), Stop, TVector3.Zero, TVector3.Zero, MASK_SHOT, FCur.PM);
   end;
   HitPos := QuakeToCge(T.EndPos);
   Right := TVector3.CrossProduct(Dir, Vector3(0, 1, 0));

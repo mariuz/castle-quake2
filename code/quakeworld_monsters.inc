@@ -60,7 +60,7 @@ end;
 procedure TQuakeWorld.MonsterRevived(const Monster: TQuakeMonster);
 begin
   { monster_start counts the monster again }
-  Inc(FStats.TotalKills);
+  Inc(FCur.Stats.TotalKills);
 end;
 
 procedure TQuakeWorld.BossSummon(const Boss: TQuakeMonster);
@@ -119,7 +119,7 @@ begin
     M := FMonsters.Last;
     { AI_SPAWNED_*, AI_DO_NOT_COUNT; they go after the boss's enemy }
     M.DoNotCount := True;
-    Dec(FStats.TotalKills);
+    Dec(FCur.Stats.TotalKills);
     M.Alert;
     Particles.SpawnTeleport(M.Transform.Translation);
     Dec(Boss.MonsterSlots);
@@ -272,7 +272,7 @@ begin
     M := FMonsters.Last;
     { AI_DO_NOT_COUNT: not in the level's totals }
     M.DoNotCount := True;
-    Dec(FStats.TotalKills);
+    Dec(FCur.Stats.TotalKills);
     M.Alert;
     Particles.SpawnTeleport(M.Transform.Translation);
     Dec(Medic.MonsterSlots);
@@ -326,18 +326,18 @@ var
 begin
   PlayerTrail.Now := FTime;
   FTrailTimer := FTrailTimer - SecondsPassed;
-  if (FTrailTimer > 0) or FDead then
+  if (FTrailTimer > 0) or FCur.Dead then
     Exit;
   FTrailTimer := 0.1;
   { The player's origin: 22 below the eye }
-  Origin := FPlayerPos - Vector3(0, 22, 0);
+  Origin := FCur.Pos - Vector3(0, 22, 0);
   if PlayerTrail.Count > 0 then
   begin
     ToSpot := PlayerTrail.LastSpot - Origin;
     if ToSpot.Length < 1 then
       Exit;
     if WorldTrace(CgeToQuake(Origin), CgeToQuake(PlayerTrail.LastSpot), TVector3.Zero, TVector3.Zero,
-       MASK_OPAQUE, FPlayer).Fraction >= 1 then
+       MASK_OPAQUE, FCur.PM).Fraction >= 1 then
       Exit; { still sees the last spot }
   end;
   PlayerTrail.Add(Origin);
@@ -374,7 +374,7 @@ begin
   if (Speed <= 0) or ((GameSkill = 0) and (Random > 0.25)) then
     Exit;
   T := WorldTrace(CgeToQuake(Origin), CgeToQuake(Origin + Dir * 8192), TVector3.Zero, TVector3.Zero,
-    MASK_SHOT, FPlayer);
+    MASK_SHOT, FCur.PM);
   if not (T.Ent is TQuakeMonster) then
     Exit;
   M := TQuakeMonster(T.Ent);
@@ -382,7 +382,7 @@ begin
   if not M.IsAlive then
     Exit;
   { infront(monster, player) }
-  if TVector3.DotProduct(YawToCgeDir(M.FacingAngle), (FPlayerPos - M.Transform.Translation).Normalize) <= 0.3 then
+  if TVector3.DotProduct(YawToCgeDir(M.FacingAngle), (FCur.Pos - M.Transform.Translation).Normalize) <= 0.3 then
     Exit;
   M.Dodge(Max(0, Dist - 16) / Speed);
 end;
@@ -526,10 +526,10 @@ begin
       if not M.Jumping then
         M.LeapDamage := 0
       else
-      if (M.JumpSpeed > 400) and not FDead and
-         (Abs(M.Transform.Translation.X - FPlayerPos.X) < 16 + M.BoxMaxs.X + 4) and
-         (Abs(M.Transform.Translation.Z - FPlayerPos.Z) < 16 + M.BoxMaxs.Y + 4) and
-         (Abs(M.Transform.Translation.Y - (FPlayerPos.Y - 22)) < 64) then
+      if (M.JumpSpeed > 400) and not FCur.Dead and
+         (Abs(M.Transform.Translation.X - FCur.Pos.X) < 16 + M.BoxMaxs.X + 4) and
+         (Abs(M.Transform.Translation.Z - FCur.Pos.Z) < 16 + M.BoxMaxs.Y + 4) and
+         (Abs(M.Transform.Translation.Y - (FCur.Pos.Y - 22)) < 64) then
       begin
         DamagePlayer(M.LeapDamage, M.Transform.Translation);
         M.LeapDamage := 0;
@@ -560,7 +560,7 @@ begin
       if (FMonsters.Count > 0) and (FMonsters.Last <> Makron) then
       begin
         Makron := FMonsters.Last;
-        ToPlayer := FPlayerPos - Makron.Transform.Translation;
+        ToPlayer := FCur.Pos - Makron.Transform.Translation;
         ToPlayer.Y := 0;
         if not ToPlayer.IsZero then
           Makron.MonsterJump(ToPlayer.Normalize * 400, 200);
@@ -576,12 +576,12 @@ var
   Dist, Accuracy: Single;
   I, Hits: Integer;
 begin
-  if FDead then
+  if FCur.Dead then
     Exit;
   Inc(FMonsterShots);
-  FDamageSource := Monster;
+  FCur.DamageSource := Monster;
   Eye := Monster.EyePos;
-  Target := FPlayerPos - Vector3(0, 12, 0);
+  Target := FCur.Pos - Vector3(0, 12, 0);
   { A turret's blind shot: at the spot the player was last seen }
   if Monster.BlindFire then
     Target := Monster.BlindAim;
@@ -627,8 +627,8 @@ begin
       begin
         DamagePlayer(Monster.AttackDamage, Eye);
         { fire_hit's kick: push (or pull) the player }
-        if (Monster.AttackKick <> 0) and (FPlayer <> nil) then
-          FPlayer.AddVelocity(Dir * Monster.AttackKick);
+        if (Monster.AttackKick <> 0) and (FCur.PM <> nil) then
+          FCur.PM.AddVelocity(Dir * Monster.AttackKick);
       end;
     akLeap:
       Monster.Leap;

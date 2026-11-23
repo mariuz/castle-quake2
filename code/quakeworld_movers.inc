@@ -85,7 +85,7 @@ var
 begin
   PBox := PlayerBox;
   { func_plat2's use: the activator is the player }
-  FGeometry.PlayerOriginZ := FPlayerPos.Y - (PlayerEyeHeight - 24);
+  FGeometry.PlayerOriginZ := FCur.Pos.Y - (PlayerEyeHeight - 24);
   for Mover in FGeometry.Movers do
   begin
     if not Mover.Transform.Exists then
@@ -122,17 +122,17 @@ begin
         { Touch_Plat_Center2: live players and monsters in its field }
         if Mover.Plat2Active then
         begin
-          if (not FDead) and Mover.TriggerField.Collision(PBox) then
-            Mover.Plat2Operate(FPlayerPos.Y - (PlayerEyeHeight - 24));
+          if (not FCur.Dead) and Mover.TriggerField.Collision(PBox) then
+            Mover.Plat2Operate(FCur.Pos.Y - (PlayerEyeHeight - 24));
           for M in FMonsters do
             if M.IsAlive and (not M.Dormant) and M.Transform.Exists and
                Mover.TriggerField.Collision(QuakeBoxToCge(M.Origin + M.BoxMins, M.Origin + M.BoxMaxs)) then
               Mover.Plat2Operate(M.Origin.Z);
         end;
       mkPlat:
-        if (FPlayerPos.X >= Box.Data[0].X) and (FPlayerPos.X <= Box.Data[1].X) and
-           (FPlayerPos.Z >= Box.Data[0].Z) and (FPlayerPos.Z <= Box.Data[1].Z) and
-           (Abs((FPlayerPos.Y - PlayerEyeHeight) - Box.Data[1].Y) < 24) then
+        if (FCur.Pos.X >= Box.Data[0].X) and (FCur.Pos.X <= Box.Data[1].X) and
+           (FCur.Pos.Z >= Box.Data[0].Z) and (FCur.Pos.Z <= Box.Data[1].Z) and
+           (Abs((FCur.Pos.Y - PlayerEyeHeight) - Box.Data[1].Y) < 24) then
           Mover.PlayerOnTop;
       mkButton:
         if (Mover.Health = 0) and (Mover.State = msAtStart) then
@@ -337,7 +337,7 @@ begin
     { turret_driver_think: aim at the visible enemy, fire after the
       reaction time (3 - skill seconds) from when it was (re)acquired }
     M := T.Driver;
-    if (M <> nil) and M.Alerted and (not FDead) and (not NoTarget) then
+    if (M <> nil) and M.Alerted and (not FCur.Dead) and (not NoTarget) then
     begin
       if not T.HadEnemy then
       begin
@@ -352,7 +352,7 @@ begin
           T.TrailTime := FTime;
           T.LostSight := False;
         end;
-        QuakeVecToAngles(CgeToQuake(FPlayerPos) - BreachOrg, T.MovePitch, T.MoveYaw);
+        QuakeVecToAngles(CgeToQuake(FCur.Pos) - BreachOrg, T.MovePitch, T.MoveYaw);
         Reaction := 3 - GameSkill;
         if (FTime >= T.AttackFinished) and (FTime - T.TrailTime >= Reaction) then
         begin
@@ -504,13 +504,13 @@ begin
        Mover.Transform.Exists and Old.TryInverse(OldInv) then
     begin
       { The player }
-      if (FPlayer <> nil) and Assigned(FPlayer.OnTrace) and (not FDead) then
+      if (FCur.PM <> nil) and Assigned(FCur.PM.OnTrace) and (not FCur.Dead) then
       begin
-        Org := FPlayer.Origin;
-        Mins := FPlayer.BoxMins;
-        Maxs := FPlayer.BoxMaxs;
-        if PushOne(Org, Mins, Maxs, MASK_PLAYERSOLID, FPlayer, FPlayer.GroundObject = Mover, Delta, Blocked) then
-          FPlayer.Push(Delta)
+        Org := FCur.PM.Origin;
+        Mins := FCur.PM.BoxMins;
+        Maxs := FCur.PM.BoxMaxs;
+        if PushOne(Org, Mins, Maxs, MASK_PLAYERSOLID, FCur.PM, FCur.PM.GroundObject = Mover, Delta, Blocked) then
+          FCur.PM.Push(Delta)
         else
         if Blocked then
         begin

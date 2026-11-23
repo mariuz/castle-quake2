@@ -51,7 +51,7 @@ begin
     if FCounters.TryGetValue(Ent, Count) and (Count < 0) then
       Exit;
     ItemDef := FindItemDef(LowerCase(Ent.GetField('item')));
-    if (ItemDef <> nil) and ((FStats.Keys and Cardinal(ItemDef^.Amount)) = 0) then
+    if (ItemDef <> nil) and ((FCur.Stats.Keys and Cardinal(ItemDef^.Amount)) = 0) then
     begin
       if FHud <> nil then
         FHud.ShowMessage('You need the ' + ItemDef^.Name);
@@ -61,7 +61,7 @@ begin
     end;
     Sounds.Play('sound/misc/keyuse.wav');
     if ItemDef <> nil then
-      FStats.Keys := FStats.Keys and not Cardinal(ItemDef^.Amount);
+      FCur.Stats.Keys := FCur.Stats.Keys and not Cardinal(ItemDef^.Amount);
     FCounters.AddOrSetValue(Ent, -1);
     WritelnLog('QuakeWorld', 'trigger_key "%s" unlocks "%s"', [Ent.TargetName, Ent.Target]);
     UseTargets(Ent.Target, Ent);
@@ -102,11 +102,11 @@ begin
         place and view relative to it into the next map }
       FLandmarkName := '';
       Light := PickTarget(Ent.Target);
-      if (Light <> nil) and (Light.ClassName = 'info_landmark') and (FPlayer <> nil) then
+      if (Light <> nil) and (Light.ClassName = 'info_landmark') and (FCur.PM <> nil) then
       begin
         FLandmarkName := Light.TargetName;
-        FLandmarkLocal := LandmarkLocal(FPlayer.Origin, Light.Origin, Light.Angle);
-        FLandmarkViewYaw := RadToDeg(ArcTan2(-FPlayerDir.Z, FPlayerDir.X)) - Light.Angle;
+        FLandmarkLocal := LandmarkLocal(FCur.PM.Origin, Light.Origin, Light.Angle);
+        FLandmarkViewYaw := RadToDeg(ArcTan2(-FCur.Dir.Z, FCur.Dir.X)) - Light.Angle;
         WritelnLog('QuakeWorld', 'Leaving by info_landmark "%s" at %s from it', [FLandmarkName, FLandmarkLocal.ToString]);
       end;
     end;
@@ -121,12 +121,12 @@ begin
   end else
   if CName = 'target_secret' then
   begin
-    Inc(FStats.Secrets);
+    Inc(FCur.Stats.Secrets);
     Sounds.Play('sound/misc/secret.wav');
   end else
   if CName = 'target_goal' then
   begin
-    Inc(FStats.Goals);
+    Inc(FCur.Stats.Goals);
     Sounds.Play('sound/misc/secret.wav');
   end else
   if CName = 'target_speaker' then
@@ -440,7 +440,7 @@ var
   Prop: TQuakeProp;
 begin
   { KillBox: MOD_TELEFRAG damage to everything solid in the box }
-  if (FPlayer <> nil) and not FDead and Box.Collision(PlayerBox) then
+  if (FCur.PM <> nil) and not FCur.Dead and Box.Collision(PlayerBox) then
     DamagePlayer(100000, Box.Center);
   for M in FMonsters do
     if M.IsAlive and not M.Dormant and
@@ -453,9 +453,9 @@ end;
 
 procedure TQuakeWorld.SetPlayerGravity(const Value: Single);
 begin
-  FPlayerGravity := Value;
-  if (FPlayer <> nil) and (FBaseGravity > 0) then
-    FPlayer.GravityAcceleration := FBaseGravity * Value;
+  FCur.Gravity := Value;
+  if (FCur.PM <> nil) and (FBaseGravity > 0) then
+    FCur.PM.GravityAcceleration := FBaseGravity * Value;
 end;
 
 function TQuakeWorld.EarthquakeCount: Integer;
@@ -595,14 +595,14 @@ begin
       FQuakes[I].NextSound := FTime + 0.5;
       Sounds.Play('sound/world/quake.wav');
     end;
-    if (FTime >= FQuakes[I].NextShove) and (FPlayer <> nil) and FPlayer.OnGround and not FDead then
+    if (FTime >= FQuakes[I].NextShove) and (FCur.PM <> nil) and FCur.PM.OnGround and not FCur.Dead then
     begin
       FQuakes[I].NextShove := FTime + 0.1;
-      V := FPlayer.Velocity;
+      V := FCur.PM.Velocity;
       V.X := V.X + (Random * 2 - 1) * 150;
       V.Z := V.Z + (Random * 2 - 1) * 150;
       V.Y := FQuakes[I].Entity.Speed(200) * 0.5;
-      FPlayer.Velocity := V;
+      FCur.PM.Velocity := V;
     end;
   end;
 end;
@@ -669,12 +669,12 @@ begin
     Laser.SetLength(Dist);
     if LaserTrace.Ent is TQuakeMonster then
       TQuakeMonster(LaserTrace.Ent).TakeDamage(Max(1, Laser.Damage div 10));
-    if LaserTrace.Ent = FPlayer then
+    if LaserTrace.Ent = FCur.PM then
     begin
-      FHurtTimer := FHurtTimer - SecondsPassed;
-      if FHurtTimer <= 0 then
+      FCur.HurtTimer := FCur.HurtTimer - SecondsPassed;
+      if FCur.HurtTimer <= 0 then
       begin
-        FHurtTimer := 0.1;
+        FCur.HurtTimer := 0.1;
         DamagePlayer(Laser.Damage div 10, Laser.Origin);
       end;
     end;
@@ -824,7 +824,7 @@ begin
     player can see }
   Count := 0;
   for M in FMonsters do
-    if M.IsAlive and (not M.Dormant) and M.HasLineOfSight(FPlayerPos) then
+    if M.IsAlive and (not M.Dormant) and M.HasLineOfSight(FCur.Pos) then
     begin
       M.TakeDamage(M.Health);
       Inc(Count);
@@ -858,7 +858,7 @@ begin
       if Pulse then
         TQuakeMonster(T.Ent).TakeDamage(Laser.Damage);
     end else
-    if T.Ent = FPlayer then
+    if T.Ent = FCur.PM then
     begin
       if Pulse then
         DamagePlayer(Laser.Damage, Laser.Origin);
@@ -1024,10 +1024,10 @@ begin
     CName := Trig.Entity.ClassName;
     if CName = 'trigger_hurt' then
     begin
-      FHurtTimer := FHurtTimer - SecondsPassed;
-      if FHurtTimer <= 0 then
+      FCur.HurtTimer := FCur.HurtTimer - SecondsPassed;
+      if FCur.HurtTimer <= 0 then
       begin
-        FHurtTimer := 0.1;
+        FCur.HurtTimer := 0.1;
         DamagePlayer(Max(1, Trig.Entity.GetInt('dmg', 5)), Trig.Box.Center);
       end;
       Continue;
@@ -1094,8 +1094,8 @@ begin
     if CName = 'trigger_push' then
     begin
       { Quake 2 trigger_push: velocity = movedir * speed * 10 (speed default 1000) }
-      if FPlayer <> nil then
-        FPlayer.Velocity := EntityMoveDir(Trig.Entity) * Trig.Entity.GetFloat('speed', 1000) * 10;
+      if FCur.PM <> nil then
+        FCur.PM.Velocity := EntityMoveDir(Trig.Entity) * Trig.Entity.GetFloat('speed', 1000) * 10;
       Sounds.Play('sound/misc/windfly.wav');
       { PUSH_ONCE = 1 }
       if (Trig.Entity.SpawnFlags and 1) <> 0 then
@@ -1136,7 +1136,7 @@ var
   Lights: TQuakeSurfaceLights;
   Count: Integer;
 begin
-  Count := Lighting.NearestLights(FPlayerPos, Lights);
+  Count := Lighting.NearestLights(FCur.Pos, Lights);
   FGeometry.SetSurfaceLights(Lights, Count);
 end;
 
