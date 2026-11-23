@@ -32,8 +32,8 @@ begin
   FStats.Health := FStats.Health - Take;
   if FHud <> nil then
     FHud.FlashDamage(Amount);
-  if FPlayer <> nil then
-    FPlayer.DamageKick(Amount, FromPos, FStats.Health);
+  if FViewPlayer <> nil then
+    FViewPlayer.DamageKick(Amount, FromPos, FStats.Health);
 
   if FStats.Health <= 0 then
   begin

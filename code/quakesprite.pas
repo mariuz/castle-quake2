@@ -21,6 +21,8 @@ type
   TQuakeSprite = class
   public
     Frames: array of TSp2Frame;
+    { As loaded (for the server's model table) }
+    Path: String;
     function LoadFromPak(const APath: String): Boolean;
   end;
 
@@ -43,6 +45,7 @@ type
     { 0 = opaque .. 1 = invisible }
     procedure SetTransparency(const Value: Single);
     function FrameCount: Integer;
+    property Sprite: TQuakeSprite read FSprite;
     { Frames shown since creation }
     property Time: Single read FTime;
   end;
@@ -86,6 +89,7 @@ var
   I: Integer;
 begin
   Result := False;
+  Path := APath;
   Data := Pak.GetData(APath, Size);
   if (Data = nil) or (Size < SizeOf(TSp2Header)) then
     Exit;

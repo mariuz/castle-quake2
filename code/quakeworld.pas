@@ -9,7 +9,7 @@ interface
 uses
   SysUtils, Classes, Math, Generics.Collections, fpjson, jsonparser,
   CastleVectors, CastleTransform, CastleScene, CastleLog, CastleBoxes, CastleQuaternions, CastleTimeUtils,
-  QuakePak, QuakeBsp, QuakeGeometry, QuakeMap, QuakeMd2, QuakePlayer, QuakeLight, QuakeSound, QuakeHud, QuakeSettings,
+  QuakePak, QuakeBsp, QuakeGeometry, QuakeMap, QuakeMd2, QuakePlayer, QuakePMove, QuakeLight, QuakeSound, QuakeHud, QuakeSettings,
   QuakeParticles, QuakeEntities, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTurret, QuakeInsane;
 
 const
@@ -162,7 +162,10 @@ type
       functions: trigger_elevator reads its pathtarget); nil if unknown }
     FUseSource: TQuakeEntity;
     FHelpPrimary, FHelpSecondary: String;
-    FPlayer: TQuakePlayerMovement;
+    { The player's pmove (the server's: TQuakeServer.PM) and the view's
+      movement behaviour (damage kicks) }
+    FPlayer: TQuakePMove;
+    FViewPlayer: TQuakePlayerMovement;
     { Pickups spawned from the map; later ones are monsters' drops }
     FMapPickupCount: Integer;
     { Quake 2 game.serverflags: cross-level trigger bits, kept across maps of a unit }
@@ -230,7 +233,7 @@ type
     { Quake 2 KillBox: telefrag everything in the box }
     procedure KillBox(const Box: TBox3D);
     procedure UpdateLiquids(const SecondsPassed: Single);
-    procedure SetPlayer(const Value: TQuakePlayerMovement);
+    procedure SetPlayer(const Value: TQuakePMove);
     procedure PlayerFallDamage(const Damage: Integer);
     procedure PlayerLanded(Sender: TObject);
     procedure ChooseSpawnPoint(const SpawnName: String);
@@ -506,7 +509,9 @@ type
       const Ignore: TObject): TQuakeTrace;
     procedure PlayerBeforeMove(Sender: TObject);
     { Player movement (pmove), for falling damage and jump pads; may be nil }
-    property Player: TQuakePlayerMovement read FPlayer write SetPlayer;
+    property Player: TQuakePMove read FPlayer write SetPlayer;
+    { The view's movement (view kicks on damage); may be nil }
+    property ViewPlayer: TQuakePlayerMovement read FViewPlayer write FViewPlayer;
     property Stats: TQuakePlayerStats read FStats;
     property SpawnPoint: TVector3 read FSpawnPoint;
     property SpawnAngle: Single read FSpawnAngle;
@@ -531,6 +536,7 @@ type
     function ProjectileCount: Integer;
     function DelayedCount: Integer;
     property Pickups: TQuakePickupList read FPickups;
+    property Projectiles: TQuakeProjectileList read FProjectiles;
     property Props: TQuakePropList read FProps;
     property Lasers: TQuakeLaserList read FLasers;
     property Turrets: TQuakeTurretList read FTurrets;
@@ -1239,8 +1245,7 @@ begin
     end;
   end;
   { The player's box (for monsters and their shots) }
-  if ((Mask and CONTENTS_MONSTER) <> 0) and (FPlayer <> nil) and (Ignore <> FPlayer) and (not FDead) and
-     (FPlayer.Parent <> nil) then
+  if ((Mask and CONTENTS_MONSTER) <> 0) and (FPlayer <> nil) and (Ignore <> FPlayer) and (not FDead) then
   begin
     Org := FPlayer.Origin;
     if Overlaps(Org + FPlayer.BoxMins, Org + FPlayer.BoxMaxs) then

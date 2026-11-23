@@ -14,16 +14,17 @@ interface
 uses
   SysUtils, Classes, Math,
   CastleVectors, CastleTransform, CastleClassUtils, CastleBoxes, CastleTriangles,
-  QuakeTrace;
+  QuakeTrace, QuakePMove;
 
 type
-  TFallDamageEvent = procedure(const Damage: Integer) of object;
-  { Contents (Quake CONTENTS_* bits) at a CGE position }
-  TPointContentsEvent = function(const CgePos: TVector3): Integer of object;
-  { Sweep a box (Quake coordinates: Mins / Maxs around the moving origin)
-    against everything solid for Mask (map brushes, movers, monsters) }
-  TPlayerTraceEvent = function(const Start, Stop, Mins, Maxs: TVector3;
-    const Mask: Integer): TQuakeTrace of object;
+  TFallDamageEvent = QuakePMove.TFallDamageEvent;
+  TPointContentsEvent = QuakePMove.TPointContentsEvent;
+  TPlayerTraceEvent = QuakePMove.TPlayerTraceEvent;
+  TPMoveInput = QuakePMove.TPMoveInput;
+  { Client prediction (TViewPlay): move PM for this frame's Input (the
+    server's last state, the commands it hasn't acknowledged, then this one) }
+  TPredictEvent = procedure(Sender: TObject; const Input: TPMoveInput;
+    const PM: TQuakePMove) of object;
 
   TQuakePlayerMovement = class(TCastleBehavior)
   strict private
@@ -58,30 +59,24 @@ type
     FGunAngles: TVector3;
     FHasLastAngles: Boolean;
     FLastYaw, FLastPitch, FYawRate, FPitchRate: Single;
-    { Trace-based pmove (when OnTrace is set): origin and velocity in Quake
-      coordinates during a move, eye above the origin (smoothed when
-      ducking), view lag after steps up, landing time, ground entity }
+    { Trace-based pmove (when OnTrace is set): Quake 2's pmove in FPM (unit
+      QuakePMove); the eye above its origin (smoothed when ducking) and the
+      view lag after steps up stay here }
     FOnTrace: TPlayerTraceEvent;
     FOnBeforeMove: TNotifyEvent;
-    FOrg, FVel: TVector3;
-    FViewZ, FStepOffset, FLandTime: Single;
-    FGroundObject: TObject;
-    FStuckCount: Integer;
-    function PMMins: TVector3;
-    function PMMaxs: TVector3;
-    function PMViewHeight: Single;
-    function PMTrace(const Start, Stop: TVector3): TQuakeTrace;
-    function PMGoodPosition(const Org: TVector3): Boolean;
-    procedure PMUnstick;
-    function PMFindFree(const MaxDist: Single): Boolean;
-    procedure PMSlideMove(const Dt: Single);
-    procedure PMStepSlideMove(const Dt: Single);
-    procedure PMCategorizePosition;
-    procedure PMCheckDuck;
-    procedure PMFriction(const Dt: Single);
-    procedure PMAccelerate(const WishDir: TVector3; const WishSpeed, Accel, Dt: Single);
-    procedure PMCheckJump;
-    procedure PMMove(const Dt: Single);
+    FOnPredict: TPredictEvent;
+    FPM: TQuakePMove;
+    FViewZ, FStepOffset: Single;
+    procedure SetOnTrace(const Value: TPlayerTraceEvent);
+    procedure SetOnPointContents(const Value: TPointContentsEvent);
+    procedure SetOnFallDamage(const Value: TFallDamageEvent);
+    procedure SetOnLandSound(const Value: TNotifyEvent);
+    function GetGroundObject: TObject;
+    function GetStuckCount: Integer;
+    function MakeInput(const SecondsPassed: Single): TPMoveInput;
+    { Place the camera at FPM's origin and copy its state for the view
+      effects, after a move }
+    procedure AfterPMove(const SecondsPassed: Single);
     { Move the player (the pmove part of Update) }
     procedure Move(const SecondsPassed: Single);
     procedure StartFallKick(const Delta: Single);
@@ -119,6 +114,7 @@ type
     { Temporarily frozen (dead, intermission) }
     Suspended: Boolean;
     constructor Create(AOwner: TComponent); override;
+    destructor Destroy; override;
     function PropertySections(const PropertyName: String): TPropertySections; override;
     procedure Update(const SecondsPassed: Single; var RemoveMe: TRemoveType); override;
     { Forget the velocity (after teleports, level loads, respawn) }
@@ -143,20 +139,31 @@ type
     procedure AddVelocity(const V: TVector3);
     { Pmove velocity in CGE units per second }
     property Velocity: TVector3 read FVelocity write FVelocity;
-    property OnFallDamage: TFallDamageEvent read FOnFallDamage write FOnFallDamage;
-    property OnLandSound: TNotifyEvent read FOnLandSound write FOnLandSound;
-    property OnPointContents: TPointContentsEvent read FOnPointContents write FOnPointContents;
+    property OnFallDamage: TFallDamageEvent read FOnFallDamage write SetOnFallDamage;
+    property OnLandSound: TNotifyEvent read FOnLandSound write SetOnLandSound;
+    property OnPointContents: TPointContentsEvent read FOnPointContents write SetOnPointContents;
     { Box traces for Quake 2's pmove (PM_StepSlideMove against the BSP
       brushes, movers and monsters). Without it the player collides with
       the scene through approximate overlap tests (editor, tests). }
-    property OnTrace: TPlayerTraceEvent read FOnTrace write FOnTrace;
+    property OnTrace: TPlayerTraceEvent read FOnTrace write SetOnTrace;
+    { Client prediction: when set, Update only turns the view and clears its
+      effects; the view moves the player with MoveNow at the end of its
+      frame, through this event (TViewPlay.PredictMove) }
+    property OnPredict: TPredictEvent read FOnPredict write FOnPredict;
+    { Move now (with OnPredict): this frame's inputs, then the view effects.
+      False when the player can't move (inactive, suspended). }
+    function MoveNow(const SecondsPassed: Single): Boolean;
+    { The pmove state (Quake coordinates) }
+    property PM: TQuakePMove read FPM;
+    { PM's constants from the published properties }
+    procedure SyncParams;
     { Called right before each move: movers carry / push the player here,
       so the move starts from where they left him }
     property OnBeforeMove: TNotifyEvent read FOnBeforeMove write FOnBeforeMove;
     { What the player stands on (nil: the world or nothing; a mover / monster) }
-    property GroundObject: TObject read FGroundObject;
+    property GroundObject: TObject read GetGroundObject;
     { Moves that started inside a solid (and were nudged out); demo log }
-    property StuckCount: Integer read FStuckCount;
+    property StuckCount: Integer read GetStuckCount;
     { The player's box (Quake coordinates, around Origin) and origin }
     function BoxMins: TVector3;
     function BoxMaxs: TVector3;
@@ -238,6 +245,66 @@ begin
   FWaterFriction := 1;
   FWaterSink := 60;
   FViewZ := FEyeHeight - 24;
+  FPM := TQuakePMove.Create;
+  SyncParams;
+end;
+
+destructor TQuakePlayerMovement.Destroy;
+begin
+  FreeAndNil(FPM);
+  inherited Destroy;
+end;
+
+procedure TQuakePlayerMovement.SetOnTrace(const Value: TPlayerTraceEvent);
+begin
+  FOnTrace := Value;
+  FPM.OnTrace := Value;
+end;
+
+procedure TQuakePlayerMovement.SetOnPointContents(const Value: TPointContentsEvent);
+begin
+  FOnPointContents := Value;
+  FPM.OnPointContents := Value;
+end;
+
+procedure TQuakePlayerMovement.SetOnFallDamage(const Value: TFallDamageEvent);
+begin
+  FOnFallDamage := Value;
+  FPM.OnFallDamage := Value;
+end;
+
+procedure TQuakePlayerMovement.SetOnLandSound(const Value: TNotifyEvent);
+begin
+  FOnLandSound := Value;
+  FPM.OnLandSound := Value;
+end;
+
+function TQuakePlayerMovement.GetGroundObject: TObject;
+begin
+  Result := FPM.GroundObject;
+end;
+
+function TQuakePlayerMovement.GetStuckCount: Integer;
+begin
+  Result := FPM.StuckCount;
+end;
+
+procedure TQuakePlayerMovement.SyncParams;
+begin
+  FPM.RunSpeed := FRunSpeed;
+  FPM.CrouchSpeed := FCrouchSpeed;
+  FPM.AccelerateRate := FAccelerate;
+  FPM.AirAccelerateRate := FAirAccelerate;
+  FPM.Friction := FFriction;
+  FPM.StopSpeed := FStopSpeed;
+  FPM.GravityAcceleration := FGravity;
+  FPM.JumpSpeed := FJumpSpeed;
+  FPM.StepSize := FStepSize;
+  FPM.HalfWidth := FHalfWidth;
+  FPM.WaterFriction := FWaterFriction;
+  FPM.WaterSink := FWaterSink;
+  FPM.StandEyeHeight := FEyeHeight;
+  FPM.CrouchEyeHeight := FCrouchEyeHeight;
 end;
 
 function TQuakePlayerMovement.PropertySections(const PropertyName: String): TPropertySections;
@@ -328,10 +395,9 @@ begin
   FBobTime := 0;
   FHasLastAngles := False;
   FCrouched := False;
-  FViewZ := PMViewHeight;
+  FViewZ := FEyeHeight - 24;
   FStepOffset := 0;
-  FLandTime := 0;
-  FGroundObject := nil;
+  FPM.ResetState;
 end;
 
 procedure TQuakePlayerMovement.AddVelocity(const V: TVector3);
@@ -575,9 +641,39 @@ begin
     Exit;
   ClearViewEffects;
   ApplyTurn;
+  { Predicted: the view moves the player later in its frame (MoveNow) }
+  if Assigned(FOnPredict) then
+    Exit;
   if Assigned(FOnBeforeMove) then
     FOnBeforeMove(Self);
   Move(SecondsPassed);
+  UpdateViewEffects(SecondsPassed);
+end;
+
+function TQuakePlayerMovement.MakeInput(const SecondsPassed: Single): TPMoveInput;
+var
+  D: TVector3;
+begin
+  Result.Forward := InputForward;
+  Result.Side := InputSide;
+  Result.Jump := InputJump;
+  Result.Crouch := InputCrouch;
+  D := Parent.Direction;
+  Result.Dir := Vector3(D.X, -D.Z, D.Y);
+  if not Result.Dir.IsZero then
+    Result.Dir := Result.Dir.Normalize;
+  Result.Dt := SecondsPassed;
+end;
+
+function TQuakePlayerMovement.MoveNow(const SecondsPassed: Single): Boolean;
+begin
+  Result := FActive and not Suspended and (Parent <> nil) and (World <> nil) and
+    (SecondsPassed > 0) and Assigned(FOnPredict);
+  if not Result then
+    Exit;
+  SyncParams;
+  FOnPredict(Self, MakeInput(SecondsPassed), FPM);
+  AfterPMove(SecondsPassed);
   UpdateViewEffects(SecondsPassed);
 end;
 
@@ -607,7 +703,7 @@ begin
   InputPitch := 0;
 end;
 
-{ Trace-based pmove (Quake 2 pmove.c), in Quake coordinates }
+{ Quake and CGE coordinates }
 
 function QV(const C: TVector3): TVector3; inline;
 begin
@@ -619,25 +715,14 @@ begin
   Result := Vector3(Q.X, Q.Z, -Q.Y);
 end;
 
-const
-  PM_STOP_EPSILON = 0.1;
-  PM_MIN_STEP_NORMAL = 0.7;
-  PM_MAX_CLIP_PLANES = 5;
-  PM_CONTENTS_LADDER = $20000000;
-  PM_MASK_LIQUID = 8 or 16 or 32;
-  PM_CONTENTS_LAVA = 8;
-  PM_CONTENTS_SLIME = 16;
-  PM_CONTENTS_WATER = 32;
-  PM_MASK_PLAYERSOLID = 1 or 2 or $10000 or $2000000;
-
 function TQuakePlayerMovement.BoxMins: TVector3;
 begin
-  Result := PMMins;
+  Result := FPM.Mins;
 end;
 
 function TQuakePlayerMovement.BoxMaxs: TVector3;
 begin
-  Result := PMMaxs;
+  Result := FPM.Maxs;
 end;
 
 function TQuakePlayerMovement.Origin: TVector3;
@@ -653,568 +738,47 @@ begin
     Parent.Translation := Parent.Translation + Delta;
 end;
 
-function TQuakePlayerMovement.PMMins: TVector3;
-begin
-  Result := Vector3(-FHalfWidth, -FHalfWidth, -24);
-end;
-
-function TQuakePlayerMovement.PMMaxs: TVector3;
-begin
-  if FCrouched then
-    Result := Vector3(FHalfWidth, FHalfWidth, 4)
-  else
-    Result := Vector3(FHalfWidth, FHalfWidth, 32);
-end;
-
-function TQuakePlayerMovement.PMViewHeight: Single;
-begin
-  { Origin to eye: standing 22, ducked -2 (origin 24 above the feet) }
-  Result := EyeHeight - 24;
-end;
-
-function TQuakePlayerMovement.PMTrace(const Start, Stop: TVector3): TQuakeTrace;
-begin
-  Result := FOnTrace(Start, Stop, PMMins, PMMaxs, PM_MASK_PLAYERSOLID);
-end;
-
-function TQuakePlayerMovement.PMGoodPosition(const Org: TVector3): Boolean;
-begin
-  Result := not PMTrace(Org, Org).AllSolid;
-end;
-
-function TQuakePlayerMovement.PMFindFree(const MaxDist: Single): Boolean;
-var
-  R: Single;
-  DX, DY, DZ: Integer;
-  Off: TVector3;
-begin
-  if PMGoodPosition(FOrg) then
-    Exit(True);
-  R := 1;
-  while R <= MaxDist do
-  begin
-    { Up first, then the 26 directions around }
-    if PMGoodPosition(FOrg + Vector3(0, 0, R)) then
-    begin
-      FOrg := FOrg + Vector3(0, 0, R);
-      Exit(True);
-    end;
-    for DZ := 1 downto 0 do
-      for DX := -1 to 1 do
-        for DY := -1 to 1 do
-          if (DX <> 0) or (DY <> 0) or (DZ <> 0) then
-          begin
-            Off := Vector3(DX, DY, DZ).Normalize * R;
-            if PMGoodPosition(FOrg + Off) then
-            begin
-              FOrg := FOrg + Off;
-              Exit(True);
-            end;
-          end;
-    R := R * 1.5;
-  end;
-  Result := False;
-end;
-
 function TQuakePlayerMovement.SnapToFreeSpace(const MaxDist: Single): Boolean;
 begin
   if (Parent = nil) or not Assigned(FOnTrace) then
     Exit(False);
-  FOrg := Origin;
-  Result := PMFindFree(MaxDist);
+  FPM.Origin := Origin;
+  Result := FPM.FindFree(MaxDist);
   if Result then
-    Parent.Translation := CV(FOrg + Vector3(0, 0, FViewZ - FStepOffset)) + FAppliedOffset;
+    Parent.Translation := CV(FPM.Origin + Vector3(0, 0, FViewZ - FStepOffset)) + FAppliedOffset;
 end;
 
-procedure TQuakePlayerMovement.PMUnstick;
-const
-  Dists: array[0..5] of Single = (1, 2, 4, 8, 16, 24);
-  { Never down: below a floor is the void outside the map }
-  Dirs: array[0..4] of TVector3 = ((X: 0; Y: 0; Z: 1), (X: 1; Y: 0; Z: 0), (X: -1; Y: 0; Z: 0),
-    (X: 0; Y: 1; Z: 0), (X: 0; Y: -1; Z: 0));
+procedure TQuakePlayerMovement.AfterPMove(const SecondsPassed: Single);
 var
-  D, I: Integer;
+  Dt, TargetView: Single;
 begin
-  { Started inside a solid (spawned in a wall, pushed by a mover): find the
-    nearest free spot, like Quake 2's PM_InitialSnapPosition but further }
-  if PMGoodPosition(FOrg) then
-    Exit;
-  Inc(FStuckCount);
-  for D := 0 to High(Dists) do
-    for I := 0 to High(Dirs) do
-      if PMGoodPosition(FOrg + Dirs[I] * Dists[D]) then
-      begin
-        FOrg := FOrg + Dirs[I] * Dists[D];
-        Exit;
-      end;
-end;
-
-procedure PMClipVelocity(const InV, Normal: TVector3; out OutV: TVector3; const Overbounce: Single);
-var
-  Backoff: Single;
-  I: Integer;
-begin
-  Backoff := TVector3.DotProduct(InV, Normal) * Overbounce;
-  OutV := InV - Normal * Backoff;
-  for I := 0 to 2 do
-    if Abs(OutV.Data[I]) < PM_STOP_EPSILON then
-      OutV.Data[I] := 0;
-end;
-
-procedure TQuakePlayerMovement.PMSlideMove(const Dt: Single);
-var
-  Bump, I, J, NumPlanes: Integer;
-  Planes: array[0..PM_MAX_CLIP_PLANES - 1] of TVector3;
-  PrimalVel, Dir, Stop: TVector3;
-  TimeLeft, D: Single;
-  T: TQuakeTrace;
-begin
-  { PM_StepSlideMove_: move, clipping the velocity against every plane hit
-    (at most 4 bumps), along creases between two planes }
-  NumPlanes := 0;
-  PrimalVel := FVel;
-  TimeLeft := Dt;
-  for Bump := 0 to 3 do
-  begin
-    Stop := FOrg + FVel * TimeLeft;
-    T := PMTrace(FOrg, Stop);
-    if T.AllSolid then
-    begin
-      { Trapped in a solid }
-      FVel.Z := 0;
-      Exit;
-    end;
-    if T.Fraction > 0 then
-    begin
-      FOrg := T.EndPos;
-      NumPlanes := 0;
-    end;
-    if T.Fraction = 1 then
-      Break;
-    TimeLeft := TimeLeft - TimeLeft * T.Fraction;
-    if NumPlanes >= PM_MAX_CLIP_PLANES then
-    begin
-      FVel := TVector3.Zero;
-      Break;
-    end;
-    Planes[NumPlanes] := T.Normal;
-    Inc(NumPlanes);
-    { Make the velocity parallel to all clip planes }
-    I := 0;
-    while I < NumPlanes do
-    begin
-      PMClipVelocity(FVel, Planes[I], FVel, 1.01);
-      J := 0;
-      while J < NumPlanes do
-      begin
-        if (J <> I) and (TVector3.DotProduct(FVel, Planes[J]) < 0) then
-          Break;
-        Inc(J);
-      end;
-      if J = NumPlanes then
-        Break;
-      Inc(I);
-    end;
-    if I = NumPlanes then
-    begin
-      { Go along the crease }
-      if NumPlanes <> 2 then
-      begin
-        FVel := TVector3.Zero;
-        Break;
-      end;
-      Dir := TVector3.CrossProduct(Planes[0], Planes[1]);
-      D := TVector3.DotProduct(Dir, FVel);
-      FVel := Dir * D;
-    end;
-    { Stop dead rather than oscillate in sloping corners }
-    if TVector3.DotProduct(FVel, PrimalVel) <= 0 then
-    begin
-      FVel := TVector3.Zero;
-      Break;
-    end;
-  end;
-end;
-
-procedure TQuakePlayerMovement.PMStepSlideMove(const Dt: Single);
-var
-  StartO, StartV, DownO, DownV, Up, Down: TVector3;
-  T: TQuakeTrace;
-  DownDist, UpDist: Single;
-begin
-  { PM_StepSlideMove: slide; then try again from StepSize higher and keep
-    whichever got further (walks up stairs) }
-  StartO := FOrg;
-  StartV := FVel;
-  PMSlideMove(Dt);
-  DownO := FOrg;
-  DownV := FVel;
-
-  Up := StartO + Vector3(0, 0, FStepSize);
-  T := PMTrace(Up, Up);
-  if T.AllSolid then
-    Exit; { can't step up }
-
-  FOrg := Up;
-  FVel := StartV;
-  PMSlideMove(Dt);
-  { Push down the final amount }
-  Down := FOrg - Vector3(0, 0, FStepSize);
-  T := PMTrace(FOrg, Down);
-  if not T.AllSolid then
-    FOrg := T.EndPos;
-  Up := FOrg;
-
-  DownDist := Sqr(DownO.X - StartO.X) + Sqr(DownO.Y - StartO.Y);
-  UpDist := Sqr(Up.X - StartO.X) + Sqr(Up.Y - StartO.Y);
-  if (DownDist > UpDist) or (T.Normal.Z < PM_MIN_STEP_NORMAL) then
-  begin
-    FOrg := DownO;
-    FVel := DownV;
-    Exit;
-  end;
-  { Walking along a plane: keep the vertical speed of the plain slide }
-  FVel.Z := DownV.Z;
-end;
-
-procedure TQuakePlayerMovement.PMCategorizePosition;
-var
-  Point: TVector3;
-  T: TQuakeTrace;
-  Sample1, Sample2: Single;
-  C: Integer;
-begin
-  { PM_CatagorizePosition: on ground if a 0.25 unit trace down hits a
-    walkable plane (normal z >= 0.7) }
-  Point := FOrg - Vector3(0, 0, 0.25);
-  FGroundContents := 0;
-  if FVel.Z > 180 then
-  begin
-    FOnGround := False;
-    FGroundObject := nil;
-  end else
-  begin
-    T := PMTrace(FOrg, Point);
-    if (not T.Hit) or ((T.Normal.Z < 0.7) and not T.StartSolid) then
-    begin
-      FOnGround := False;
-      FGroundObject := nil;
-    end else
-    begin
-      FGroundObject := T.Ent;
-      FGroundContents := T.Contents;
-      if not FOnGround then
-      begin
-        { Just hit the ground: a hard landing stops jumps for a moment }
-        if FVel.Z < -200 then
-        begin
-          if FVel.Z < -400 then
-            FLandTime := 25 * 0.008
-          else
-            FLandTime := 18 * 0.008;
-        end;
-      end;
-      FOnGround := True;
-    end;
-  end;
-
-  { Water level: feet, waist, eyes }
-  FWaterLevel := 0;
-  FWaterType := 0;
-  if not Assigned(FOnPointContents) then
-    Exit;
-  Sample1 := PMViewHeight - PMMins.Z;
-  Sample2 := Sample1 / 2;
-  Point := FOrg + Vector3(0, 0, PMMins.Z + 1);
-  C := FOnPointContents(CV(Point));
-  if (C and PM_MASK_LIQUID) <> 0 then
-  begin
-    FWaterType := C and PM_MASK_LIQUID;
-    FWaterContents := C;
-    FWaterLevel := 1;
-    Point.Z := FOrg.Z + PMMins.Z + Sample2;
-    if (FOnPointContents(CV(Point)) and PM_MASK_LIQUID) <> 0 then
-    begin
-      FWaterLevel := 2;
-      Point.Z := FOrg.Z + PMMins.Z + Sample1;
-      if (FOnPointContents(CV(Point)) and PM_MASK_LIQUID) <> 0 then
-        FWaterLevel := 3;
-    end;
-  end;
-end;
-
-function CurrentDirection(const Contents: Integer): TVector3;
-begin
-  Result := TVector3.Zero;
-  if (Contents and CONTENTS_CURRENT_0) <> 0 then Result.X := Result.X + 1;
-  if (Contents and CONTENTS_CURRENT_90) <> 0 then Result.Y := Result.Y + 1;
-  if (Contents and CONTENTS_CURRENT_180) <> 0 then Result.X := Result.X - 1;
-  if (Contents and CONTENTS_CURRENT_270) <> 0 then Result.Y := Result.Y - 1;
-  if (Contents and CONTENTS_CURRENT_UP) <> 0 then Result.Z := Result.Z + 1;
-  if (Contents and CONTENTS_CURRENT_DOWN) <> 0 then Result.Z := Result.Z - 1;
-end;
-
-function PMCurrentVelocity(const WaterContents, WaterLevel: Integer; const OnGround: Boolean;
-  const GroundContents: Integer): TVector3;
-var
-  S: Single;
-begin
-  Result := TVector3.Zero;
-  if (WaterLevel > 0) and ((WaterContents and MASK_CURRENT) <> 0) then
-  begin
-    S := 400; { pm_waterspeed }
-    if (WaterLevel = 1) and OnGround then
-      S := S / 2;
-    Result := Result + CurrentDirection(WaterContents) * S;
-  end;
-  if OnGround then
-    Result := Result + CurrentDirection(GroundContents) * 100;
-end;
-
-procedure TQuakePlayerMovement.PMCheckDuck;
-begin
-  { PM_CheckDuck: duck on the ground; stand up when there is room }
-  if InputCrouch and FOnGround then
-    FCrouched := True
-  else
-  if FCrouched then
-  begin
-    FCrouched := False;
-    if PMTrace(FOrg, FOrg).AllSolid then
-      FCrouched := True;
-  end;
-end;
-
-procedure TQuakePlayerMovement.PMFriction(const Dt: Single);
-var
-  Speed, Drop, Control, NewSpeed: Single;
-begin
-  { PM_Friction: ground (and ladder) friction, water friction by depth }
-  Speed := FVel.Length;
-  if Speed < 1 then
-  begin
-    FVel.X := 0;
-    FVel.Y := 0;
-    Exit;
-  end;
-  Drop := 0;
-  if FOnGround or FOnLadder then
-  begin
-    Control := Max(Speed, FStopSpeed);
-    Drop := Drop + Control * FFriction * Dt;
-  end;
-  if (FWaterLevel > 0) and not FOnLadder then
-    Drop := Drop + Speed * FWaterFriction * FWaterLevel * Dt;
-  NewSpeed := Max(0, Speed - Drop) / Speed;
-  FVel := FVel * NewSpeed;
-end;
-
-procedure TQuakePlayerMovement.PMAccelerate(const WishDir: TVector3; const WishSpeed, Accel, Dt: Single);
-var
-  CurrentSpeed, AddSpeed, AccelSpeed: Single;
-begin
-  CurrentSpeed := TVector3.DotProduct(FVel, WishDir);
-  AddSpeed := WishSpeed - CurrentSpeed;
-  if AddSpeed <= 0 then
-    Exit;
-  AccelSpeed := Min(AddSpeed, Accel * Dt * WishSpeed);
-  FVel := FVel + WishDir * AccelSpeed;
-end;
-
-procedure TQuakePlayerMovement.PMCheckJump;
-begin
-  { PM_CheckJump }
-  if FLandTime > 0 then
-    Exit;
-  if not InputJump then
-  begin
-    FJumpHeld := False;
-    Exit;
-  end;
-  if FJumpHeld then
-    Exit;
-  if FWaterLevel >= 2 then
-  begin
-    { Swim up }
-    FOnGround := False;
-    FGroundObject := nil;
-    if FVel.Z <= -300 then
-      Exit;
-    if FWaterType = PM_CONTENTS_WATER then
-      FVel.Z := 100
-    else
-    if FWaterType = PM_CONTENTS_SLIME then
-      FVel.Z := 80
-    else
-      FVel.Z := 50;
-    Exit;
-  end;
-  if not FOnGround then
-    Exit;
-  FJumpHeld := True;
-  FOnGround := False;
-  FGroundObject := nil;
-  FVel.Z := Max(FVel.Z + FJumpSpeed, FJumpSpeed);
-end;
-
-procedure TQuakePlayerMovement.PMMove(const Dt: Single);
-const
-  SinPitch15 = 0.2588;
-  MoveScale = 400; { cl_forwardspeed / cl_sidespeed with always run }
-var
-  DirQ, Forward, Right, WishVel, WishDir: TVector3;
-  FMove, SMove, WishSpeed, MaxSpeed, PreVelZ, FallSpeed, Delta, Rise, TargetView, StartZ: Single;
-  WasOnGround: Boolean;
-  T: TQuakeTrace;
-begin
-  FOrg := QV(Parent.Translation) - Vector3(0, 0, FViewZ - FStepOffset);
-  FVel := QV(FVelocity);
-  PMUnstick;
-  StartZ := FOrg.Z;
-
-  PMCheckDuck;
-  WasOnGround := FOnGround;
-  PMCategorizePosition;
-  if FLandTime > 0 then
-    FLandTime := Max(0, FLandTime - Dt);
-
-  DirQ := QV(Parent.Direction);
-  Forward := Vector3(DirQ.X, DirQ.Y, 0);
-  if Forward.Length < 0.001 then
-    Forward := Vector3(1, 0, 0);
-  Forward := Forward.Normalize;
-  Right := Vector3(Forward.Y, -Forward.X, 0);
-
-  { PM_CheckSpecialMovement: a ladder brush just in front }
-  T := FOnTrace(FOrg, FOrg + Forward, PMMins, PMMaxs, PM_MASK_PLAYERSOLID or PM_CONTENTS_LADDER);
-  FOnLadder := (T.Fraction < 1) and ((T.Contents and PM_CONTENTS_LADDER) <> 0);
-
-  PMCheckJump;
-  PMFriction(Dt);
-  PreVelZ := FVel.Z;
-
-  FMove := InputForward * MoveScale;
-  SMove := InputSide * MoveScale;
-  if FCrouched then
-    MaxSpeed := FCrouchSpeed
-  else
-    MaxSpeed := FRunSpeed;
-
-  if FWaterLevel >= 2 then
-  begin
-    { PM_WaterMove: swim along the view, sink slowly without input }
-    WishVel := DirQ * FMove + Right * SMove;
-    if (FMove = 0) and (SMove = 0) and not InputJump and not InputCrouch then
-      WishVel.Z := WishVel.Z - FWaterSink
-    else
-    if InputJump then
-      WishVel.Z := WishVel.Z + 200
-    else
-    if InputCrouch then
-      WishVel.Z := WishVel.Z - 200;
-    WishVel := WishVel + PMCurrentVelocity(FWaterContents, FWaterLevel, FOnGround, FGroundContents);
-    WishSpeed := WishVel.Length;
-    if WishSpeed > MaxSpeed then
-      WishSpeed := MaxSpeed;
-    WishSpeed := WishSpeed * 0.5;
-    if WishVel.Length > 0.001 then
-      PMAccelerate(WishVel.Normalize, WishSpeed, FAccelerate, Dt);
-    PMStepSlideMove(Dt);
-  end else
-  begin
-    { PM_AirMove }
-    WishVel := Forward * FMove + Right * SMove;
-    WishVel.Z := 0;
-    if FOnLadder and (Abs(FVel.Z) <= 200) then
-    begin
-      { PM_AddCurrents: climb by looking up / down, jump and crouch }
-      if (DirQ.Z >= SinPitch15) and (FMove > 0) then
-        WishVel.Z := 200
-      else
-      if (DirQ.Z <= -SinPitch15) and (FMove > 0) then
-        WishVel.Z := -200
-      else
-      if InputJump then
-        WishVel.Z := 200
-      else
-      if InputCrouch then
-        WishVel.Z := -200;
-      WishVel.X := EnsureRange(WishVel.X, -25, 25);
-      WishVel.Y := EnsureRange(WishVel.Y, -25, 25);
-    end;
-    WishVel := WishVel + PMCurrentVelocity(FWaterContents, FWaterLevel, FOnGround, FGroundContents);
-    WishSpeed := WishVel.Length;
-    if WishSpeed > 0.001 then
-      WishDir := WishVel / WishSpeed
-    else
-      WishDir := TVector3.Zero;
-    if WishSpeed > MaxSpeed then
-      WishSpeed := MaxSpeed;
-
-    if FOnLadder then
-    begin
-      PMAccelerate(WishDir, WishSpeed, FAccelerate, Dt);
-      if WishVel.Z = 0 then
-      begin
-        if FVel.Z > 0 then
-          FVel.Z := Max(0, FVel.Z - FGravity * Dt)
-        else
-          FVel.Z := Min(0, FVel.Z + FGravity * Dt);
-      end;
-      PMStepSlideMove(Dt);
-    end else
-    if FOnGround then
-    begin
-      FVel.Z := 0;
-      PMAccelerate(WishDir, WishSpeed, FAccelerate, Dt);
-      FVel.Z := 0;
-      if (FVel.X <> 0) or (FVel.Y <> 0) then
-        PMStepSlideMove(Dt);
-    end else
-    begin
-      PMAccelerate(WishDir, WishSpeed, FAirAccelerate, Dt);
-      FVel.Z := FVel.Z - FGravity * Dt;
-      PMStepSlideMove(Dt);
-    end;
-  end;
-
-  Rise := FOrg.Z - StartZ;
-  PMCategorizePosition;
-
-  { Landing: Quake 2 P_FallingDamage (less in water) }
-  if FOnGround and not WasOnGround and (PreVelZ < 0) then
-  begin
-    FallSpeed := -PreVelZ;
-    Delta := Sqr(FallSpeed / 10) * 0.01;
-    if FWaterLevel = 3 then
-      Delta := 0
-    else
-    if FWaterLevel = 2 then
-      Delta := Delta * 0.25
-    else
-    if FWaterLevel = 1 then
-      Delta := Delta * 0.5;
-    StartFallKick(Delta);
-    if (Delta > 30) and Assigned(FOnFallDamage) then
-      FOnFallDamage(Max(1, Round((Delta - 30) / 2)))
-    else
-    if (Delta >= 15) and Assigned(FOnLandSound) then
-      FOnLandSound(Self);
-  end;
-
+  Dt := Min(SecondsPassed, 0.05);
+  StartFallKick(FPM.LastFallDelta);
   { Smooth the view over steps up (Quake 2 client predicted_step) }
-  if WasOnGround and FOnGround and (Rise > 4) and (Rise <= FStepSize + 2) then
-    FStepOffset := Min(FStepSize, FStepOffset + Rise);
+  if FPM.LastWasOnGround and FPM.OnGround and (FPM.LastRise > 4) and
+     (FPM.LastRise <= FStepSize + 2) then
+    FStepOffset := Min(FStepSize, FStepOffset + FPM.LastRise);
   FStepOffset := Max(0, FStepOffset - Dt * FStepSize * 10);
   { The eye follows ducking within 0.1 s, like Quake 2's viewoffset lerp }
-  TargetView := PMViewHeight;
+  TargetView := FPM.ViewHeight;
   if FViewZ < TargetView then
     FViewZ := Min(TargetView, FViewZ + 240 * Dt)
   else
     FViewZ := Max(TargetView, FViewZ - 240 * Dt);
+  Parent.Translation := CV(FPM.Origin + Vector3(0, 0, FViewZ - FStepOffset));
+  { What the view effects and the HUD read }
+  FVelocity := FPM.Velocity;
+  FOnGround := FPM.OnGround;
+  FCrouched := FPM.Crouched;
+  FOnLadder := FPM.OnLadder;
+  FWaterLevel := FPM.WaterLevel;
+  FWaterType := FPM.WaterType;
+end;
 
-  Parent.Translation := CV(FOrg + Vector3(0, 0, FViewZ - FStepOffset));
-  FVelocity := CV(FVel);
+function PMCurrentVelocity(const WaterContents, WaterLevel: Integer; const OnGround: Boolean;
+  const GroundContents: Integer): TVector3;
+begin
+  Result := QuakePMove.PMCurrentVelocity(WaterContents, WaterLevel, OnGround, GroundContents);
 end;
 
 procedure TQuakePlayerMovement.Move(const SecondsPassed: Single);
@@ -1239,7 +803,12 @@ begin
 
   if Assigned(FOnTrace) then
   begin
-    PMMove(Dt);
+    { Code may have moved the camera or changed the velocity since }
+    SyncParams;
+    FPM.Origin := Origin;
+    FPM.Velocity := FVelocity;
+    FPM.Move(MakeInput(Dt));
+    AfterPMove(Dt);
     Exit;
   end;
 

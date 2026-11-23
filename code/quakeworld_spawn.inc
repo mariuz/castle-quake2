@@ -827,7 +827,7 @@ begin
   Result := True;
 end;
 
-procedure TQuakeWorld.SetPlayer(const Value: TQuakePlayerMovement);
+procedure TQuakeWorld.SetPlayer(const Value: TQuakePMove);
 begin
   FPlayer := Value;
   if FPlayer <> nil then

@@ -500,7 +500,7 @@ begin
        Mover.Transform.Exists and Old.TryInverse(OldInv) then
     begin
       { The player }
-      if (FPlayer <> nil) and Assigned(FPlayer.OnTrace) and (not FDead) and (FPlayer.Parent <> nil) then
+      if (FPlayer <> nil) and Assigned(FPlayer.OnTrace) and (not FDead) then
       begin
         Org := FPlayer.Origin;
         Mins := FPlayer.BoxMins;

@@ -124,6 +124,9 @@ type
       Not owned. }
     property Follower: TQuakeMd2Instance read FFollower write FFollower;
     property Model: TQuakeMd2 read FModel;
+    { The frame shown (blended towards) and the skin, for snapshots }
+    property ShownFrame: Integer read FLastB;
+    property SkinIndex: Integer read FSkinIndex;
     { True when a non-looping animation reached its last frame }
     property AnimDone: Boolean read FAnimDone;
     { 0..1 position in the current animation (non-looping ones stop at 1) }

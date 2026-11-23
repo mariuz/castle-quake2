@@ -16,7 +16,7 @@ uses
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound, QuakeMd2,
   QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad, QuakeTouch, QuakeExitWatchdog, QuakeBenchmark, CastleTimeUtils,
   X3DNodes, X3DFields, CastleRenderOptions,
-  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevel, QuakeLevelGen, QuakeLevelEditor, QuakeBspBuilder, QuakeTrace, QuakeTick, fpjson, jsonparser, CastleDownload, CastleUriUtils;
+  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevel, QuakeLevelGen, QuakeLevelEditor, QuakeBspBuilder, QuakeTrace, QuakeTick, QuakeNet, QuakeServer, QuakeClient, QuakePMove, fpjson, jsonparser, CastleDownload, CastleUriUtils;
 
 type
   TCameraMode = (cmFirstPerson, cmNoclip);
@@ -70,6 +70,19 @@ type
     FDemoFireHeld: Boolean;
     { Right trigger held this frame }
     FGamepadFire: Boolean;
+    { E.1: the server (the simulation) and the client (this view) in one
+      process, over a loopback channel }
+    FNet: TNetLoopback;
+    FServer: TQuakeServer;
+    FClient: TQuakeClient;
+    { A tapped shot (X, a recorded tap) for the next command }
+    FNetAttackTap: Boolean;
+    { Snapshots compared with the server's, and how many differed }
+    FNetChecked, FNetMismatches: Integer;
+    { Where the last prediction left the view (a camera moved by code since
+      moves the server's player there) }
+    FPredictedView: TVector3;
+    FPredictValid: Boolean;
     FIntermission: Boolean;
     FIntermissionTime: Single;
     { Demo script movement: hold forward / side input until FDemoMoveTime runs out }
@@ -107,6 +120,14 @@ type
     { Note an instant action in the recording, at the current time }
     procedure RecordCommand(const Cmd: String);
     procedure SampleRecording(const Firing: Boolean);
+    { Move the player (client prediction) and send this frame's usercmd to
+      the server, which runs it at once }
+    procedure MoveAndSend(const Attack: Boolean; const SecondsPassed: Single);
+    procedure PredictMove(Sender: TObject; const Input: TPMoveInput; const PM: TQuakePMove);
+    { The server's svc_print / svc_centerprint }
+    procedure ClientPrint(const Text: String; const AtCenter: Boolean);
+    { The client's copy of the last snapshot must be the server's }
+    procedure CheckSnapshot;
     { Player actions that a recording keeps }
     procedure DoSelectWeapon(const Slot: Integer);
     procedure DoUse;
@@ -138,8 +159,6 @@ type
     procedure EndIntermission;
     procedure PlaceCamera(const Pos: TVector3; const YawDeg: Single);
     procedure HandleConsoleCommand(const Cmd, Args: String);
-    { "spawn classname key value...": a new map entity in front of the player }
-    procedure SpawnFromConsole(const Args: String);
     procedure HandleMenuAction(const Action: TMenuAction; const Param: String);
     procedure ParseDemoScript(const Script: String);
     procedure RunDemoStep(const SecondsPassed: Single);
@@ -239,6 +258,8 @@ begin
   FCameraMode := Mode;
   WalkNavigation.Gravity := (Mode = cmFirstPerson) and not PlayerMovement.Active;
   PlayerMovement.Noclip := Mode = cmNoclip;
+  if FClient <> nil then
+    FClient.AddCommand('noclip ' + Iff(Mode = cmNoclip, '1', '0'));
   { Autotests must not depend on where the desktop mouse happens to be }
   WalkNavigation.MouseLook := WantMouseLook;
   if Mode = cmNoclip then
@@ -296,36 +317,6 @@ begin
     CycleWeapon(1);
 end;
 
-function SplitArgs(const Args: String): TStringList;
-var
-  I: Integer;
-  Word: String;
-  Quoted, HasWord: Boolean;
-begin
-  Result := TStringList.Create;
-  Word := '';
-  Quoted := False;
-  HasWord := False;
-  for I := 1 to Length(Args) do
-    if Args[I] = '"' then
-    begin
-      Quoted := not Quoted;
-      HasWord := True;
-    end else
-    if (Args[I] = ' ') and not Quoted then
-    begin
-      if HasWord then
-        Result.Add(Word);
-      Word := '';
-      HasWord := False;
-    end else
-    begin
-      Word := Word + Args[I];
-      HasWord := True;
-    end;
-  if HasWord then
-    Result.Add(Word);
-end;
 
 { Move a control to the front of its parent's children. Removed first:
   InsertFront of a control that is already in the list adds it twice
@@ -556,7 +547,19 @@ begin
   FWorld := TQuakeWorld.Create(MainViewport.Items, QuakeMap);
   FWorld.AttachWeaponToCamera(WeaponViewport.Camera, MainViewport.Camera);
   FWorld.Hud := Hud;
-  FWorld.Player := PlayerMovement;
+  FNet := TNetLoopback.Create;
+  FServer := TQuakeServer.Create(FWorld, FNet);
+  FClient := TQuakeClient.Create(FNet);
+  { The server moves the player (the world's Player); the view predicts it
+    with the same pmove and its own copy of the state }
+  PlayerMovement.SyncParams;
+  FServer.PM.CopyParams(PlayerMovement.PM);
+  FWorld.Player := FServer.PM;
+  FWorld.ViewPlayer := PlayerMovement;
+  PlayerMovement.OnTrace := @FWorld.PlayerTrace;
+  PlayerMovement.OnPointContents := @FWorld.PlayerPointContents;
+  PlayerMovement.OnPredict := @PredictMove;
+  FClient.OnPrint := @ClientPrint;
   { Screenshots must not depend on random idle pauses of the view weapon }
   FWorld.Gun.RandomPauses := FAutoTestMap = '';
   Particles.SetParent(MainViewport.Items);
@@ -720,6 +723,9 @@ begin
   Sounds.StopMusic;
   Particles.Camera := nil;
   Particles.SetParent(nil);
+  FreeAndNil(FClient);
+  FreeAndNil(FServer);
+  FreeAndNil(FNet);
   { The world references design components, which are freed by inherited Stop }
   FreeAndNil(FWorld);
   FreeAndNil(FScaledView);
@@ -735,6 +741,9 @@ procedure TViewPlay.PlaceCamera(const Pos: TVector3; const YawDeg: Single);
 begin
   MainViewport.Camera.SetWorldView(Pos, YawToCgeDir(YawDeg), Vector3(0, 1, 0));
   PlayerMovement.ResetVelocity;
+  { The server places the player (spawn, teleport) }
+  if FServer <> nil then
+    FServer.PlacePlayer(PlayerMovement.Origin, YawToCgeDir(YawDeg), True);
 end;
 
 procedure TViewPlay.UpdateMovementInput(const SecondsPassed: Single);
@@ -832,6 +841,11 @@ begin
   if FWorld.LoadMap(LevelName) then
   begin
     FMapName := FWorld.Bsp.MapName;
+    if FServer <> nil then
+    begin
+      FNet.Clear;
+      FServer.NewMap(FMapName);
+    end;
     PlaceCamera(FWorld.SpawnPoint, FWorld.SpawnAngle);
     Hud.ShowMessage(FMapName, 3.0);
   end else
@@ -1099,7 +1113,7 @@ begin
       if (Input.Buttons and InButtonJump) <> 0 then
         FDemoJump := True;
       if (Input.Buttons and InButtonFire) <> 0 then
-        FWorld.FireWeapon(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
+        FNetAttackTap := True;
       Input := NextInput;
       Inc(FDemoIndex);
     end;
@@ -1118,7 +1132,7 @@ begin
         MainViewport.Camera.Translation := QuakeToCge(Input.Origin);
         { Not into a wall (when the map changed since the recording) }
         if Assigned(EntityTrace) and EntityTrace(PlayerMovement.Origin, PlayerMovement.Origin,
-           PlayerMovement.BoxMins, PlayerMovement.BoxMaxs, MASK_PLAYERSOLID, PlayerMovement).StartSolid then
+           PlayerMovement.BoxMins, PlayerMovement.BoxMaxs, MASK_PLAYERSOLID, FServer.PM).StartSolid then
           MainViewport.Camera.Translation := Dir;
       end;
     end;
@@ -1159,7 +1173,7 @@ begin
   if Action = 'X' then
   begin
     RecordCommand('X');
-    FWorld.FireWeapon(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
+    FNetAttackTap := True;
   end
   else
   if Action = 'H' then { Hold / release fire }
@@ -1258,10 +1272,10 @@ begin
     if Length(Vals) >= 4 then
     begin
       J := StrToIntDef(Vals[0], -1);
-      if (J >= 0) and (J < FWorld.Monsters.Count) then
+      { Spawned in this frame: the server knows it when it runs the command }
+      if J >= 0 then
       begin
-        FWorld.Monsters[J].Transform.Translation := QuakeToCge(Vector3(StrToFloatDef(Vals[1], 0),
-          StrToFloatDef(Vals[2], 0), StrToFloatDef(Vals[3], 0)));
+        FClient.AddCommand('mv ' + Param);
         FWatchedMonster := J;
       end;
     end;
@@ -1305,7 +1319,7 @@ begin
       { Swept like the player's box: stops at walls instead of passing them }
       Target := PlayerMovement.Origin;
       Target2Q := EntityTrace(Target, Target + CgeToQuake(Dir.Normalize * Val), PlayerMovement.BoxMins,
-        PlayerMovement.BoxMaxs, MASK_PLAYERSOLID, PlayerMovement).EndPos;
+        PlayerMovement.BoxMaxs, MASK_PLAYERSOLID, FServer.PM).EndPos;
       PlayerMovement.Push(QuakeToCge(Target2Q) - QuakeToCge(Target));
     end else
     if Dir.Length > 0 then
@@ -1354,7 +1368,7 @@ begin
       HandleConsoleCommand(LowerCase(Param), '');
   end else
   if Action = 'E' then { Fire entity targets, like a trigger would }
-    FWorld.UseTargets(Param)
+    FClient.AddCommand('fire ' + Param)
   else
   if Action = 'V' then { Log mover states }
   begin
@@ -1452,11 +1466,21 @@ begin
     WritelnLog('Demo', 'Projectiles: %d, delayed targets: %d, earthquakes: %d, player gravity %.2f, gibs: %d',
       [FWorld.ProjectileCount, FWorld.DelayedCount, FWorld.EarthquakeCount, FWorld.PlayerGravity, Particles.GibCount]);
     WritelnLog('Demo', 'Particles: %d (mesh uploads %d)', [Particles.ParticleCount, Particles.Uploads]);
+    if FNet.PacketsToClient > 0 then
+      WritelnLog('Demo', 'Net: server frame %d, %d entities in view, last snapshot %d bytes (delta from %d), %d bytes a snapshot on average, %d commands (%d string), client frames %d (%d bad), %d of %d checked differ, prediction checked %d times, %d off by more than 1/8 (max %.2f)',
+        [FServer.FrameNum, Length(FServer.LastFrame.Entities), FServer.LastBytes, FServer.LastDelta,
+         FNet.BytesToClient div FNet.PacketsToClient, FServer.Commands, FServer.StringCommands,
+         FClient.FramesReceived, FClient.BadFrames, FNetMismatches, FNetChecked,
+         FClient.PredictionChecks, FClient.PredictionErrors, FClient.MaxPredictionError]);
+    WritelnLog('Demo', 'Player: server origin %s velocity %s%s water %d, client origin %s%s',
+      [FServer.PM.Origin.ToString, FServer.PM.QuakeVelocity.ToString,
+       Iff(FServer.PM.Crouched, ' crouched', ''), FServer.PM.WaterLevel,
+       PlayerMovement.Origin.ToString, Iff(PlayerMovement.PM.Crouched, ' crouched', '')]);
     WritelnLog('Demo', 'Model lights: %d of %d models lit by dynamic lights%s', [ModelsLitCount, Md2Instances.Count,
       Iff((FWorld.WeaponModel <> nil) and (FWorld.WeaponModel.DynamicLightCount > 0), ', the gun too', '')]);
     WritelnLog('Demo', 'String: "%s"', [FWorld.LastString]);
     WritelnLog('Demo', 'Monster shots: %d, player health %d armor %d, player stuck %d', [FWorld.MonsterShots,
-      FWorld.Stats.Health, FWorld.Stats.Armor, PlayerMovement.StuckCount]);
+      FWorld.Stats.Health, FWorld.Stats.Armor, FServer.PM.StuckCount]);
     WritelnLog('Demo', 'Replay drift: max %.1f units', [FDemoMaxDrift]);
     WritelnLog('Demo', 'Kills: %d / %d, secrets %d / %d, goals %d / %d', [FWorld.Stats.Kills, FWorld.Stats.TotalKills,
       FWorld.Stats.Secrets, FWorld.Stats.TotalSecrets, FWorld.Stats.Goals, FWorld.Stats.TotalGoals]);
@@ -1484,10 +1508,10 @@ begin
     DoSelectWeapon(StrToIntDef(Param, 2))
   else
   if Action = 'K' then
-    FWorld.CheatGiveAll
+    FClient.AddCommand('give all')
   else
   if Action = 'Y' then
-    FWorld.CheatGodMode
+    FClient.AddCommand('god')
   else
   if Action = 'L' then { Load map; IN times count from here }
   begin
@@ -1710,6 +1734,7 @@ begin
       MainViewport.Camera.SetWorldView(Vector3(Arr.Floats[0], Arr.Floats[1], Arr.Floats[2]),
         Dir, Vector3(0, 1, 0));
       PlayerMovement.ResetVelocity;
+      FServer.PlacePlayer(PlayerMovement.Origin, Dir, True);
     end;
     Hud.ShowMessage('Game loaded: ' + SaveName);
     WritelnLog('GameViewPlay', 'Loaded game from %s', [SaveUrl(SaveName)]);
@@ -1737,13 +1762,13 @@ end;
 procedure TViewPlay.DoSelectWeapon(const Slot: Integer);
 begin
   RecordCommand('C:' + IntToStr(Slot));
-  FWorld.SelectWeapon(Slot);
+  FClient.AddCommand('weapon ' + IntToStr(Slot));
 end;
 
 procedure TViewPlay.DoUse;
 begin
   RecordCommand('U');
-  FWorld.ActivateUse(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
+  FClient.AddCommand('use');
 end;
 
 procedure TViewPlay.PadBindCommand(const Args: String);
@@ -2088,6 +2113,16 @@ begin
   UpdateMovementInput(SecondsPassed);
   FWorld.UpdateFrame(SecondsPassed);
   RunTicks(SecondsPassed);
+  { Hold to fire (left mouse / Ctrl) }
+  Firing := FDemoFireHeld or FDemoInFire;
+  if not Console.IsOpen and not Menu.Exists then
+    { With touch controls every touch is a "left button": fire only by FIRE }
+    Firing := Firing or Container.Pressed[Settings.Keys[qaFire]] or
+      ((FTouch = nil) and (buttonLeft in Container.MousePressed)) or FGamepadFire;
+  { Like Quake 2's client frame: this frame's command, predicted here and
+    run by the server at once (ClientThink: the move, then fire) }
+  MoveAndSend(Firing or FNetAttackTap, SecondsPassed);
+  FNetAttackTap := False;
   FWorld.SetGunAngles(PlayerMovement.GunAngles);
   FWorld.Geometry.UpdateVisibility(CgeToQuake(MainViewport.Camera.Translation));
   FWorld.CullEntities;
@@ -2119,16 +2154,60 @@ begin
   if FWorld.LevelExited and (FWorld.NextMap <> '') then
     BeginIntermission;
 
-  { Hold to fire (left mouse / Ctrl) }
-  Firing := FDemoFireHeld or FDemoInFire;
-  if not Console.IsOpen and not Menu.Exists then
-    { With touch controls every touch is a "left button": fire only by FIRE }
-    Firing := Firing or Container.Pressed[Settings.Keys[qaFire]] or
-      ((FTouch = nil) and (buttonLeft in Container.MousePressed)) or FGamepadFire;
-  if Firing then
-    FWorld.FireWeapon(PlayerMovement.AimPosition, PlayerMovement.AimDirection);
   if FRecorder <> nil then
     SampleRecording(Firing);
+end;
+
+procedure TViewPlay.ClientPrint(const Text: String; const AtCenter: Boolean);
+begin
+  if AtCenter then
+    Hud.ShowMessage(Text, 2)
+  else
+    Console.Print(Text);
+end;
+
+procedure TViewPlay.PredictMove(Sender: TObject; const Input: TPMoveInput; const PM: TQuakePMove);
+begin
+  FClient.Predict(Input, PM);
+end;
+
+procedure TViewPlay.MoveAndSend(const Attack: Boolean; const SecondsPassed: Single);
+var
+  Alive: Boolean;
+begin
+  Alive := not FWorld.Dead and not PlayerMovement.Suspended;
+  { Code moved the camera since the last prediction (demo actions, the
+    console): the server's player goes there, keeping its velocity }
+  if FPredictValid and Alive and
+     not TVector3.PerfectlyEquals(PlayerMovement.AimPosition, FPredictedView) then
+    FServer.PlacePlayer(PlayerMovement.Origin, PlayerMovement.AimDirection, False);
+  { A placed player is sent at once, so prediction starts from there }
+  if FServer.PlayerChanged then
+    FServer.SendFrame;
+  FClient.ReadPackets;
+  FPredictValid := Alive and PlayerMovement.MoveNow(SecondsPassed);
+  if FPredictValid then
+    FPredictedView := PlayerMovement.AimPosition;
+  FClient.SendMove(Attack, CgeToQuake(PlayerMovement.AimDirection));
+  FServer.ReadPackets;
+end;
+
+procedure TViewPlay.CheckSnapshot;
+var
+  S, C: TNetFrame;
+begin
+  S := FServer.LastFrame;
+  if not S.Valid then
+    Exit;
+  C := FClient.Frame;
+  Inc(FNetChecked);
+  if not (C.Valid and (C.ServerFrame = S.ServerFrame) and FramesEqual(C, S)) then
+  begin
+    Inc(FNetMismatches);
+    if FNetMismatches <= 5 then
+      WritelnWarning('Net', 'Client snapshot %d differs from the server''s %d (%d / %d entities)',
+        [C.ServerFrame, S.ServerFrame, Length(C.Entities), Length(S.Entities)]);
+  end;
 end;
 
 procedure TViewPlay.RunTicks(const SecondsPassed: Single);
@@ -2140,12 +2219,18 @@ begin
   begin
     FWorld.CollectMovingTransforms(FTickList);
     FTickClock.BeforeTick(FTickList);
-    FWorld.Update(TickSeconds, PlayerMovement.AimPosition, PlayerMovement.AimDirection);
+    FServer.RunTick(TickSeconds);
+    FServer.SendFrame;
     FWorld.CollectMovingTransforms(FTickList);
     FTickClock.AfterTick(FTickList);
     { The frame acts on these first (a new map, a teleport, the intermission) }
     if FWorld.RestartPending or FWorld.TeleportPending or FWorld.LevelExited then
       Break;
+  end;
+  if Count > 0 then
+  begin
+    FClient.ReadPackets;
+    CheckSnapshot;
   end;
 end;
 
@@ -2286,41 +2371,6 @@ end;
 
 { Words of a console line; "double quotes" keep spaces }
 
-procedure TViewPlay.SpawnFromConsole(const Args: String);
-var
-  Words: TStringList;
-  Ent: TQuakeEntity;
-  I: Integer;
-  Org: TVector3;
-begin
-  Words := SplitArgs(Args);
-  try
-    if (Words.Count = 0) or (FWorld.Bsp = nil) then
-    begin
-      Console.Print('Usage: spawn <classname> [key value]...  e.g. spawn target_earthquake targetname q count 2');
-      Exit;
-    end;
-    Ent := TQuakeEntity.Create;
-    Ent.SetField('classname', Words[0]);
-    { 96 units in front of the player, at foot level, unless "origin" is given }
-    Org := CgeToQuake(PlayerMovement.AimPosition) +
-      CgeToQuake(Vector3(PlayerMovement.AimDirection.X, 0, PlayerMovement.AimDirection.Z).Normalize * 96);
-    Org.Z := PlayerMovement.Origin.Z;
-    Ent.SetField('origin', Format('%d %d %d', [Round(Org.X), Round(Org.Y), Round(Org.Z)]));
-    I := 1;
-    while I + 1 < Words.Count do
-    begin
-      Ent.SetField(Words[I], Words[I + 1]);
-      Inc(I, 2);
-    end;
-    FWorld.Bsp.Entities.Add(Ent);
-    FWorld.SpawnEntity(Ent);
-    Console.Print(Format('Spawned %s at %s', [Ent.ClassName, Ent.GetField('origin')]));
-    WritelnLog('Console', 'Spawned %s at %s', [Ent.ClassName, Ent.GetField('origin')]);
-  finally
-    Words.Free;
-  end;
-end;
 
 procedure TViewPlay.HandleConsoleCommand(const Cmd, Args: String);
 var
@@ -2334,8 +2384,11 @@ begin
      (Cmd <> 'exit') and (Cmd <> 'help') and (Cmd <> 'fps') and (Cmd <> 'maps') then
     RecordCommand('O:' + Trim(Cmd + ' ' + Args));
 
-  if Cmd = 'spawn' then
-    SpawnFromConsole(Args)
+  { Commands that change the game run on the server (cheats, spawns, tests),
+    in order with the moves and the other commands }
+  if (Cmd = 'spawn') or (Cmd = 'hurt') or (Cmd = 'god') or (Cmd = 'give') or
+     (Cmd = 'powerarmor') or (Cmd = 'notarget') or (Cmd = 'kill') then
+    FClient.AddCommand(Trim(Cmd + ' ' + Args))
   else
   if Cmd = 'sky' then
   begin
@@ -2420,27 +2473,6 @@ begin
     else
       Hud.ShowMessage('No point of interest', 2);
   end else
-  if Cmd = 'hurt' then
-  begin
-    { hurt <monster index | last> <damage>: damage one monster (tests: boss
-      deaths; "last" is the one spawned last) }
-    Words := TStringList.Create;
-    try
-      Words.Delimiter := ' ';
-      Words.StrictDelimiter := True;
-      Words.DelimitedText := Args;
-      if (Words.Count >= 1) and SameText(Words[0], 'last') then
-        Words[0] := IntToStr(FWorld.Monsters.Count - 1);
-      if (Words.Count >= 2) and (StrToIntDef(Words[0], -1) >= 0) and
-         (StrToIntDef(Words[0], -1) < FWorld.Monsters.Count) then
-      begin
-        FWorld.Monsters[StrToInt(Words[0])].TakeDamage(StrToIntDef(Words[1], 0));
-        WritelnLog('Console', 'hurt %s by %s', [FWorld.Monsters[StrToInt(Words[0])].Transform.Name, Words[1]]);
-      end;
-    finally
-      Words.Free;
-    end;
-  end else
   if Cmd = 'renderscale' then
   begin
     { renderscale [25..100]: percent of the window's resolution the 3D view
@@ -2497,31 +2529,6 @@ begin
       GameSkill := EnsureRange(StrToIntDef(Args, GameSkill), 0, 3);
     Console.Print(Format('skill %d (%s), applies to the next map', [GameSkill, SkillNames[GameSkill]]));
   end else
-  if Cmd = 'god' then
-    FWorld.CheatGodMode
-  else
-  if (Cmd = 'give') and (Args = 'all') then
-    FWorld.CheatGiveAll
-  else
-  if (Cmd = 'give') and (Args = 'quad') then
-    FWorld.CheatPowerup(True)
-  else
-  if (Cmd = 'give') and (Args = 'invulnerability') then
-    FWorld.CheatPowerup(False)
-  else
-  if Cmd = 'give' then
-  begin
-    if not FWorld.CheatGiveItem(Args) then
-      Console.Print('Unknown item: ' + Args);
-  end else
-  if Cmd = 'powerarmor' then
-    FWorld.TogglePowerArmor
-  else
-  if Cmd = 'notarget' then
-  begin
-    NoTarget := not NoTarget;
-    Hud.ShowMessage('notarget ' + Iff(NoTarget, 'ON', 'OFF'), 2);
-  end else
   if Cmd = 'noclip' then
   begin
     if FCameraMode = cmFirstPerson then
@@ -2529,9 +2536,6 @@ begin
     else
       SetCameraMode(cmFirstPerson);
   end else
-  if Cmd = 'kill' then
-    FWorld.Suicide
-  else
   if (Cmd = 'quit') or (Cmd = 'exit') then
     Application.Terminate
   else

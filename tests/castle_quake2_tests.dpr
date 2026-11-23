@@ -29,7 +29,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeTick, QuakeWebParams, QuakeInstalls, QuakeInsane, QuakeHud, Zipper;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeTick, QuakeWebParams, QuakeInstalls, QuakeInsane, QuakeHud, QuakeNet, QuakeServer, QuakeClient, QuakePMove, Zipper;
 
 var
   Passed, Failed: Integer;
@@ -3474,6 +3474,249 @@ begin
   Check(TVector3.Equals(D.Translation, Cur.Translation, 0.001), 'a jump is drawn where it landed');
 end;
 
+procedure TestNet;
+var
+  Msg: TNetMessage;
+  A, B: TVector3;
+  Cmd0, Cmd1, Cmd2: TNetUserCmd;
+  Old, New, Got: TNetEntityStates;
+  P0, P1, P2: TNetPlayerState;
+  Loop: TNetLoopback;
+  Data: TBytes;
+  Client: TQuakeClient;
+  F: TNetFrame;
+  Size: Integer;
+  Input: TPMoveInput;
+  PM: TQuakePMove;
+
+  function Ent(const Number, Model, Frame: Integer; const X: Single): TNetEntityState;
+  begin
+    Result := NullEntityState(Number);
+    Result.ModelIndex := Model;
+    Result.Frame := Frame;
+    Result.Origin := Vector3(X, 2, 3);
+    Result.Angles := Vector3(0, QuantizeAngle(45), 0);
+  end;
+
+  { Read back what was written (or Bytes) }
+  procedure Reread(const Bytes: TBytes);
+  begin
+    Msg.Free;
+    Msg := TNetMessage.CreateFrom(Bytes);
+  end;
+
+  procedure SendFrame(const Num, Delta: Integer; const Base, States: TNetEntityStates;
+    const BaseP, P: TNetPlayerState; const Header: Boolean);
+  begin
+    Msg.Clear;
+    if Header then
+    begin
+      Msg.WriteByte(SvcServerData);
+      Msg.WriteString('demo1');
+      Msg.WriteByte(SvcConfigString);
+      Msg.WriteWord(1);
+      Msg.WriteString('models/monsters/soldier/tris.md2');
+    end;
+    Msg.WriteByte(SvcFrame);
+    Msg.WriteLong(Num);
+    Msg.WriteLong(Delta);
+    Msg.WriteByte(SvcPlayerInfo);
+    WriteDeltaPlayerState(Msg, BaseP, P);
+    Msg.WriteByte(SvcPacketEntities);
+    WritePacketEntities(Msg, Base, States);
+    Loop.SendToClient(Msg);
+  end;
+
+begin
+  Msg := TNetMessage.Create;
+  try
+    { Message fields read back as written }
+    Msg.WriteByte(200);
+    Msg.WriteShort(-1234);
+    Msg.WriteWord(65000);
+    Msg.WriteLong(-123456789);
+    Msg.WriteFloat(3.25);
+    Msg.WriteString('weapon 7');
+    Msg.WriteVector(Vector3(1.5, -2, 1e6));
+    Msg.WriteAngle16(90);
+    Reread(Msg.ToBytes);
+    Check(Msg.ReadByte = 200, 'Net: byte');
+    Check(Msg.ReadShort = -1234, 'Net: short');
+    Check(Msg.ReadWord = 65000, 'Net: word');
+    Check(Msg.ReadLong = -123456789, 'Net: long');
+    Check(Msg.ReadFloat = 3.25, 'Net: float');
+    Check(Msg.ReadString = 'weapon 7', 'Net: string');
+    Check(TVector3.PerfectlyEquals(Msg.ReadVector, Vector3(1.5, -2, 1e6)), 'Net: vector');
+    Check(Msg.ReadAngle16 = 90, 'Net: angle');
+    Check(Msg.AtEnd and not Msg.BadRead, 'Net: message read to its end');
+    Check((Msg.ReadLong = 0) and Msg.BadRead, 'Net: a read past the end gives 0 and BadRead');
+  finally
+    Msg.Free;
+  end;
+
+  { Angles: 16 bits, -180 .. 180 }
+  Check(QuantizeAngle(180) = -180, 'Net: angle 180 reads as -180');
+  Check(AngleToShort(QuantizeAngle(37.3)) = AngleToShort(37.3), 'Net: a quantized angle codes the same');
+  A := RotationToQuakeAngles(Vector4(0, 1, 0, DegToRad(90)));
+  Check(TVector3.Equals(A, Vector3(0, 90, 0), 0.01), 'Net: yaw 90 of a monster rotation: ' + A.ToString);
+  A := Vector3(20, -135, 30);
+  B := RotationToQuakeAngles(QuakeAnglesToRotation(A));
+  Check(TVector3.Equals(A, B, 0.01), 'Net: pitch / yaw / roll round trip: ' + B.ToString);
+  Check(TVector3.Equals(NetAnglesToDir(0, 90), YawToCgeDir(90), 1e-5), 'Net: usercmd yaw 90 is YawToCgeDir(90)');
+  Check(NetAnglesToDir(30, 0).Y < -0.49, 'Net: pitch down positive');
+
+  { usercmd: only what changed }
+  Input := Default(TPMoveInput);
+  Input.Forward := 1;
+  Input.Side := -0.5;
+  Input.Jump := True;
+  Input.Dir := Vector3(0, 1, 0);
+  Input.Dt := 0.016;
+  Cmd1 := PMoveInputToUserCmd(Input, 16);
+  Cmd1.Buttons := NetButtonAttack;
+  Check(Cmd1.Angles[1] = AngleToShort(90), 'Net: usercmd yaw of Quake +Y is 90');
+  Check(TVector3.Equals(UserCmdToPMoveInput(Cmd1).Dir, Vector3(0, 1, 0), 1e-4) and
+    SameValue(UserCmdToPMoveInput(Cmd1).Dt, 0.016, 1e-6) and UserCmdToPMoveInput(Cmd1).Jump,
+    'Net: usercmd back to pmove input');
+  Check((Cmd1.ForwardMove = NetMoveScale) and (Cmd1.SideMove = -NetMoveScale div 2) and
+    (Cmd1.UpMove = NetMoveScale) and (Cmd1.Buttons = NetButtonAttack) and (Cmd1.Msec = 16),
+    'Net: usercmd moves, jump, attack, msec');
+  Msg := TNetMessage.Create;
+  try
+    Cmd0 := Default(TNetUserCmd);
+    WriteDeltaUserCmd(Msg, Cmd0, Cmd1);
+    WriteDeltaUserCmd(Msg, Cmd1, Cmd1);
+    Size := Msg.Size;
+    Reread(Msg.ToBytes);
+    Cmd2 := ReadDeltaUserCmd(Msg, Cmd0);
+    Check(CompareMem(@Cmd1, @Cmd2, SizeOf(Cmd1)), 'Net: usercmd delta round trip');
+    Cmd2 := ReadDeltaUserCmd(Msg, Cmd2);
+    Check(CompareMem(@Cmd1, @Cmd2, SizeOf(Cmd1)) and Msg.AtEnd, 'Net: unchanged usercmd');
+    Check(Size < 40, Format('Net: two usercmds in %d bytes', [Size]));
+  finally
+    Msg.Free;
+  end;
+
+  { Packet entities: changed, new, unchanged and removed ones }
+  Old := [Ent(2, 1, 0, 100), Ent(3, 1, 5, 200), Ent(5, 2, 0, 300)];
+  New := [Ent(2, 1, 1, 104), Ent(4, 3, 0, 50), Ent(5, 2, 0, 300)];
+  Msg := TNetMessage.Create;
+  try
+    WritePacketEntities(Msg, Old, New);
+    Size := Msg.Size;
+    Reread(Msg.ToBytes);
+    Check(ReadPacketEntities(Msg, Old, Got), 'Net: packet entities read');
+    Check((Length(Got) = 3) and EntityStatesEqual(Got[0], New[0]) and EntityStatesEqual(Got[1], New[1]) and
+      EntityStatesEqual(Got[2], New[2]), 'Net: packet entities match after the delta');
+    Check(Size < 60, Format('Net: delta of 3 entities in %d bytes', [Size]));
+    Msg.Clear;
+    WritePacketEntities(Msg, New, New);
+    CheckEquals(2, Msg.Size, 'Net: nothing changed: only the end marker');
+    Msg.Clear;
+    WritePacketEntities(Msg, New, nil);
+    Reread(Msg.ToBytes);
+    Check(ReadPacketEntities(Msg, New, Got) and (Length(Got) = 0), 'Net: all removed');
+
+    { Player state: stats by bit }
+    P0 := Default(TNetPlayerState);
+    P1 := P0;
+    P1.Origin := Vector3(1, 2, 3);
+    P1.ViewAngles := Vector3(QuantizeAngle(-10), QuantizeAngle(270), 0);
+    P1.GunIndex := 3;
+    P1.Stats[StatHealth] := 100;
+    P1.Stats[StatAmmo] := -1;
+    Msg.Clear;
+    WriteDeltaPlayerState(Msg, P0, P1);
+    WriteDeltaPlayerState(Msg, P1, P1);
+    Reread(Msg.ToBytes);
+    P2 := ReadDeltaPlayerState(Msg, P0);
+    Check(PlayerStatesEqual(P1, P2), 'Net: player state round trip');
+    P2 := ReadDeltaPlayerState(Msg, P2);
+    Check(PlayerStatesEqual(P1, P2) and Msg.AtEnd, 'Net: unchanged player state');
+  finally
+    Msg.Free;
+  end;
+
+  { Loopback and the client: a full snapshot, a delta, a delta from a
+    snapshot the client doesn't have }
+  Loop := TNetLoopback.Create;
+  Client := TQuakeClient.Create(Loop);
+  Msg := TNetMessage.Create;
+  try
+    SendFrame(1, -1, nil, Old, P0, P1, True);
+    SendFrame(2, 1, Old, New, P1, P1, False);
+    CheckEquals(2, Loop.PacketsToClient, 'Net: loopback packets');
+    Client.ReadPackets;
+    F := Client.Frame;
+    Check(F.Valid and (F.ServerFrame = 2) and (Length(F.Entities) = 3) and
+      EntityStatesEqual(F.Entities[1], New[1]) and PlayerStatesEqual(F.Player, P1),
+      'Net: client snapshot after a delta');
+    Check((Client.MapName = 'demo1') and (Client.ModelNames[1] = 'models/monsters/soldier/tris.md2'),
+      'Net: client map and model table');
+    SendFrame(9, 7, New, Old, P1, P1, False);
+    Client.ReadPackets;
+    CheckEquals(1, Client.BadFrames, 'Net: delta from a missing snapshot refused');
+    Check(not Client.Frame.Valid, 'Net: the client then asks for a full snapshot');
+    Client.AddCommand('use');
+    Client.SendMove(True, Vector3(0, 1, 0));
+    Check(Loop.ReceiveOnServer(Data) and (Data[0] = ClcMove), 'Net: client move sent');
+    Reread(Data);
+    Msg.ReadByte;
+    CheckEquals(-1, Msg.ReadLong, 'Net: acknowledges no snapshot');
+    CheckEquals(1, Msg.ReadLong, 'Net: command sequence');
+    Cmd2 := ReadDeltaUserCmd(Msg, Default(TNetUserCmd));
+    Check((Cmd2.Buttons = NetButtonAttack) and (Cmd2.Msec = 0) and (Cmd2.Angles[1] = AngleToShort(90)),
+      'Net: a command without a move keeps the view and the buttons');
+    Check((Msg.ReadByte = ClcStringCmd) and (Msg.ReadString = 'use') and Msg.AtEnd,
+      'Net: string command after the move');
+  finally
+    Msg.Free;
+    Client.Free;
+    Loop.Free;
+  end;
+
+  { Prediction (noclip: pmove without traces): from the snapshot's state,
+    the commands the server hasn't run, then this frame's }
+  Loop := TNetLoopback.Create;
+  Client := TQuakeClient.Create(Loop);
+  PM := TQuakePMove.Create;
+  Msg := TNetMessage.Create;
+  try
+    P1 := Default(TNetPlayerState);
+    P1.PmFlags := PmfNoclip;
+    SendFrame(1, -1, nil, nil, P0, P1, True);
+    Client.ReadPackets;
+    Input := Default(TPMoveInput);
+    Input.Forward := 1;
+    Input.Dir := Vector3(1, 0, 0);
+    Input.Dt := 0.0405;
+    Client.Predict(Input, PM);
+    { 40 ms of 300 * 1.5 units a second; 0.5 ms carried to the next frame }
+    Check(SameValue(PM.Origin.X, 18, 0.01), 'Net: predicted move: ' + PM.Origin.ToString);
+    Client.SendMove(False, Input.Dir);
+    Client.Predict(Input, PM);
+    Check(SameValue(PM.Origin.X, 36 + 0.45, 0.01), 'Net: an unacknowledged command replayed: ' + PM.Origin.ToString);
+    Client.SendMove(False, Input.Dir);
+    CheckEquals(2, Client.CommandsSent, 'Net: commands sent');
+    { The server ran command 1 and moved the player 18 units }
+    P2 := P1;
+    P2.Origin := Vector3(18, 0, 0);
+    P2.CommandAck := 1;
+    SendFrame(2, 1, nil, nil, P1, P2, False);
+    Client.ReadPackets;
+    Client.Predict(Input, PM);
+    Check(SameValue(PM.Origin.X, 18 + 18.45 + 18, 0.01), 'Net: prediction rebased on the snapshot: ' + PM.Origin.ToString);
+    Check((Client.PredictionChecks = 1) and (Client.PredictionErrors = 0),
+      Format('Net: prediction checked against the server (%d checks, %d errors)',
+        [Client.PredictionChecks, Client.PredictionErrors]));
+  finally
+    Msg.Free;
+    PM.Free;
+    Client.Free;
+    Loop.Free;
+  end;
+end;
+
 procedure TestWebParams;
 var
   Ignored: TStringList;
@@ -3788,6 +4031,7 @@ begin
   TestTick;
   TestParticleMotion;
   TestWebParams;
+  TestNet;
   TestInstalls;
   TestInsane;
 

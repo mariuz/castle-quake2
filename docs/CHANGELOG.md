@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- First step of multiplayer (roadmap E.1): inside the game, the view and the simulation now talk like a Quake 2 client and server, over a channel in the same process. Your inputs go to the server as commands (fire, use and weapon switches act through them), and after every tick the server sends back a delta-coded snapshot of the player and of everything in view (about 60 bytes on demo1). The server moves the player with Quake 2's pmove and the view predicts its own moves from the snapshots, so they match exactly (on lifts the view catches up a few units). Console cheats, `spawn` and the test scripts' actions are server commands too. Single player plays as before; CI checks that every snapshot arrives intact.
 - Dynamic lights on models: muzzle flashes, rockets, explosions and the remaster's `dynamic_light` now light monsters, items, props and the gun per pixel, every frame, brightest on the side facing the light (the 4 nearest lights, like the walls). Before, a model took one flat colour updated ten times a second, so short flashes were often missed.
 
 ## v0.33.0 — 2026-11-22

@@ -138,7 +138,7 @@ begin
   { monster_fire_heat: a trace to the target and on, 10 to what it hits }
   Dir := (Target - Eye).Normalize;
   T := WorldTrace(CgeToQuake(Eye), CgeToQuake(Eye + Dir * 8192), TVector3.Zero, TVector3.Zero, MASK_SHOT, Monster);
-  if T.Ent is TQuakePlayerMovement then
+  if T.Ent is TQuakePMove then
   begin
     { Drawn to just short of the player: particles at the eye fill the view }
     if PointsDistance(Eye, QuakeToCge(T.EndPos)) > 64 then
@@ -148,7 +148,7 @@ begin
   begin
     Particles.SpawnBeam(Eye, QuakeToCge(T.EndPos), Vector3(1.0, 0.6, 0.2));
   end;
-  if not (T.Ent is TQuakePlayerMovement) then
+  if not (T.Ent is TQuakePMove) then
   if T.Hit and ((T.Contents and CONTENTS_SOLID) <> 0) then
     Particles.SpawnSteam(QuakeToCge(T.EndPos) - Dir * 2, -Dir, 8, 60, 223);
 end;
@@ -419,7 +419,7 @@ begin
     T := WorldTrace(Start, Stop, TVector3.Zero, TVector3.Zero, MASK_SHOT, Ignore);
     if not T.Hit then
       Break;
-    if T.Ent is TQuakePlayerMovement then
+    if T.Ent is TQuakePMove then
     begin
       DamagePlayer(Monster.AttackDamage, Eye);
       Result := True;

@@ -252,7 +252,7 @@ var
         if T.Ent <> Proj.Owner then
           TQuakeMonster(T.Ent).TakeDamage(LaserDamage);
       end else
-      if T.Ent is TQuakePlayerMovement then
+      if T.Ent is TQuakePMove then
       begin
         if not Proj.FromPlayer then
           DamagePlayer(LaserDamage, QuakeToCge(Origin));
@@ -618,7 +618,7 @@ begin
     begin
       NewPos := QuakeToCge(T.EndPos);
       HitNormal := QuakeToCge(T.Normal);
-      Damageable := (T.Ent is TQuakeMonster) or (T.Ent is TQuakePlayerMovement);
+      Damageable := (T.Ent is TQuakeMonster) or (T.Ent is TQuakePMove);
       if (Proj.Kind = pkRipper) and not Damageable then
       begin
         { MOVETYPE_WALLBOUNCE: a perfect reflection off anything that doesn't
@@ -698,7 +698,7 @@ begin
           TQuakeMonster(T.Ent).TakeDamage(Proj.Damage);
           Particles.SpawnBlood(NewPos, -Dir);
         end else
-        if T.Ent is TQuakePlayerMovement then
+        if T.Ent is TQuakePMove then
         begin
           FDamageSource := Proj.Owner;
           if Proj.Kind in [pkBlasterBolt, pkBfg, pkRipper, pkBlueBolt, pkLoogie, pkPlasma] then
