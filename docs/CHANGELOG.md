@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Bots (roadmap E.3): `addbot [skill]` in the console or `+set bots N` on the command line adds players that play by themselves: they fight the other players in deathmatch (monsters in single player) with a reaction time and aim by skill 0..3, choose weapons by distance, pick up what they lack, wander around walls, drops and lava, and respawn. They find each other only by sight (no routes yet).
 - Deathmatch rules (roadmap E.2): `+set deathmatch 1` (or `deathmatch 1` in the console, then load a map) spawns players at the deathmatch spots without monsters, counts frags (shown at the top right, death messages for everyone), brings picked items back after 20 to 300 seconds and respawns a dead player when they press fire. `dmflags` supports no health, no powerups, weapons stay, no falling damage, spawn farthest, forced respawn, no armor and allowed exits. Other players are still test clients from the console (`addclient`); bots come next.
 - More than one player on the server (roadmap E.2): the world keeps a list of players and runs each one's part of the game; `addclient` in the console adds a player without a view (shown as a soldier on the demo), `clientinput` moves it and `removeclient` takes it away. Monsters go for the nearest player.
 - Fixed: standing near a spinning brush (`func_rotating`, the fans in demo1) could throw the player tens of units in one frame: its pushes come from a box around the rotated model, and from a spinning brush a push over 16 units is now ignored as one that caught the player from afar.

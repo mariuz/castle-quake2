@@ -301,6 +301,17 @@ jobs:
           L=test_output/dmitems.log
           grep -E "picked up|respawned" $L
           [ "$(grep -c 'picked up weapon_shotgun (weapons stay)' $L)" = 1 ] && grep -q "item_armor_shard respawned" $L && [ "$(grep -c 'picked up item_armor_shard' $L)" = 2 ] && ! grep -q Exception $L || { echo "::error::Deathmatch items (see dmitems.log)"; exit 1; }
+          # Bots (E.3): two skill-3 bots from +set bots, put next to each other (the view's player has notarget),
+          # hurt each other until one dies (a bot's shot or a barrel it hit) and it respawns at a deathmatch spot
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 +set deathmatch 1 +set skill 3 +set bots 2 --autotest demo1 test_output/bots --demo 'W:1,O:notarget,G:-1000 1500 160,O:clientgoto 1 -1168 1264 160,O:clientgoto 2 -1296 1264 160,W:10,V,W:10,V,W:10,V,Q' > test_output/bots.log 2>&1
+          L=test_output/bots.log
+          grep -E "Bot [0-9]|Broadcast|spawns at" $L
+          [ "$(grep -c 'Bot [12] added' $L)" = 2 ] && [ "$(grep -c 'hurt by Player [23]' $L)" -ge 2 ] && grep -qE "Broadcast: Player [23] (was killed by Player [23]|killed themselves)" $L && [ "$(grep -cE 'Player [23] spawns at' $L)" -ge 3 ] && ! grep -q "hurt by Player 1" $L && ! grep -q Exception $L || { echo "::error::Bots fighting (see bots.log)"; exit 1; }
+          # A bot in single player helps against monsters: next to a light soldier it kills it
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/botsp --demo 'W:1,Y,O:addbot 3,O:clientgoto 1 250 229 -30,W:12,V,Q' > test_output/botsp.log 2>&1
+          L=test_output/botsp.log
+          grep -E "Bot [0-9]|Kills:" $L
+          grep -q "Bot 1 added" $L && grep -qE "Kills: [1-9][0-9]* / " $L && ! grep -q Exception $L || { echo "::error::A bot against monsters (see botsp.log)"; exit 1; }
           # func_door_secret2 (the mission pack's, in the remaster): used by its targetname, it slides away in two moves; OPEN_ONCE stays open, the other closes after its wait (2 s)
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/sec2 --demo 'W:1,Y,O:notarget,O:spawn func_door_secret2 targetname sd2 spawnflags 1 angle 90 origin "60 -400 24" mins "-32 -8 -24" maxs "32 8 40",O:spawn func_door_secret2 targetname sd3 wait 2 angle 0 origin "200 -400 24" mins "-8 -32 -24" maxs "8 32 40",W:0.5,E:sd2,E:sd3,W:0.5,V,W:3.5,V,W:6,V,Q' > test_output/sec2.log 2>&1
           [ "$(grep -c 'func_door_secret2  tex frame [0-9]* state 2 progress 2.00' test_output/sec2.log)" = 3 ] && grep -q 'Mover 13 func_door_secret2  tex frame [0-9]* state 0 progress 0.00' test_output/sec2.log && ! grep -q Exception test_output/sec2.log || { echo "::error::func_door_secret2 (see sec2.log)"; exit 1; }

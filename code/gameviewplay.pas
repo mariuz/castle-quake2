@@ -16,21 +16,23 @@ uses
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound, QuakeMd2,
   QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad, QuakeTouch, QuakeExitWatchdog, QuakeBenchmark, CastleTimeUtils,
   X3DNodes, X3DFields, CastleRenderOptions,
-  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevel, QuakeLevelGen, QuakeLevelEditor, QuakeBspBuilder, QuakeTrace, QuakeTick, QuakeNet, QuakeServer, QuakeClient, QuakeClientScene, QuakePMove, fpjson, jsonparser, CastleDownload, CastleUriUtils;
+  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevel, QuakeLevelGen, QuakeLevelEditor, QuakeBspBuilder, QuakeTrace, QuakeTick, QuakeNet, QuakeServer, QuakeClient, QuakeClientScene, QuakePMove, QuakeBot, fpjson, jsonparser, CastleDownload, CastleUriUtils;
 
 type
   TCameraMode = (cmFirstPerson, cmNoclip);
 
-  { A client without a view (tests, later bots): its channel, client, a
-    pmove for its prediction (no traces: the server moves it) and inputs
-    held until changed }
+  { A client without a view (tests, bots): its channel, client, a pmove for
+    its prediction (no traces: the server moves it) and inputs held until
+    changed, or decided every frame by its bot (addbot) }
   TTestClient = class
     Net: TNetLoopback;
     Client: TQuakeClient;
     PM: TQuakePMove;
     Server: TServerClient;
-    Forward, Side, Yaw: Single;
-    Fire: Boolean;
+    Forward, Side, Yaw, Pitch: Single;
+    Fire, Jump: Boolean;
+    { Owned; nil for a test client driven by clientinput }
+    Bot: TQuakeBot;
     destructor Destroy; override;
   end;
 
@@ -151,6 +153,8 @@ type
     procedure ClientPrint(const Text: String; const AtCenter: Boolean);
     { The console's addclient / clientinput / removeclient }
     procedure TestClientCommand(const Cmd, Args: String);
+    { +set bots N }
+    procedure AddStartBots;
     { Each test client reads its snapshots and sends its command }
     procedure UpdateTestClients(const SecondsPassed: Single);
     { The client's copy of the last snapshot must be the server's }
@@ -620,11 +624,13 @@ begin
     FAutoTestActive := True;
     ParseDemoScript(FAutoTestDemo);
     LoadLevel(FAutoTestMap);
+    AddStartBots;
   end else
   begin
     if FMapName = '' then
       FMapName := FirstMapName;
     LoadLevel(FMapName);
+    AddStartBots;
     { The title menu's Level Editor }
     if OpenEditorOnStart then
     begin
@@ -632,6 +638,16 @@ begin
       OpenEditor;
     end;
   end;
+end;
+
+procedure TViewPlay.AddStartBots;
+var
+  I: Integer;
+begin
+  { +set bots N: N bots join once the first map is loaded }
+  for I := 1 to StartBots do
+    TestClientCommand('addbot', '');
+  StartBots := 0;
 end;
 
 function TViewPlay.RenderScale: Integer;
@@ -2242,6 +2258,7 @@ end;
 
 destructor TTestClient.Destroy;
 begin
+  FreeAndNil(Bot);
   FreeAndNil(Client);
   FreeAndNil(PM);
   FreeAndNil(Net);
@@ -2252,14 +2269,31 @@ procedure TViewPlay.UpdateTestClients(const SecondsPassed: Single);
 var
   T: TTestClient;
   Input: TPMoveInput;
+  Slot: Integer;
 begin
   for T in FTestClients do
   begin
     T.Client.ReadPackets;
+    if (T.Bot <> nil) and (T.Server <> nil) then
+    begin
+      { The bot decides from the server's world; its command goes through
+        the channel like a person's }
+      T.Bot.Think(FWorld, T.Server.Player, SecondsPassed);
+      T.Forward := T.Bot.Forward;
+      T.Side := T.Bot.Side;
+      T.Yaw := T.Bot.Yaw;
+      T.Pitch := T.Bot.Pitch;
+      T.Fire := T.Bot.Fire;
+      T.Jump := T.Bot.Jump;
+      if T.Bot.TakeWeaponRequest(Slot) then
+        T.Client.AddCommand('weapon ' + IntToStr(Slot));
+    end;
     Input := Default(TPMoveInput);
     Input.Forward := T.Forward;
     Input.Side := T.Side;
-    Input.Dir := Vector3(Cos(DegToRad(T.Yaw)), Sin(DegToRad(T.Yaw)), 0);
+    Input.Jump := T.Jump;
+    Input.Dir := Vector3(Cos(DegToRad(T.Pitch)) * Cos(DegToRad(T.Yaw)),
+      Cos(DegToRad(T.Pitch)) * Sin(DegToRad(T.Yaw)), Sin(DegToRad(T.Pitch)));
     Input.Dt := SecondsPassed;
     T.Client.Predict(Input, T.PM);
     T.Client.SendMove(T.Fire, Input.Dir);
@@ -2274,7 +2308,7 @@ var
 begin
   Words := SplitArgs(Args);
   try
-    if Cmd = 'addclient' then
+    if (Cmd = 'addclient') or (Cmd = 'addbot') then
     begin
       T := TTestClient.Create;
       T.Net := TNetLoopback.Create;
@@ -2290,6 +2324,17 @@ begin
       T.PM.CopyParams(PlayerMovement.PM);
       T.Yaw := FWorld.SpawnAngle;
       FTestClients.Add(T);
+      if Cmd = 'addbot' then
+      begin
+        { addbot [skill 0..3] (default: the game's skill) }
+        N := GameSkill;
+        if Words.Count > 0 then
+          N := StrToIntDef(Words[0], GameSkill);
+        T.Bot := TQuakeBot.Create(T.Server.Player.Number, N, T.Yaw);
+        Console.Print(Format('Bot %d added (player %d, skill %d)', [FTestClients.Count, T.Server.Player.Number, T.Bot.Skill]));
+        WritelnLog('Net', 'Bot %d added: player %d, skill %d', [FTestClients.Count, T.Server.Player.Number, T.Bot.Skill]);
+        Exit;
+      end;
       Console.Print(Format('Client %d added (player %d)', [FTestClients.Count, T.Server.Player.Number]));
       WritelnLog('Net', 'Test client %d added: player %d', [FTestClients.Count, T.Server.Player.Number]);
       Exit;
@@ -2377,6 +2422,8 @@ begin
     WritelnLog('Demo', 'Client %d: player %d at %s health %d, frames %d (%d bad), sees %d entities and %d other players',
       [I + 1, T.Server.Player.Number, T.Server.PM.Origin.ToString, T.Server.Player.Stats.Health,
        T.Client.FramesReceived, T.Client.BadFrames, Length(F.Entities), Seen]);
+    if T.Bot <> nil then
+      WritelnLog('Demo', 'Bot %d: %s', [I + 1, T.Bot.Describe(FWorld, T.Server.Player)]);
   end;
 end;
 
@@ -2605,7 +2652,7 @@ begin
      (Cmd = 'powerarmor') or (Cmd = 'notarget') or (Cmd = 'kill') then
     FClient.AddCommand(Trim(Cmd + ' ' + Args))
   else
-  if (Cmd = 'addclient') or (Cmd = 'clientinput') or (Cmd = 'removeclient') or (Cmd = 'clientgoto') then
+  if (Cmd = 'addclient') or (Cmd = 'addbot') or (Cmd = 'clientinput') or (Cmd = 'removeclient') or (Cmd = 'clientgoto') then
     TestClientCommand(Cmd, Args)
   else
   if Cmd = 'clientdraw' then

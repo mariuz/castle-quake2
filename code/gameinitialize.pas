@@ -294,6 +294,11 @@ begin
       DMFlags := StrToIntDef(Parameters[I + 2], 0);
       Inc(I, 2);
     end else
+    if (Parameters[I] = '+set') and (I + 2 <= Parameters.High) and SameText(Parameters[I + 1], 'bots') then
+    begin
+      StartBots := EnsureRange(StrToIntDef(Parameters[I + 2], 0), 0, 7);
+      Inc(I, 2);
+    end else
     if (Parameters[I] = '+set') and (I + 2 <= Parameters.High) and SameText(Parameters[I + 1], 'game') then
     begin
       CmdGame := Parameters[I + 2];

@@ -29,7 +29,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeTick, QuakeWebParams, QuakeInstalls, QuakeInsane, QuakeHud, QuakeNet, QuakeServer, QuakeClient, QuakeClientScene, QuakePMove, Zipper;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeTick, QuakeWebParams, QuakeInstalls, QuakeInsane, QuakeHud, QuakeNet, QuakeServer, QuakeClient, QuakeClientScene, QuakePMove, QuakeBot, Zipper;
 
 var
   Passed, Failed: Integer;
@@ -3523,6 +3523,50 @@ begin
   DMFlags := 0;
 end;
 
+procedure TestBots;
+var
+  Stats: TQuakePlayerStats;
+
+  function Worth(const AClass: String; const WeaponsStay: Boolean = False): Single;
+  var
+    Def: PQuakeItemDef;
+  begin
+    Def := FindItemDef(AClass);
+    if Def = nil then
+      Exit(-1);
+    Result := BotItemWorth(Def^, Stats, WeaponsStay);
+  end;
+
+begin
+  { Angles }
+  Check(SameValue(BotAngleDiff(350, 10), -20, 0.001) and SameValue(BotAngleDiff(10, 350), 20, 0.001),
+    'bots: angle differences wrap at 360');
+  Check(SameValue(BotTurn(350, 20, 10), 0, 0.001) and SameValue(BotTurn(10, 20, 30), 20, 0.001) and
+    SameValue(BotTurn(20, 350, 10), 10, 0.001), 'bots: turning takes the short way, at most the step');
+  Check((BotReactionTime(3) < BotReactionTime(0)) and (BotAimSpread(3) < BotAimSpread(0)) and
+    (BotTurnSpeed(3) > BotTurnSpeed(0)) and (BotReactionTime(9) = BotReactionTime(3)),
+    'bots: better skill reacts sooner, aims closer, turns faster (skill 0..3)');
+  { Weapons: the best owned one with ammo, no splash close by }
+  Stats := Default(TQuakePlayerStats);
+  Stats.WeaponMask := (1 shl 1) or (1 shl 7) or (1 shl 9);
+  Stats.Ammo[atRockets] := 5;
+  Stats.Ammo[atSlugs] := 5;
+  Check((BotWeaponChoice(Stats, 400) = 7) and (BotWeaponChoice(Stats, 100) = 9),
+    'bots: rockets at range, the railgun close by');
+  Stats.Ammo[atSlugs] := 0;
+  Check(BotWeaponChoice(Stats, 100) = 1, 'bots: the blaster when nothing else may fire');
+  { Items: what it lacks }
+  Stats.Health := 100;
+  Stats.MaxHealth := 100;
+  Stats.MaxAmmo[atShells] := 100;
+  Check((Worth('weapon_shotgun') >= 3) and (Worth('weapon_railgun', True) = 0) and
+    (Worth('weapon_railgun', False) > 0), 'bots: new weapons are worth most, owned ones nothing when weapons stay');
+  Check((Worth('item_health') = 0) and (Worth('item_health_mega') > 0) and (Worth('ammo_shells') > 0) and
+    (Worth('key_blue_key') = 0), 'bots: no health at full health, ammo while not full, never keys');
+  Stats.Health := 50;
+  Check(Worth('item_health') > Worth('ammo_shells'), 'bots: health matters more when hurt');
+end;
+
 procedure TestNet;
 var
   Msg: TNetMessage;
@@ -4096,6 +4140,7 @@ begin
   TestParticleMotion;
   TestWebParams;
   TestDeathmatch;
+  TestBots;
   TestNet;
   TestInstalls;
   TestInsane;

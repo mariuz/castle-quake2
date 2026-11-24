@@ -136,6 +136,8 @@ var
     "dmflags" (at once); set by +set on the command line and the console }
   Deathmatch: Boolean = False;
   DMFlags: Integer = 0;
+  { +set bots N: bots added when the first map has loaded }
+  StartBots: Integer = 0;
   { Touch screen (or --touch): set at startup, Auto interface size is larger }
   TouchInterface: Boolean;
 
