@@ -284,6 +284,16 @@ begin
       CmdSkill := EnsureRange(StrToIntDef(Parameters[I + 2], 1), 0, 3);
       Inc(I, 2);
     end else
+    if (Parameters[I] = '+set') and (I + 2 <= Parameters.High) and SameText(Parameters[I + 1], 'deathmatch') then
+    begin
+      Deathmatch := StrToIntDef(Parameters[I + 2], 0) <> 0;
+      Inc(I, 2);
+    end else
+    if (Parameters[I] = '+set') and (I + 2 <= Parameters.High) and SameText(Parameters[I + 1], 'dmflags') then
+    begin
+      DMFlags := StrToIntDef(Parameters[I + 2], 0);
+      Inc(I, 2);
+    end else
     if (Parameters[I] = '+set') and (I + 2 <= Parameters.High) and SameText(Parameters[I + 1], 'game') then
     begin
       CmdGame := Parameters[I + 2];

@@ -58,6 +58,12 @@
     },
     {
       "$$ClassName" : "TQuakeNamedSound",
+      "Name" : "Items_respawn1",
+      "QuakePath" : "sound/items/respawn1.wav",
+      "Url" : "quakepak:/sound/items/respawn1.wav"
+    },
+    {
+      "$$ClassName" : "TQuakeNamedSound",
       "Name" : "Items_s_health",
       "QuakePath" : "sound/items/s_health.wav",
       "Url" : "quakepak:/sound/items/s_health.wav"

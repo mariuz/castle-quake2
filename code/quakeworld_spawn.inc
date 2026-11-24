@@ -93,6 +93,13 @@ begin
     then an unnamed info_player_start, then any start, then deathmatch spots }
   Best := nil;
   BestScore := 0;
+  { Deathmatch: a deathmatch spot (SelectDeathmatchSpawnPoint) }
+  if Deathmatch and SelectDeathmatchSpot(Best) then
+  begin
+    FSpawnPoint := QuakeToCge(Best.Origin + Vector3(0, 0, 1)) + Vector3(0, PlayerEyeHeight - 24, 0);
+    FSpawnAngle := Best.Angle;
+    Exit;
+  end;
   for Ent in FBsp.Entities do
   begin
     if Ent.ClassName = 'info_player_start' then
@@ -150,6 +157,21 @@ begin
   Pos := QuakeToCge(Ent.Origin);
   SpawnFlags := Ent.SpawnFlags;
 
+  if Deathmatch then
+  begin
+    { SpawnEntities: SPAWNFLAG_NOT_DEATHMATCH instead of the skill flags;
+      no monsters (SP_monster_*, misc_insane, turret_driver) and no
+      help / secret / goal targets in deathmatch }
+    if (SpawnFlags and SPAWNFLAG_NOT_DEATHMATCH) <> 0 then
+      Exit;
+    if ((Copy(CName, 1, 8) = 'monster_') and (CName <> 'monster_commander_body')) or
+       (CName = 'misc_insane') or (CName = 'turret_driver') or
+       (CName = 'target_help') or (CName = 'target_secret') or (CName = 'target_goal') then
+      Exit;
+    ItemDef := FindItemDef(CName);
+    if (ItemDef <> nil) and not ItemAllowedByDMFlags(ItemDef^, DMFlags) then
+      Exit;
+  end else
   { Entities not on this skill (single player) }
   if (SpawnFlags and SkillSpawnFlag(GameSkill)) <> 0 then
     Exit;
@@ -593,6 +615,7 @@ var
   RestoreRemembered: Boolean;
   MapName, SpawnName, MapPath: String;
   P: Integer;
+  Pl: TQuakePlayer;
   World: TQuakeEntity;
 begin
   Result := False;
@@ -642,6 +665,9 @@ begin
   FreeAndNil(FCollision);
   FCur.Gibbed := False;
   FCur.HasKiller := False;
+  { Scores start over on each map (InitClientResp) }
+  for Pl in FPlayers do
+    Pl.Frags := 0;
   if FWeaponTransform <> nil then
     FWeaponTransform.Exists := True;
   FClocks := nil;

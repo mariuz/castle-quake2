@@ -2309,6 +2309,19 @@ begin
       T.Server := nil;
       FTestClients.Delete(N);
     end else
+    if Cmd = 'clientgoto' then
+    begin
+      { clientgoto <n> <x> <y> <z>: the client's player at a Quake origin
+        (tests; like a teleport of another player) }
+      if (Words.Count >= 4) and (T.Server.PM <> nil) then
+      begin
+        T.Server.PM.Origin := Vector3(StrToFloatDef(Words[1], 0, DefaultFormatSettings),
+          StrToFloatDef(Words[2], 0, DefaultFormatSettings), StrToFloatDef(Words[3], 0, DefaultFormatSettings));
+        T.Server.PM.ResetState;
+        T.Server.Player.Pos := QuakeToCge(T.Server.PM.Origin + Vector3(0, 0, T.Server.PM.ViewHeight));
+        WritelnLog('Net', 'Test client %d placed at %s', [N + 1, T.Server.PM.Origin.ToString]);
+      end;
+    end else
     begin
       { clientinput <n> <forward> <side> <yaw> [fire 0|1] }
       if Words.Count >= 2 then
@@ -2328,6 +2341,8 @@ end;
 procedure TViewPlay.LogClients;
 var
   I, Seen: Integer;
+  Frags: String;
+  P: TQuakePlayer;
   T: TTestClient;
   F: TNetFrame;
   S: TNetEntityState;
@@ -2339,6 +2354,18 @@ begin
       Inc(Seen);
   WritelnLog('Demo', 'Clients: %d, players %d, the view sees %d other players',
     [FServer.ClientCount, FWorld.Players.Count, Seen]);
+  if Deathmatch then
+  begin
+    Frags := '';
+    for P in FWorld.Players do
+    begin
+      if Frags <> '' then
+        Frags := Frags + ', ';
+      Frags := Frags + Format('%s %d', [FWorld.PlayerName(P), P.Frags]);
+    end;
+    WritelnLog('Demo', 'Deathmatch: dmflags %d, frags %s (the view''s HUD %d)',
+      [DMFlags, Frags, FClient.Frame.Player.Stats[StatFrags]]);
+  end;
   for I := 0 to FTestClients.Count - 1 do
   begin
     T := FTestClients[I];
@@ -2578,7 +2605,7 @@ begin
      (Cmd = 'powerarmor') or (Cmd = 'notarget') or (Cmd = 'kill') then
     FClient.AddCommand(Trim(Cmd + ' ' + Args))
   else
-  if (Cmd = 'addclient') or (Cmd = 'clientinput') or (Cmd = 'removeclient') then
+  if (Cmd = 'addclient') or (Cmd = 'clientinput') or (Cmd = 'removeclient') or (Cmd = 'clientgoto') then
     TestClientCommand(Cmd, Args)
   else
   if Cmd = 'clientdraw' then
@@ -2722,6 +2749,19 @@ begin
   if Cmd = 'padbind' then
     PadBindCommand(Args)
   else
+  if Cmd = 'deathmatch' then
+  begin
+    { Quake 2's latched cvar: takes effect when a map is (re)loaded }
+    if Args <> '' then
+      Deathmatch := StrToIntDef(Args, 0) <> 0;
+    Console.Print(Format('deathmatch %d, applies to the next map', [Ord(Deathmatch)]));
+  end else
+  if Cmd = 'dmflags' then
+  begin
+    if Args <> '' then
+      DMFlags := StrToIntDef(Args, DMFlags);
+    Console.Print(Format('dmflags %d', [DMFlags]));
+  end else
   if Cmd = 'skill' then
   begin
     { Like Quake 2: takes effect when a map is (re)loaded }

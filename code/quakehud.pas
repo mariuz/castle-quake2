@@ -110,6 +110,9 @@ type
       PoiVisible: Boolean;
       PoiScreen: TVector2;
       PoiDistance: Single;
+      { Deathmatch: the frag count at the top right (STAT_FRAGS) }
+      ShowFrags: Boolean;
+      Frags: Integer;
     property HelpPrimary: String read FHelpPrimary write FHelpPrimary;
     property HelpSecondary: String read FHelpSecondary write FHelpSecondary;
   end;
@@ -467,6 +470,10 @@ begin
       if Img <> nil then
         Img.Draw(FloatRectangle(X + 50 * Sc, Y, 24 * Sc, 24 * Sc));
     end;
+
+    { The deathmatch status bar: "xr -50 yt 2 num 3 14" }
+    if ShowFrags then
+      DrawNumber(W - 50 * Sc, H - 26 * Sc, Frags, 3, False, Sc);
 
     X := W / 2 - 54 * Sc;
     DrawNumber(X, Y, Max(0, FStats.Health), 3, FStats.Health <= 25, Sc);

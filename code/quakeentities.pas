@@ -73,6 +73,8 @@ type
     Origin: TVector3;
     RotationAngle: Single;
     Collected: Boolean;
+    { Deathmatch: seconds until a collected item comes back (0 = never) }
+    RespawnTime: Single;
     { Re-light the model 10 times a second (light styles flicker) }
     LightTimer: Single;
     constructor CreatePickup(const AParent: TCastleTransform; const ADef: PQuakeItemDef;
@@ -937,6 +939,14 @@ var
 
 { Lookup tables (nil when the classname is unknown) }
 function FindItemDef(const AClassName: String): PQuakeItemDef;
+{ Deathmatch: seconds until a picked item comes back (Quake 2 SetRespawn:
+  weapons, ammo and health 30, armor and the megahealth 20, powerups their
+  quantity: 60, the invulnerability 300, the pack 180), 0 = never (keys) }
+function ItemRespawnSeconds(const Def: TQuakeItemDef): Single;
+{ Deathmatch: whether dmflags let the item spawn (SpawnItem: DF_NO_ARMOR
+  armor and power armor, DF_NO_ITEMS powerups, DF_NO_HEALTH health, the
+  adrenaline and the ancient head) }
+function ItemAllowedByDMFlags(const Def: TQuakeItemDef; const Flags: Integer): Boolean;
 function FindMonsterDef(const AClassName: String): PQuakeMonsterDef;
 
 type
@@ -1405,6 +1415,45 @@ begin
     Result := 0
   else
     Result := -24 - Mins.Z;
+end;
+
+function ItemRespawnSeconds(const Def: TQuakeItemDef): Single;
+begin
+  case Def.Category of
+    icWeapon, icAmmo: Result := 30;
+    icHealth:
+      if Def.ClassName = 'item_health_mega' then
+        Result := 20
+      else
+        Result := 30;
+    icArmor: Result := 20;
+    icPowerup:
+      case Def.Param of
+        POWERUP_INVULN: Result := 300;
+        POWERUP_PACK: Result := 180;
+        else Result := 60;
+      end;
+    else Result := 0;
+  end;
+end;
+
+function ItemAllowedByDMFlags(const Def: TQuakeItemDef; const Flags: Integer): Boolean;
+var
+  PowerArmor: Boolean;
+begin
+  Result := True;
+  PowerArmor := (Def.ClassName = 'item_power_screen') or (Def.ClassName = 'item_power_shield');
+  if (Flags and DF_NO_ARMOR) <> 0 then
+    if (Def.Category = icArmor) or PowerArmor then
+      Exit(False);
+  if (Flags and DF_NO_HEALTH) <> 0 then
+    if (Def.Category = icHealth) or
+       ((Def.Category = icPowerup) and (Def.Param in [POWERUP_ADRENALINE, POWERUP_ANCIENT_HEAD])) then
+      Exit(False);
+  if (Flags and DF_NO_ITEMS) <> 0 then
+    if (Def.Category = icPowerup) and not PowerArmor and
+       not (Def.Param in [POWERUP_ADRENALINE, POWERUP_ANCIENT_HEAD, POWERUP_BANDOLIER, POWERUP_PACK]) then
+      Exit(False);
 end;
 
 function FindItemDef(const AClassName: String): PQuakeItemDef;

@@ -90,6 +90,19 @@ begin
   if (Msg <> '') and (FHud <> nil) and (Copy(CName, 1, 7) = 'target_') and (CName <> 'target_string') then
     FHud.ShowMessage(Msg, 4);
 
+  if (CName = 'target_changelevel') and Deathmatch and not DMFlag(DF_ALLOW_EXIT) then
+  begin
+    { use_target_changelevel in deathmatch without DF_ALLOW_EXIT: the
+      player who got there dies (MOD_EXIT) }
+    if not FCur.Dead then
+    begin
+      FObituaryText := 'found a way out';
+      FCur.Stats.Health := 0;
+      FCur.HasKiller := False;
+      KillPlayer;
+    end;
+    Exit;
+  end;
   if CName = 'target_changelevel' then
   begin
     MapName := Ent.GetField('map');

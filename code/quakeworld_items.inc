@@ -207,9 +207,25 @@ begin
         WritelnLog('QuakeWorld', 'Food cube: %d health', [Amount]);
         Continue;
       end;
+      { DF_WEAPONS_STAY: a weapon stays where it is; one you have is left
+        alone (Pickup_Weapon) }
+      if DMFlag(DF_WEAPONS_STAY) and (P.Def^.Category = icWeapon) then
+      begin
+        if (FCur.Stats.WeaponMask and (1 shl P.Def^.Weapon)) <> 0 then
+          Continue;
+        GiveItem(P.Def);
+        WritelnLog('QuakeWorld', '%s picked up %s (weapons stay)', [PlayerName(FCur), P.Def^.ClassName]);
+        Sounds.Play(P.Def^.Sound, 1, chItem);
+        if FHud <> nil then
+          FHud.ShowPickup(P.Def^.Icon, P.Def^.Name);
+        Continue;
+      end;
       if not GiveItem(P.Def) then
         Continue;
       P.Collected := True;
+      if Deathmatch then
+        P.RespawnTime := ItemRespawnSeconds(P.Def^);
+      WritelnLog('QuakeWorld', '%s picked up %s', [PlayerName(FCur), P.Def^.ClassName]);
       Sounds.Play(P.Def^.Sound, 1, chItem);
       if FHud <> nil then
         FHud.ShowPickup(P.Def^.Icon, P.Def^.Name);

@@ -103,10 +103,18 @@ type
     BreathSound: Boolean;
     { trigger_gravity's factor of the player's gravity }
     Gravity: Single;
+    { Deathmatch score (Quake 2 resp.score): +1 for killing another player,
+      -1 for dying by oneself or the world }
+    Frags: Integer;
+    { Fire pressed while dead (Quake 2 latched_buttons: respawns in
+      deathmatch) }
+    LatchedAttack: Boolean;
     constructor Create(const ANumber: Integer);
     destructor Destroy; override;
   end;
   TQuakePlayerList = specialize TObjectList<TQuakePlayer>;
+
+  TWorldPrintEvent = procedure(const Text: String) of object;
 
   { World simulation manager }
   TQuakeWorld = class
@@ -191,6 +199,14 @@ type
     { The entity whose targets are being used (Quake 2's "other" in use
       functions: trigger_elevator reads its pathtarget); nil if unknown }
     FUseSource: TQuakeEntity;
+    { The player whose weapon deals the damage being done now (set while
+      a player's gun fires and while a player's projectile moves); nil for
+      monsters and the world. Deathmatch frags go to it. }
+    FAttacker: TQuakePlayer;
+    { Death message instead of the generic one (target_changelevel in
+      deathmatch: "found a way out") }
+    FObituaryText: String;
+    FOnBroadcast: TWorldPrintEvent;
     FHelpPrimary, FHelpSecondary: String;
     { The view's movement behaviour (damage kicks) }
     FViewPlayer, FLocalViewPlayer: TQuakePlayerMovement;
@@ -376,8 +392,18 @@ type
       Origin along Dir, if it faces the player, may dodge before it arrives
       (easy: a quarter as often) }
     procedure CheckDodge(const Origin, Dir: TVector3; const Speed: Single);
+    { Splash damage; IgnorePM is the player hit directly (its pmove), left
+      out like T_RadiusDamage's ignore }
     procedure Explode(const Pos: TVector3; const Damage: Integer; const Radius: Single;
-      const FromPlayer: Boolean; const ExplosionSound: Boolean = True);
+      const FromPlayer: Boolean; const ExplosionSound: Boolean = True; const IgnorePM: TObject = nil);
+    { A message for every player (the server prints it to every client) }
+    procedure Broadcast(const Text: String);
+    { Deathmatch: a info_player_deathmatch for the current player
+      (SelectRandomDeathmatchSpawnPoint, or the farthest from the other
+      players with DF_SPAWN_FARTHEST); False when the map has none }
+    function SelectDeathmatchSpot(out Spot: TQuakeEntity): Boolean;
+    { Deathmatch: the frag and the death message (ClientObituary) }
+    procedure Obituary(const Killer: TQuakePlayer);
     function MonsterByTransform(const T: TCastleTransform): TQuakeMonster;
     function MoverByTransform(const T: TCastleTransform): TQuakeMover;
     procedure UseEntity(const Ent: TQuakeEntity);
@@ -559,6 +585,10 @@ type
     property Player: TQuakePMove read GetPlayerPM write SetPlayer;
     { Every player; the world acts on CurrentPlayer (player 1 in single player) }
     property Players: TQuakePlayerList read FPlayers;
+    { "Player N" }
+    function PlayerName(const P: TQuakePlayer): String;
+    { Deathmatch obituaries for every client (the server sets it) }
+    property OnBroadcast: TWorldPrintEvent read FOnBroadcast write FOnBroadcast;
     property CurrentPlayer: TQuakePlayer read FCur;
     { Another player (a client of the server) moved by PM (its pmove: the
       server's, not owned), standing at a spawn point }
@@ -929,23 +959,200 @@ end;
 procedure TQuakeWorld.RespawnPlayer;
 var
   Org: TVector3;
+  Angle: Single;
+  Spot: TQuakeEntity;
+  DMSpot: Boolean;
 begin
-  { A spawn point beside the map's start, out of the other players }
   FCur.Dead := False;
   FCur.Gibbed := False;
-  if FCur.Stats.Health <= 0 then
+  FCur.HasKiller := False;
+  FCur.LatchedAttack := False;
+  { Deathmatch respawns start over (PutClientInServer: InitClientPersistant) }
+  if Deathmatch or (FCur.Stats.Health <= 0) then
+  begin
     ResetStats;
-  Org := CgeToQuake(FSpawnPoint) - Vector3(0, 0, PlayerEyeHeight - 24) +
-    Vector3(48 * (FCur.Number - 1), 0, 0);
+    FCur.Gun.Reset(FCur.Stats.CurrentWeapon);
+  end;
+  DMSpot := Deathmatch and SelectDeathmatchSpot(Spot);
+  if DMSpot then
+  begin
+    { 1 above the spot (PutClientInServer) }
+    Org := Spot.Origin + Vector3(0, 0, 1);
+    Angle := Spot.Angle;
+  end else
+  begin
+    { A spawn point beside the map's start, out of the other players }
+    Org := CgeToQuake(FSpawnPoint) - Vector3(0, 0, PlayerEyeHeight - 24) +
+      Vector3(48 * (FCur.Number - 1), 0, 0);
+    Angle := FSpawnAngle;
+  end;
   if FCur.PM <> nil then
   begin
     FCur.PM.Origin := Org;
     FCur.PM.ResetState;
     FCur.PM.FindFree(128);
     FCur.Pos := QuakeToCge(FCur.PM.Origin + Vector3(0, 0, FCur.PM.ViewHeight));
+  end else
+    FCur.Pos := QuakeToCge(Org) + Vector3(0, PlayerEyeHeight - 24, 0);
+  FCur.Dir := YawToCgeDir(Angle);
+  if IsLocal then
+  begin
+    { The view places the camera (and the server's player), like a teleport }
+    FTeleportPending := True;
+    FTeleportPos := FCur.Pos;
+    FTeleportAngle := Angle;
+    if FWeaponTransform <> nil then
+      FWeaponTransform.Exists := True;
+    UpdateWeaponModel;
   end;
-  FCur.Dir := YawToCgeDir(FSpawnAngle);
+  if Deathmatch then
+  begin
+    { EV_PLAYER_TELEPORT }
+    Particles.SpawnTeleport(FCur.Pos);
+    Sounds.PlayAtPoint('sound/misc/tele1.wav', FCur.Pos);
+  end;
   WritelnLog('QuakeWorld', 'Player %d spawns at %s', [FCur.Number, CgeToQuake(FCur.Pos).ToString]);
+end;
+
+function TQuakeWorld.PlayerName(const P: TQuakePlayer): String;
+begin
+  Result := 'Player ' + IntToStr(P.Number);
+end;
+
+procedure TQuakeWorld.Broadcast(const Text: String);
+begin
+  WritelnLog('QuakeWorld', 'Broadcast: %s', [Text]);
+  if Assigned(FOnBroadcast) then
+    FOnBroadcast(Text);
+end;
+
+function TQuakeWorld.SelectDeathmatchSpot(out Spot: TQuakeEntity): Boolean;
+var
+  Spots: array of TQuakeEntity;
+  Ent, Spot1, Spot2: TQuakeEntity;
+  Range, Range1, Range2, Best: Single;
+  I, Count, Selection: Integer;
+
+  { PlayersRangeFromSpot: the nearest other player alive }
+  function RangeFrom(const E: TQuakeEntity): Single;
+  var
+    P: TQuakePlayer;
+    Org: TVector3;
+  begin
+    Result := 9999999;
+    for P in FPlayers do
+      if (P <> FCur) and not P.Dead then
+      begin
+        if P.PM <> nil then
+          Org := P.PM.Origin
+        else
+          Org := CgeToQuake(P.Pos);
+        Result := Min(Result, PointsDistance(Org, E.Origin));
+      end;
+  end;
+
+begin
+  Spot := nil;
+  Spots := nil;
+  if FBsp = nil then
+    Exit(False);
+  for Ent in FBsp.Entities do
+    if Ent.ClassName = 'info_player_deathmatch' then
+    begin
+      SetLength(Spots, Length(Spots) + 1);
+      Spots[High(Spots)] := Ent;
+    end;
+  Count := Length(Spots);
+  if Count = 0 then
+    Exit(False);
+  if DMFlag(DF_SPAWN_FARTHEST) then
+  begin
+    { SelectFarthestDeathmatchSpawnPoint }
+    Best := -1;
+    for I := 0 to Count - 1 do
+    begin
+      Range := RangeFrom(Spots[I]);
+      if Range > Best then
+      begin
+        Best := Range;
+        Spot := Spots[I];
+      end;
+    end;
+    Exit(True);
+  end;
+  { SelectRandomDeathmatchSpawnPoint: any spot but the two nearest to a
+    player (when there are more than two) }
+  Spot1 := nil;
+  Spot2 := nil;
+  Range1 := 99999;
+  Range2 := 99999;
+  for I := 0 to Count - 1 do
+  begin
+    Range := RangeFrom(Spots[I]);
+    if Range < Range1 then
+    begin
+      Range2 := Range1;
+      Spot2 := Spot1;
+      Range1 := Range;
+      Spot1 := Spots[I];
+    end else
+    if Range < Range2 then
+    begin
+      Range2 := Range;
+      Spot2 := Spots[I];
+    end;
+  end;
+  if Count <= 2 then
+  begin
+    Spot1 := nil;
+    Spot2 := nil;
+  end else
+  begin
+    if Spot1 <> nil then
+      Dec(Count);
+    if Spot2 <> nil then
+      Dec(Count);
+  end;
+  Selection := Random(Count);
+  for I := 0 to High(Spots) do
+    if (Spots[I] <> Spot1) and (Spots[I] <> Spot2) then
+    begin
+      if Selection = 0 then
+      begin
+        Spot := Spots[I];
+        Break;
+      end;
+      Dec(Selection);
+    end;
+  if Spot = nil then
+    Spot := Spots[0];
+  Result := True;
+end;
+
+procedure TQuakeWorld.Obituary(const Killer: TQuakePlayer);
+var
+  Text: String;
+begin
+  if not Deathmatch then
+    Exit;
+  if FObituaryText <> '' then
+  begin
+    Text := PlayerName(FCur) + ' ' + FObituaryText;
+    Dec(FCur.Frags);
+  end else
+  if (Killer <> nil) and (Killer <> FCur) then
+  begin
+    Text := PlayerName(FCur) + ' was killed by ' + PlayerName(Killer);
+    Inc(Killer.Frags);
+  end else
+  begin
+    if Killer = FCur then
+      Text := PlayerName(FCur) + ' killed themselves'
+    else
+      Text := PlayerName(FCur) + ' died';
+    Dec(FCur.Frags);
+  end;
+  Broadcast(Text + '.');
 end;
 
 function TQuakeWorld.GetPlayerPM: TQuakePMove;
@@ -1194,6 +1401,14 @@ begin
     begin
       SetCurrent(P);
       FCur.DeadTimer := FCur.DeadTimer - SecondsPassed;
+      if Deathmatch then
+      begin
+        { ClientBeginServerFrame: after a second, fire (or DF_FORCE_RESPAWN)
+          respawns }
+        if (FCur.DeadTimer <= 0) and (FCur.LatchedAttack or DMFlag(DF_FORCE_RESPAWN)) then
+          RespawnPlayer;
+        FCur.LatchedAttack := False;
+      end else
       if FCur.DeadTimer <= 0 then
       begin
         if IsLocal then
@@ -1219,7 +1434,21 @@ begin
     end;
 
   for I := 0 to FPickups.Count - 1 do
+  begin
+    { Deathmatch: picked items come back (DoRespawn) }
+    if FPickups[I].Collected and (FPickups[I].RespawnTime > 0) then
+    begin
+      FPickups[I].RespawnTime := FPickups[I].RespawnTime - SecondsPassed;
+      if FPickups[I].RespawnTime <= 0 then
+      begin
+        FPickups[I].RespawnTime := 0;
+        FPickups[I].Collected := False;
+        Sounds.PlayAtPoint('sound/items/respawn1.wav', FPickups[I].Origin);
+        WritelnLog('QuakeWorld', '%s respawned', [FPickups[I].Def^.ClassName]);
+      end;
+    end;
     FPickups[I].UpdatePickup(SecondsPassed);
+  end;
   for P in FPlayers do
   begin
     SetCurrent(P);
@@ -1282,6 +1511,7 @@ begin
   end;
   SetCurrent(Local);
   UpdateProjectiles(SecondsPassed);
+  FAttacker := nil;
   UpdateFallingProps(SecondsPassed);
   UpdateFallingObjects(SecondsPassed);
   UpdateClocks;
@@ -1322,7 +1552,11 @@ begin
       FKeyIcons.Add(KeyIconNames[I]);
   A := WeaponDefs[FCur.Stats.CurrentWeapon].AmmoType;
   if FHud <> nil then
+  begin
+    FHud.ShowFrags := Deathmatch;
+    FHud.Frags := FCur.Frags;
     FHud.Update(SecondsPassed, FCur.Stats, WeaponDefs[FCur.Stats.CurrentWeapon].Icon, AmmoIcons[A], FKeyIcons);
+  end;
 end;
 
 procedure TQuakeWorld.UpdateFrame(const SecondsPassed: Single);

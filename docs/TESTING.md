@@ -75,6 +75,8 @@ On Linux without a display, run under `xvfb-run -a -s "-screen 0 1600x900x24"`, 
 | `GP:lx ly rx ry lt rt`, `GP:` | Hold a virtual gamepad's sticks and triggers; release them |
 | `GB:button`, `GH:button` | Press a gamepad button; hold / release one (`south`, `east`, `west`, `north`, `lb`, `rb`, `ls`, `rs`, `up`, `down`, `left`, `right`, `menu`, `view`, `share`) |
 | `O:addclient`, `O:clientinput n forward side yaw [fire]`, `O:removeclient n` | Another client on the server (a player without a view; the demo shows it as a soldier), its held inputs (yaw in Quake degrees, fire 0 / 1), and leaving; `V` logs `Clients:` and each `Client n:` (position, health, snapshots, what it sees) |
+| `O:clientgoto n x y z` | Puts test client n's player at a Quake origin (to line up a shot) |
+| `+set deathmatch 1` (before `--autotest`), `O:dmflags n` | Deathmatch rules for the map; `V` then logs `Deathmatch: dmflags N, frags Player 1 F, ... (the view's HUD F)`, the log has `Broadcast:` death messages, `picked up` / `respawned` items and `Player N spawns at` (CI's `dm` and `dmitems` scripts) |
 | `O:clientdraw 0` / `O:clientdraw 1` | Draw the server's own models / the snapshots' (the default; `--server-draw` for a whole run; `V` logs `Client draws N models from the snapshots`) |
 | `O:renderscale N` | Draw the 3D view at N % of the window's resolution (`--render-scale N` for a whole run; the log says `Render scale N%: 3D view drawn at WxH`) |
 | `TD:x y finger`, `TM:x y finger`, `TU:finger` | Touch down / move / up (window fractions from the bottom left; run with `--touch` to show the touch controls) |

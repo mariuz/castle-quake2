@@ -72,9 +72,12 @@ begin
         Particles.SpawnRailTrail(Muzzle, HitPos);
       Exit;
     end;
-    if T.Ent is TQuakeMonster then
+    if (T.Ent is TQuakeMonster) or (T.Ent is TQuakePMove) then
     begin
-      TQuakeMonster(T.Ent).TakeDamage(Damage);
+      if T.Ent is TQuakeMonster then
+        TQuakeMonster(T.Ent).TakeDamage(Damage)
+      else
+        DamagePlayerHit(T.Ent, Damage, Origin);
       Particles.SpawnBlood(HitPos, -ShotDir);
       if Rail then
       begin
@@ -248,7 +251,13 @@ begin
 end;
 
 procedure TQuakeWorld.GunEvent(const Event: TGunEvent);
+var
+  SavedAttacker: TQuakePlayer;
 begin
+  { What the gun does now is the current player's doing }
+  SavedAttacker := FAttacker;
+  FAttacker := FCur;
+  try
   case Event of
     geFire: FireGun;
     geBfgFlash:
@@ -295,6 +304,9 @@ begin
     geChaingunUp: Sounds.Play('sound/weapons/chngnu1a.wav');
     geChaingunDown: Sounds.Play('sound/weapons/chngnd1a.wav');
     geHyperBlasterDown: Sounds.Play('sound/weapons/hyprbd1a.wav');
+  end;
+  finally
+    FAttacker := SavedAttacker;
   end;
 end;
 
@@ -354,6 +366,8 @@ procedure TQuakeWorld.FireWeapon(const Origin, Dir: TVector3);
 begin
   FCur.Pos := Origin;
   FCur.Dir := Dir;
+  if FCur.Dead then
+    FCur.LatchedAttack := True;
   if (FBsp = nil) or FCur.Dead then
     Exit;
   { A new press is latched (a short tap still fires) and thinks at once }
@@ -489,9 +503,12 @@ begin
   if not T.Hit then
     Exit;
   HitPos := QuakeToCge(T.EndPos);
-  if T.Ent is TQuakeMonster then
+  if (T.Ent is TQuakeMonster) or (T.Ent is TQuakePMove) then
   begin
-    TQuakeMonster(T.Ent).TakeDamage(Damage);
+    if T.Ent is TQuakeMonster then
+      TQuakeMonster(T.Ent).TakeDamage(Damage)
+    else
+      DamagePlayerHit(T.Ent, Damage, Origin);
     Particles.SpawnBlood(HitPos, -Dir);
     if FCur.PM <> nil then
       FCur.PM.AddVelocity(Vector3(Dir.X, 0, Dir.Z) * 75 + Vector3(0, 75, 0));
@@ -532,9 +549,12 @@ begin
   Particles.SpawnBeam(Muzzle, HitPos, Vector3(1.0, 0.75, 0.2));
   if not T.Hit then
     Exit;
-  if T.Ent is TQuakeMonster then
+  if (T.Ent is TQuakeMonster) or (T.Ent is TQuakePMove) then
   begin
-    TQuakeMonster(T.Ent).TakeDamage(Dmg);
+    if T.Ent is TQuakeMonster then
+      TQuakeMonster(T.Ent).TakeDamage(Dmg)
+    else
+      DamagePlayerHit(T.Ent, Dmg, Origin);
     Particles.SpawnBlood(HitPos, -Dir);
   end else
   begin

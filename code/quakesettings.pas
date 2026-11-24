@@ -117,11 +117,25 @@ const
   SPAWNFLAG_NOT_MEDIUM = 512;
   SPAWNFLAG_NOT_HARD = 1024;
 
+  { Quake 2 dmflags bits used here (the cvar's values) }
+  DF_NO_HEALTH = 1;
+  DF_NO_ITEMS = 2;
+  DF_WEAPONS_STAY = 4;
+  DF_NO_FALLING = 8;
+  DF_SPAWN_FARTHEST = 512;
+  DF_FORCE_RESPAWN = 1024;
+  DF_NO_ARMOR = 2048;
+  DF_ALLOW_EXIT = 4096;
+
 var
   Settings: TQuakeSettings;
   { Skill of the game being played (Quake 2's latched "skill" cvar): set by
     a new game, the "skill" console command and loading a savegame }
   GameSkill: Integer = 1;
+  { Quake 2's "deathmatch" cvar (latched: applies when a map loads) and
+    "dmflags" (at once); set by +set on the command line and the console }
+  Deathmatch: Boolean = False;
+  DMFlags: Integer = 0;
   { Touch screen (or --touch): set at startup, Auto interface size is larger }
   TouchInterface: Boolean;
 
@@ -142,6 +156,8 @@ function SkillSpawnFlag(const ASkill: Integer): Integer;
 { Monster time between attacks is multiplied by this (Quake 2 M_CheckAttack
   halves the attack chance on easy and doubles it from hard on) }
 function SkillAttackDelay(const ASkill: Integer): Single;
+{ Deathmatch is on and dmflags has this bit }
+function DMFlag(const Flag: Integer): Boolean;
 
 { Hor+: the vertical field of view (radians) of a 4:3 view HorizDegrees
   wide, used on every screen (wider ones see more at the sides) }
@@ -183,6 +199,11 @@ begin
     1: Result := SPAWNFLAG_NOT_MEDIUM;
     else Result := SPAWNFLAG_NOT_HARD;
   end;
+end;
+
+function DMFlag(const Flag: Integer): Boolean;
+begin
+  Result := Deathmatch and ((DMFlags and Flag) <> 0);
 end;
 
 function SkillAttackDelay(const ASkill: Integer): Single;

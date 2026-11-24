@@ -106,6 +106,8 @@ type
     { Text for a client's console (svc_print) or the middle of its screen
       (svc_centerprint); nil: the local client }
     procedure Print(const Text: String; const Center: Boolean = False; C: TServerClient = nil);
+    { svc_print to every client (gi.bprintf: deathmatch obituaries) }
+    procedure BroadcastPrint(const Text: String);
     { One game tick with the players' last known views }
     procedure RunTick(const Seconds: Single);
     { Send this tick's snapshot to every client }
@@ -221,10 +223,13 @@ begin
   FLocal.Player := FWorld.Players[0];
   FLocal.Player.Dir := Vector3(1, 0, 0);
   FClients.Add(FLocal);
+  FWorld.OnBroadcast := @BroadcastPrint;
 end;
 
 destructor TQuakeServer.Destroy;
 begin
+  if FWorld <> nil then
+    FWorld.OnBroadcast := nil;
   FClients.Free;
   FSlots.Free;
   FModelIndex.Free;
@@ -612,6 +617,7 @@ begin
   F.Player.Stats[StatQuad] := ClampShort(Ceil(Stats.QuadTime * 10));
   F.Player.Stats[StatInvulnerable] := ClampShort(Ceil(Stats.InvulnTime * 10));
   F.Player.Stats[StatLevelSeconds] := ClampShort(Trunc(Stats.LevelTime));
+  F.Player.Stats[StatFrags] := ClampShort(C.Player.Frags);
 end;
 
 procedure TQuakeServer.FreeUnseenNumbers;
@@ -672,6 +678,14 @@ begin
   finally
     Msg.Free;
   end;
+end;
+
+procedure TQuakeServer.BroadcastPrint(const Text: String);
+var
+  C: TServerClient;
+begin
+  for C in FClients do
+    Print(Text, False, C);
 end;
 
 procedure TQuakeServer.SpawnCommand(const C: TServerClient; const Args: String);

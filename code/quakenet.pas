@@ -93,6 +93,8 @@ const
   StatQuad = 15;
   StatInvulnerable = 16;
   StatLevelSeconds = 17;
+  { Deathmatch score (Quake 2 STAT_FRAGS) }
+  StatFrags = 18;
 
   { Entity delta bits }
   UOrigin1 = 1;

@@ -154,6 +154,9 @@ begin
         { weapon_bfg_fire: fire_bfg(damage 500, speed 400, radius 1000); the
           shot's Damage is the 200 of the core hit, both times the quad }
         Proj.SplashDamage := Damage * 5 div 2;
+        { deathmatch: 200 }
+        if Deathmatch then
+          Proj.SplashDamage := Damage;
         Proj.SplashRadius := 1000;
         Proj.LaserTimer := 0.1;
       end;
@@ -167,7 +170,7 @@ begin
 end;
 
 procedure TQuakeWorld.Explode(const Pos: TVector3; const Damage: Integer; const Radius: Single;
-  const FromPlayer: Boolean; const ExplosionSound: Boolean);
+  const FromPlayer: Boolean; const ExplosionSound: Boolean; const IgnorePM: TObject);
 var
   P: TQuakePlayer;
   M: TQuakeMonster;
@@ -218,14 +221,14 @@ begin
   { Every player in range }
   for P in FPlayers do
   begin
-    if P.Dead then
+    if P.Dead or ((IgnorePM <> nil) and (P.PM = IgnorePM)) then
       Continue;
     Dist := PointsDistance(P.Pos - Vector3(0, 22, 0), Pos);
     if Dist < Radius then
     begin
       Points := Round(Damage * (1 - 0.5 * Dist / Radius));
-      { Self damage is halved, like Quake 2 rockets }
-      if FromPlayer then
+      { Self damage is halved (T_RadiusDamage: the attacker's own) }
+      if FromPlayer and ((FAttacker = nil) or (FAttacker = P)) then
         Points := Points div 2;
       if Points > 0 then
         DamagePlayerHit(P.PM, Points, Pos);
@@ -236,8 +239,11 @@ end;
 procedure TQuakeWorld.BfgLasers(const Proj: TQuakeProjectile);
 const
   LaserMask = CONTENTS_SOLID or CONTENTS_MONSTER or CONTENTS_DEADMONSTER;
-  LaserDamage = 10; { single player }
+  { bfg_think: 10 in single player, 5 in deathmatch }
+  LaserDamageSP = 10;
+  LaserDamageDM = 5;
 var
+  LaserDamage: Integer;
   Origin: TVector3;
 
   procedure LaserAt(const Target: TVector3);
@@ -278,6 +284,10 @@ var
   M: TQuakeMonster;
   Center: TVector3;
 begin
+  if Deathmatch then
+    LaserDamage := LaserDamageDM
+  else
+    LaserDamage := LaserDamageSP;
   Origin := CgeToQuake(Proj.Transform.Translation);
   for M in FMonsters do
     if M.IsAlive and (M <> Proj.Owner) and M.Transform.Exists then
@@ -528,11 +538,17 @@ var
   StepLen: Single;
   Remove, Damageable: Boolean;
   T: TQuakeTrace;
-  Shooter: TObject;
+  Shooter, DirectPM: TObject;
 begin
   for I := FProjectiles.Count - 1 downto 0 do
   begin
     Proj := FProjectiles[I];
+    { A player's projectile: its damage is that player's doing }
+    if Proj.FromPlayer then
+      FAttacker := PlayerOfEnt(Proj.OwnerPlayer)
+    else
+      FAttacker := nil;
+    DirectPM := nil;
     Proj.Life := Proj.Life - SecondsPassed;
     Remove := False;
     OldPos := Proj.Transform.Translation;
@@ -715,8 +731,14 @@ begin
         begin
           if PlayerOfEnt(T.Ent) <> nil then
             PlayerOfEnt(T.Ent).DamageSource := Proj.Owner;
-          if Proj.Kind in [pkBlasterBolt, pkBfg, pkRipper, pkBlueBolt, pkLoogie, pkPlasma] then
+          { A player's projectiles hit other players directly too (rockets:
+            rocket_touch's T_Damage, the splash leaves them out) }
+          if (Proj.Kind in [pkBlasterBolt, pkBfg, pkRipper, pkBlueBolt, pkLoogie, pkPlasma]) or Proj.FromPlayer then
+          begin
             DamagePlayerHit(T.Ent, Proj.Damage, OldPos);
+            if Proj.FromPlayer then
+              DirectPM := T.Ent;
+          end;
         end else
         if T.Ent is TQuakeMover then
           DamageMover(TQuakeMover(T.Ent), Proj.Damage)
@@ -724,7 +746,7 @@ begin
         if T.Ent is TQuakeProp then
           DamageProp(TQuakeProp(T.Ent), Proj.Damage);
         case Proj.Kind of
-          pkRocket, pkHeatRocket: Explode(NewPos, Proj.SplashDamage * DamageMultiplier, Proj.SplashRadius, Proj.FromPlayer);
+          pkRocket, pkHeatRocket: Explode(NewPos, Proj.SplashDamage * DamageMultiplier, Proj.SplashRadius, Proj.FromPlayer, True, DirectPM);
           pkPlasma:
             { plasma_touch: the hit, then the splash (TE_PLASMA_EXPLOSION) }
             Explode(NewPos - Dir * 2, Proj.SplashDamage * DamageMultiplier, Proj.SplashRadius, Proj.FromPlayer);

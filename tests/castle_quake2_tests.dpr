@@ -327,7 +327,7 @@ end;
 
 const
   { Sounds the game code plays by literal path, named in the sounds design }
-  DesignSoundPaths: array[0..68] of String = (
+  DesignSoundPaths: array[0..69] of String = (
     'sound/doors/dr1_end.wav',
     'sound/doors/dr1_mid.wav',
     'sound/doors/dr1_strt.wav',
@@ -337,6 +337,7 @@ const
     'sound/items/m_health.wav',
     'sound/items/n_health.wav',
     'sound/items/pkup.wav',
+    'sound/items/respawn1.wav',
     'sound/items/s_health.wav',
     'sound/misc/am_pkup.wav',
     'sound/misc/ar1_pkup.wav',
@@ -3474,6 +3475,54 @@ begin
   Check(TVector3.Equals(D.Translation, Cur.Translation, 0.001), 'a jump is drawn where it landed');
 end;
 
+procedure TestDeathmatch;
+var
+  Def: PQuakeItemDef;
+
+  function Allowed(const AClass: String; const Flags: Integer): Boolean;
+  begin
+    Def := FindItemDef(AClass);
+    Result := (Def <> nil) and ItemAllowedByDMFlags(Def^, Flags);
+  end;
+
+  function Respawn(const AClass: String): Single;
+  begin
+    Def := FindItemDef(AClass);
+    if Def = nil then
+      Exit(-1);
+    Result := ItemRespawnSeconds(Def^);
+  end;
+
+begin
+  { SetRespawn times }
+  Check(Respawn('weapon_railgun') = 30, 'deathmatch: weapons come back after 30 s');
+  Check(Respawn('ammo_slugs') = 30, 'deathmatch: ammo after 30 s');
+  Check(Respawn('item_health') = 30, 'deathmatch: health after 30 s');
+  Check(Respawn('item_health_mega') = 20, 'deathmatch: the megahealth after 20 s');
+  Check(Respawn('item_armor_body') = 20, 'deathmatch: armor after 20 s');
+  Check(Respawn('item_quad') = 60, 'deathmatch: the quad after 60 s');
+  Check(Respawn('item_invulnerability') = 300, 'deathmatch: the invulnerability after 300 s');
+  Check(Respawn('item_pack') = 180, 'deathmatch: the pack after 180 s');
+  Check(Respawn('key_blue_key') = 0, 'deathmatch: keys never come back');
+  { dmflags removing items (SpawnItem) }
+  Check(Allowed('item_armor_body', 0) and not Allowed('item_armor_body', DF_NO_ARMOR) and
+    not Allowed('item_power_shield', DF_NO_ARMOR), 'dmflags: no armor removes armor and power armor');
+  Check(not Allowed('item_quad', DF_NO_ITEMS) and Allowed('item_power_screen', DF_NO_ITEMS) and
+    Allowed('item_bandolier', DF_NO_ITEMS) and Allowed('weapon_railgun', DF_NO_ITEMS),
+    'dmflags: no items removes powerups only');
+  Check(not Allowed('item_health_large', DF_NO_HEALTH) and not Allowed('item_adrenaline', DF_NO_HEALTH) and
+    not Allowed('item_ancient_head', DF_NO_HEALTH) and Allowed('item_quad', DF_NO_HEALTH),
+    'dmflags: no health removes health, the adrenaline and the ancient head');
+  { DMFlag only counts in deathmatch }
+  DMFlags := DF_WEAPONS_STAY;
+  Deathmatch := False;
+  Check(not DMFlag(DF_WEAPONS_STAY), 'dmflags do nothing outside deathmatch');
+  Deathmatch := True;
+  Check(DMFlag(DF_WEAPONS_STAY) and not DMFlag(DF_NO_FALLING), 'dmflags bits in deathmatch');
+  Deathmatch := False;
+  DMFlags := 0;
+end;
+
 procedure TestNet;
 var
   Msg: TNetMessage;
@@ -4046,6 +4095,7 @@ begin
   TestTick;
   TestParticleMotion;
   TestWebParams;
+  TestDeathmatch;
   TestNet;
   TestInstalls;
   TestInsane;

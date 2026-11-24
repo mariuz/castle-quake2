@@ -15,8 +15,8 @@ begin
   { T_Damage: half damage while a defender sphere is out }
   if FCur.Stats.DefenderTime > 0 then
     Take := Max(1, Take div 2);
-  { Quake 2 T_Damage: half damage on easy }
-  if GameSkill = 0 then
+  { Quake 2 T_Damage: half damage on easy (not in deathmatch) }
+  if (GameSkill = 0) and not Deathmatch then
     Take := Max(1, Take div 2);
   { Power armor first, then armor (T_Damage: CheckPowerArmor, CheckArmor) }
   if not NoArmor then
@@ -42,6 +42,9 @@ begin
     KillPlayer;
     Exit;
   end;
+  if (FAttacker <> nil) and (FAttacker <> FCur) then
+    WritelnLog('QuakeWorld', '%s hurt by %s: %d (health %d)',
+      [PlayerName(FCur), PlayerName(FAttacker), Take, FCur.Stats.Health]);
 
   if FCur.PainSoundTimer <= 0 then
   begin
@@ -65,7 +68,12 @@ var
   Org: TVector3;
 begin
   FCur.Dead := True;
-  FCur.DeadTimer := 3.0;
+  FCur.LatchedAttack := False;
+  { player_die: respawn_time 1 s in deathmatch }
+  if Deathmatch then
+    FCur.DeadTimer := 1.0
+  else
+    FCur.DeadTimer := 3.0;
   { player_die: below -40 health the body is gibbed (4 meat + the head the
     view stays in), else the death sound }
   FCur.Gibbed := FCur.Stats.Health < -40;
@@ -87,7 +95,9 @@ begin
   { ps.gunindex = 0: no view weapon while dead }
   if (FWeaponTransform <> nil) and IsLocal then
     FWeaponTransform.Exists := False;
-  if FHud <> nil then
+  Obituary(FAttacker);
+  FObituaryText := '';
+  if (FHud <> nil) and not Deathmatch then
     FHud.ShowMessage('You died. Restarting level...', 3);
 end;
 
@@ -98,12 +108,21 @@ begin
 end;
 
 procedure TQuakeWorld.Suicide;
+var
+  Saved: TQuakePlayer;
 begin
   if FCur.Dead then
     Exit;
   FCur.Stats.Health := 0;
   FCur.HasKiller := False;
-  KillPlayer;
+  { MOD_SUICIDE: by oneself }
+  Saved := FAttacker;
+  FAttacker := FCur;
+  try
+    KillPlayer;
+  finally
+    FAttacker := Saved;
+  end;
 end;
 
 function TQuakeWorld.PlayerTrace(const Start, Stop, Mins, Maxs: TVector3; const Mask: Integer): TQuakeTrace;
@@ -232,6 +251,9 @@ begin
     Sounds.Play('sound/player/male/fall1.wav', 1, chVoice)
   else
     Sounds.Play('sound/player/male/fall2.wav', 1, chVoice);
+  { P_FallingDamage: the fall event still plays, no damage }
+  if DMFlag(DF_NO_FALLING) then
+    Exit;
   DamagePlayer(Damage, FCur.Pos);
 end;
 
