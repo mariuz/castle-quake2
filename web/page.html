@@ -52,3 +52,42 @@
   });
 })();
 </script>
+<!--
+  Packets between pages of this browser (pages/duel.html: two games in
+  iframes, one hosting, one joining; QuakeNetLink.TNetWebLink). The game
+  calls document.CastleNetOpen(name) once ('' = make up a name; returns
+  the page's name), CastleNetSend(to, hex) and CastleNetReceive() ('' or
+  "<from>\n<hex>"). Every page of this site hears the same
+  BroadcastChannel; a page takes only what is sent to its name. Opening
+  announces the name ({hello: name}), so the duel page knows a host is up.
+-->
+<script>
+(function () {
+  if (typeof BroadcastChannel === "undefined") return;
+  let channel = null;
+  let myName = "";
+  const inbox = [];
+  document.CastleNetOpen = function (name) {
+    myName = name || ("page-" + Math.random().toString(36).slice(2, 10));
+    if (!channel) {
+      channel = new BroadcastChannel("castle-quake2-net");
+      channel.onmessage = function (e) {
+        const m = e.data;
+        if (m && m.to === myName && typeof m.data === "string")
+          inbox.push(m.from + "\n" + m.data);
+      };
+    }
+    channel.postMessage({ hello: myName });
+    console.log("Castle Quake 2: net page " + myName);
+    return myName;
+  };
+  document.CastleNetSend = function (to, hex) {
+    if (!channel) return false;
+    channel.postMessage({ from: myName, to: to, data: hex });
+    return true;
+  };
+  document.CastleNetReceive = function () {
+    return inbox.length > 0 ? inbox.shift() : "";
+  };
+})();
+</script>

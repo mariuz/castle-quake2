@@ -87,6 +87,25 @@ type
   end;
   {$endif}
 
+  {$ifdef WASI}
+  { Datagrams between pages of one browser (pages/duel.html: two iframes):
+    web/page.html defines document.CastleNetOpen / CastleNetSend /
+    CastleNetReceive over a BroadcastChannel; peers are page names, the
+    data goes as hex text }
+  TNetWebLink = class(TNetLink)
+  strict private
+    FName, FError: String;
+  public
+    { AName '' = a name the page makes up (a joining page) }
+    constructor Create(const AName: String);
+    function Opened: Boolean;
+    function Send(const Peer: String; const Data: TBytes): Boolean; override;
+    function Receive(out Peer: String; out Data: TBytes): Boolean; override;
+    property Name: String read FName;
+    property Error: String read FError;
+  end;
+  {$endif}
+
   TNetPeerConnectEvent = function(const Peer: String; const Channel: TNetLoopback): TObject of object;
   TNetPeerEvent = procedure(const Peer: String; const Ref: TObject) of object;
 
@@ -153,6 +172,11 @@ type
   port isn't a number }
 function SplitHostPort(const S: String; out Host: String; out Port: Integer): Boolean;
 
+{ The web link's text: bytes as lowercase hex, and back (False on an odd
+  length or a character that isn't hex) }
+function BytesToHex(const Data: TBytes): String;
+function HexToBytes(const S: String; out Data: TBytes): Boolean;
+
 implementation
 
 uses
@@ -160,6 +184,7 @@ uses
   Sockets,
   {$ifdef MSWINDOWS} WinSock2, {$else} BaseUnix, {$endif}
   {$endif}
+  {$ifdef WASI} Job.Js, CastleInternalJobWeb, {$endif}
   CastleLog;
 
 function SplitHostPort(const S: String; out Host: String; out Port: Integer): Boolean;
@@ -175,6 +200,53 @@ begin
   end;
   Host := Copy(S, 1, P - 1);
   Result := TryStrToInt(Copy(S, P + 1, MaxInt), Port) and (Port > 0) and (Port < 65536) and (Host <> '');
+end;
+
+function BytesToHex(const Data: TBytes): String;
+const
+  Digits: array [0..15] of Char = '0123456789abcdef';
+var
+  I: Integer;
+begin
+  SetLength(Result, Length(Data) * 2);
+  for I := 0 to Length(Data) - 1 do
+  begin
+    Result[I * 2 + 1] := Digits[Data[I] shr 4];
+    Result[I * 2 + 2] := Digits[Data[I] and 15];
+  end;
+end;
+
+function HexToBytes(const S: String; out Data: TBytes): Boolean;
+
+  function Nibble(const C: Char): Integer;
+  begin
+    case C of
+      '0'..'9': Result := Ord(C) - Ord('0');
+      'a'..'f': Result := Ord(C) - Ord('a') + 10;
+      'A'..'F': Result := Ord(C) - Ord('A') + 10;
+      else Result := -1;
+    end;
+  end;
+
+var
+  I, Hi, Lo: Integer;
+begin
+  Data := nil;
+  if Odd(Length(S)) then
+    Exit(False);
+  SetLength(Data, Length(S) div 2);
+  for I := 0 to Length(Data) - 1 do
+  begin
+    Hi := Nibble(S[I * 2 + 1]);
+    Lo := Nibble(S[I * 2 + 2]);
+    if (Hi < 0) or (Lo < 0) then
+    begin
+      Data := nil;
+      Exit(False);
+    end;
+    Data[I] := (Hi shl 4) or Lo;
+  end;
+  Result := True;
 end;
 
 function TNetLink.NormalizePeer(const Peer: String): String;
@@ -252,6 +324,65 @@ begin
   Peer := P.Peer;
   Data := P.Data;
 end;
+
+{$ifdef WASI}
+
+{ TNetWebLink }
+
+constructor TNetWebLink.Create(const AName: String);
+begin
+  inherited Create;
+  try
+    FName := String(JSDocument.InvokeJSUnicodeStringResult('CastleNetOpen', [UnicodeString(AName)]));
+    if FName = '' then
+      FError := 'the page has no BroadcastChannel';
+  except
+    on E: Exception do
+    begin
+      FName := '';
+      FError := 'the page has no CastleNetOpen (' + E.Message + ')';
+    end;
+  end;
+end;
+
+function TNetWebLink.Opened: Boolean;
+begin
+  Result := FName <> '';
+end;
+
+function TNetWebLink.Send(const Peer: String; const Data: TBytes): Boolean;
+begin
+  Result := Opened and (Peer <> '') and (Length(Data) > 0);
+  if Result then
+    Result := JSDocument.InvokeJSBooleanResult('CastleNetSend',
+      [UnicodeString(Peer), UnicodeString(BytesToHex(Data))]);
+end;
+
+function TNetWebLink.Receive(out Peer: String; out Data: TBytes): Boolean;
+var
+  S: String;
+  P: Integer;
+begin
+  Peer := '';
+  Data := nil;
+  Result := False;
+  if not Opened then
+    Exit;
+  repeat
+    { "<from>" + #10 + "<hex>", '' when nothing waits }
+    S := String(JSDocument.InvokeJSUnicodeStringResult('CastleNetReceive', []));
+    if S = '' then
+      Exit;
+    P := Pos(#10, S);
+    if (P > 1) and HexToBytes(Copy(S, P + 1, MaxInt), Data) and (Length(Data) > 0) then
+    begin
+      Peer := Copy(S, 1, P - 1);
+      Exit(True);
+    end;
+  until False;
+end;
+
+{$endif}
 
 {$ifndef WASI}
 

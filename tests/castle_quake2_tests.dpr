@@ -3567,6 +3567,14 @@ begin
   Check(SplitHostPort('127.0.0.1:27999', H, Port) and (H = '127.0.0.1') and (Port = 27999) and
     SplitHostPort('localhost', H, Port) and (Port = DefaultNetPort) and not SplitHostPort('a:b', H, Port),
     'net link: host:port addresses');
+  SetLength(Data, 256);
+  for I := 0 to 255 do
+    Data[I] := I;
+  H := BytesToHex(Data);
+  Check((Length(H) = 512) and (Copy(H, 1, 6) = '000102') and (Copy(H, 507, 6) = 'fdfeff') and
+    HexToBytes(H, Data) and (Length(Data) = 256) and (Data[171] = 171) and HexToBytes('A0ff', Data) and
+    (Data[0] = $A0) and not HexToBytes('abc', Data) and not HexToBytes('0g', Data),
+    'net link: the web link''s hex text, both ways');
   Events := TLinkEvents.Create;
   Msg := TNetMessage.Create;
   HostLink := TNetMemoryLink.Create('host');
@@ -3988,6 +3996,11 @@ begin
   finally
     Ignored.Free;
   end;
+  Check(Joined(QueryToParameters('?map=demo1&deathmatch=1&host=duel')) =
+    '|+set|deathmatch|1|+set|port|27910|+set|hostname|duel|+map|demo1',
+    'address host=<name>: hosting under that page name');
+  Check(Joined(QueryToParameters('?connect=duel&demo=W:1')) = '|+connect|duel|--autotest|demo1|web|--demo|W:1',
+    'address connect=<name>: joining that page (a script still runs)');
 end;
 
 procedure TestModSupport;

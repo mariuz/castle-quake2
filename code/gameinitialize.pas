@@ -309,6 +309,11 @@ begin
       NetBindAddress := Parameters[I + 2];
       Inc(I, 2);
     end else
+    if (Parameters[I] = '+set') and (I + 2 <= Parameters.High) and SameText(Parameters[I + 1], 'hostname') then
+    begin
+      NetHostName := Parameters[I + 2];
+      Inc(I, 2);
+    end else
     if (Parameters[I] = '+connect') and (I + 1 <= Parameters.High) then
     begin
       NetConnectTo := Parameters[I + 1];
@@ -442,6 +447,10 @@ begin
     ViewPlay.MapName := CmdWarp;
     Window.Container.View := ViewPlay;
   end else
+  if NetConnectTo <> '' then
+    { +connect: straight to the host's map, no menu }
+    Window.Container.View := ViewPlay
+  else
     Window.Container.View := ViewMenu;
 end;
 

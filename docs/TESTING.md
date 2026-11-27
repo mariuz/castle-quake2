@@ -141,6 +141,8 @@ node tests/web/smoke.js https://mariuz.github.io/castle-quake2/play/ shot.png
 
 A fourth argument opens the page with settings in its address and expects that map without the menu: `node tests/web/smoke.js <dist> shot.png 300 '?map=demo2&skill=0&fps=1'` (CI runs both).
 
+`tests/web/duel.js <dist> [shot.png] [timeout s]` serves `pages/duel.html` with the build under `play/` and checks two games on one page: the left iframe hosts demo1 in deathmatch (`?host=duel`), the right one joins it through the `BroadcastChannel` (`?connect=duel`) once the host has announced itself; each runs a demo script, and the check reads both consoles until the joiner has logged two `Join:` lines that see the host's player with no bad frames or prediction errors, at two positions (it walked), and the host logged `Remote client page-... is player 2` and `Remote player 2 at`. It writes `<shot>-console.log`; CI runs it after the smoke tests.
+
 It writes the whole browser console next to the screenshot (`<name>-console.log`), and its `OK:` line includes the drawing resolution. CI also opens `?map=demo1&scale=0.5` and checks that it draws at 480 × 270, and that `?skill=0` arrived.
 
 It needs Playwright (`npm install playwright`; the cloud container has it). Its frame rate is software rendering, only comparable between runs.

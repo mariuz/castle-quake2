@@ -677,10 +677,12 @@ begin
 end;
 
 procedure TViewPlay.StartHosting(const Port: Integer);
-{$ifndef WASI}
 var
+  {$ifdef WASI}
+  Link: TNetWebLink;
+  {$else}
   Link: TNetUdpLink;
-{$endif}
+  {$endif}
 begin
   if FHostBridge <> nil then
   begin
@@ -693,7 +695,20 @@ begin
     Exit;
   end;
   {$ifdef WASI}
-  Console.Print('No UDP on the web');
+  { Other pages of this browser join by the page name (pages/duel.html) }
+  Link := TNetWebLink.Create(NetHostName);
+  if not Link.Opened then
+  begin
+    Console.Print('Cannot host: ' + Link.Error);
+    WritelnWarning('Net', 'Cannot host on the page: %s', [Link.Error]);
+    Link.Free;
+    Exit;
+  end;
+  FHostBridge := TNetHostBridge.Create(Link);
+  FHostBridge.OnConnect := @PeerConnect;
+  FHostBridge.OnDisconnect := @PeerDisconnect;
+  Console.Print('Hosting as page ' + Link.Name);
+  WritelnLog('Net', 'Hosting as page "%s"', [Link.Name]);
   {$else}
   Link := TNetUdpLink.Create(Port, NetBindAddress);
   if not Link.Opened then
@@ -712,10 +727,12 @@ begin
 end;
 
 procedure TViewPlay.StartJoining(const Address: String);
-{$ifndef WASI}
 var
+  {$ifdef WASI}
+  Link: TNetWebLink;
+  {$else}
   Link: TNetUdpLink;
-{$endif}
+  {$endif}
 begin
   if FHostBridge <> nil then
   begin
@@ -723,7 +740,15 @@ begin
     Exit;
   end;
   {$ifdef WASI}
-  Console.Print('No UDP on the web');
+  { The address is the host page's name }
+  Link := TNetWebLink.Create('');
+  if not Link.Opened then
+  begin
+    Console.Print('Cannot connect: ' + Link.Error);
+    WritelnWarning('Net', 'Cannot join on the page: %s', [Link.Error]);
+    Link.Free;
+    Exit;
+  end;
   {$else}
   Link := TNetUdpLink.Create(0, NetBindAddress);
   if not Link.Opened then
@@ -733,6 +758,7 @@ begin
     Link.Free;
     Exit;
   end;
+  {$endif}
   FreeAndNil(FJoinBridge);
   FJoinBridge := TNetJoinBridge.Create(Link, Address);
   { The client talks to the host from now on; the local server idles }
@@ -744,6 +770,9 @@ begin
   FJoinServerData := 0;
   FJoinLost := False;
   Console.Print('Connecting to ' + FJoinBridge.Host + '...');
+  {$ifdef WASI}
+  WritelnLog('Net', 'Joining %s as page "%s"', [FJoinBridge.Host, Link.Name]);
+  {$else}
   WritelnLog('Net', 'Joining %s from UDP port %d', [FJoinBridge.Host, Link.Port]);
   {$endif}
 end;
@@ -2923,9 +2952,15 @@ begin
     TestClientCommand(Cmd, Args)
   else
   if Cmd = 'host' then
-    { host [port]: other instances may join (UDP) }
-    StartHosting(StrToIntDef(Trim(Args), DefaultNetPort))
-  else
+  begin
+    { host [port]: other instances may join (UDP); on the web host [name]:
+      other pages of this browser join by that name }
+    {$ifdef WASI}
+    if Trim(Args) <> '' then
+      NetHostName := Trim(Args);
+    {$endif}
+    StartHosting(StrToIntDef(Trim(Args), DefaultNetPort));
+  end else
   if Cmd = 'connect' then
   begin
     { connect <address[:port]>: join another instance's game }

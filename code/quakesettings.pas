@@ -145,6 +145,9 @@ var
   { +set ip <address>: the address to listen on ('' = all; 127.0.0.1 = this
     machine only, no firewall question) }
   NetBindAddress: String = '';
+  { The web link's name of a hosting page (+set hostname, ?host=<name>);
+    joining pages connect to it by this name }
+  NetHostName: String = 'host';
   { Touch screen (or --touch): set at startup, Auto interface size is larger }
   TouchInterface: Boolean;
 

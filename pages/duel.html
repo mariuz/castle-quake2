@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Castle Quake 2 Duel</title>
+  <meta name="description" content="Two Castle Quake 2 games on one page: the left one hosts, the right one joins it through the browser (BroadcastChannel), no server.">
+  <!--
+    Two instances of the game, each in its own iframe (its own WebAssembly
+    instance). The left one hosts under a page name, the right one joins
+    that name; packets go between them through a BroadcastChannel
+    (web/page.html, QuakeNetLink.TNetWebLink). The right game is opened
+    once the left one announces it is hosting.
+
+    Address settings (all optional):
+      name=<page name>   the host's name (default "duel")
+      host=<query>       more settings for the left game (default
+                         "map=demo1&deathmatch=1"), URL-encoded
+      join=<query>       more settings for the right game, URL-encoded
+    For example ?host=map%3Ddemo2%26deathmatch%3D1 .
+  -->
+  <style>
+    :root {
+      --bg: #0d0f12;
+      --panel: #171b22;
+      --panel-border: #323b47;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #e26a2c;
+    }
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) {
+        --bg: #f3f4f6;
+        --panel: #ffffff;
+        --panel-border: #d0d7de;
+        --text: #1f2328;
+        --muted: #59636e;
+        --accent: #b4501c;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    main { padding: 16px; }
+    h1 { margin: 0 0 4px; font-size: 1.4rem; color: var(--accent); letter-spacing: 0.05em; }
+    p { margin: 0 0 12px; color: var(--muted); }
+    a { color: var(--accent); }
+    .games { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 900px) { .games { grid-template-columns: 1fr; } }
+    .game {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .game h2 { margin: 0; padding: 8px 12px; font-size: 1rem; font-weight: 600; }
+    .game .status { font-weight: 400; color: var(--muted); }
+    iframe { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; background: #000; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Duel</h1>
+    <p>Two games on one page: the left one hosts, the right one joins it through the browser, with no server.
+      Click a game to play in it. <a href="./">Back</a></p>
+    <div class="games">
+      <section class="game">
+        <h2>Host <span class="status" id="host-status">starting</span></h2>
+        <iframe id="host-frame" title="Hosting game" allow="fullscreen; gamepad; autoplay"></iframe>
+      </section>
+      <section class="game">
+        <h2>Joining <span class="status" id="join-status">waits for the host</span></h2>
+        <iframe id="join-frame" title="Joining game" allow="fullscreen; gamepad; autoplay"></iframe>
+      </section>
+    </div>
+  </main>
+  <script>
+  (function () {
+    const params = new URLSearchParams(window.location.search);
+    const name = params.get("name") || "duel";
+    const hostQuery = params.has("host") ? params.get("host") : "map=demo1&deathmatch=1";
+    const joinQuery = params.get("join") || "";
+    const play = "play/index.html?";
+    const hostFrame = document.getElementById("host-frame");
+    const joinFrame = document.getElementById("join-frame");
+    const hostStatus = document.getElementById("host-status");
+    const joinStatus = document.getElementById("join-status");
+
+    function query(extra, key) {
+      const q = extra ? extra + "&" : "";
+      return q + key + "=" + encodeURIComponent(name);
+    }
+
+    let joinStarted = false;
+    function startJoining() {
+      if (joinStarted) return;
+      joinStarted = true;
+      joinStatus.textContent = "joins " + name;
+      joinFrame.src = play + query(joinQuery, "connect");
+      console.log("Duel: the host is up, opening the joining game");
+    }
+
+    if (typeof BroadcastChannel === "undefined") {
+      hostStatus.textContent = "this browser has no BroadcastChannel";
+      return;
+    }
+    // The game pages announce their names (web/page.html)
+    const channel = new BroadcastChannel("castle-quake2-net");
+    channel.onmessage = function (e) {
+      const m = e.data;
+      if (m && m.hello === name) {
+        hostStatus.textContent = "hosting as " + name;
+        startJoining();
+      }
+    };
+    hostFrame.src = play + query(hostQuery, "host");
+  })();
+  </script>
+</body>
+</html>

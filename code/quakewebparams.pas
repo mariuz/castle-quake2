@@ -4,7 +4,9 @@
   (GameInitialize).
 
   Keys: map, skill (0..3), touch (1), fps (1), gamma, demo (a demo script;
-  it runs as an autotest on the map, demo1 by default, and quits); scale
+  it runs as an autotest on the map, demo1 by default, and quits), host
+  (a name: other pages join this game, "+set port 27910 +set hostname"),
+  connect (the host page's name: "+connect"), deathmatch, bots; scale
   and fullres are the page's (web/page.html), not arguments. Unknown
   keys are returned in Ignored. Pure string code, so the unit tests check
   it on the desktop. }
@@ -100,6 +102,33 @@ begin
       if Key = 'demo' then
         Demo := Value
       else
+      if Key = 'host' then
+      begin
+        { Host a game other pages join (pages/duel.html) under this name }
+        Args.Add('+set');
+        Args.Add('port');
+        Args.Add('27910');
+        Args.Add('+set');
+        Args.Add('hostname');
+        if Value = '1' then
+          Args.Add('host')
+        else
+          Args.Add(Value);
+      end else
+      if Key = 'connect' then
+      begin
+        Args.Add('+connect');
+        if Value = '1' then
+          Args.Add('host')
+        else
+          Args.Add(Value);
+      end else
+      if (Key = 'deathmatch') or (Key = 'bots') then
+      begin
+        Args.Add('+set');
+        Args.Add(Key);
+        Args.Add(Value);
+      end else
       if (Key = 'scale') or (Key = 'fullres') then
         { read by the page itself (web/page.html: drawing resolution) }
       else

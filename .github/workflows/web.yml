@@ -146,6 +146,9 @@ jobs:
           grep -q "drawing at 480x270" web-smoke.log || { echo "::error::?scale=0.5 did not halve the drawing resolution"; exit 1; }
           # Every address setting arrives (the first one used to be dropped)
           grep -q "Skill 0 from the command line" web-smoke-address-console.log || { echo "::error::?skill=0 was not applied"; exit 1; }
+          # Two games on one page (pages/duel.html): the left one hosts, the right one joins it through a
+          # BroadcastChannel, sees the host's player, walks and predicts without errors; the host sees player 2
+          NODE_PATH=/tmp/pw/node_modules node tests/web/duel.js castle-engine-output/web/dist web-smoke-duel.png 420 | tee -a web-smoke.log
           echo "### Browser build" >> "$GITHUB_STEP_SUMMARY"
           grep "^OK:" web-smoke.log >> "$GITHUB_STEP_SUMMARY"
 
@@ -163,7 +166,7 @@ jobs:
         run: |
           set -eux
           mkdir -p _site/play _site/docs
-          cp pages/index.html _site/
+          cp pages/index.html pages/duel.html _site/
           cp docs/*.png _site/docs/
           cp -R castle-engine-output/web/dist/* _site/play/
           du -sh _site
@@ -176,6 +179,8 @@ jobs:
   deploy:
     name: Deploy to GitHub Pages
     needs: build-web
+    # A manual run on another branch only builds and tests
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
