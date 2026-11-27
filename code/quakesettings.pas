@@ -138,6 +138,13 @@ var
   DMFlags: Integer = 0;
   { +set bots N: bots added when the first map has loaded }
   StartBots: Integer = 0;
+  { +set port N: other instances may join this one's game (UDP; 0 = no);
+    +connect host:port: join that game instead of starting one }
+  NetHostPort: Integer = 0;
+  NetConnectTo: String = '';
+  { +set ip <address>: the address to listen on ('' = all; 127.0.0.1 = this
+    machine only, no firewall question) }
+  NetBindAddress: String = '';
   { Touch screen (or --touch): set at startup, Auto interface size is larger }
   TouchInterface: Boolean;
 

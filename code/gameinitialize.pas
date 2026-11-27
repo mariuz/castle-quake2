@@ -299,6 +299,21 @@ begin
       StartBots := EnsureRange(StrToIntDef(Parameters[I + 2], 0), 0, 7);
       Inc(I, 2);
     end else
+    if (Parameters[I] = '+set') and (I + 2 <= Parameters.High) and SameText(Parameters[I + 1], 'port') then
+    begin
+      NetHostPort := EnsureRange(StrToIntDef(Parameters[I + 2], 0), 0, 65535);
+      Inc(I, 2);
+    end else
+    if (Parameters[I] = '+set') and (I + 2 <= Parameters.High) and SameText(Parameters[I + 1], 'ip') then
+    begin
+      NetBindAddress := Parameters[I + 2];
+      Inc(I, 2);
+    end else
+    if (Parameters[I] = '+connect') and (I + 1 <= Parameters.High) then
+    begin
+      NetConnectTo := Parameters[I + 1];
+      Inc(I);
+    end else
     if (Parameters[I] = '+set') and (I + 2 <= Parameters.High) and SameText(Parameters[I + 1], 'game') then
     begin
       CmdGame := Parameters[I + 2];

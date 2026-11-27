@@ -29,7 +29,7 @@ uses
   CastleVectors, CastleLog, CastleImages, CastleClassUtils, CastleComponentSerialize,
   CastleTransform, CastleUriUtils, CastleScene,
   QuakePak, QuakePalette, QuakeBsp, QuakeMd2, QuakeSprite, QuakeLight, QuakeEntities,
-  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeTick, QuakeWebParams, QuakeInstalls, QuakeInsane, QuakeHud, QuakeNet, QuakeServer, QuakeClient, QuakeClientScene, QuakePMove, QuakeBot, Zipper;
+  QuakeMonsterTypes, QuakeSound, QuakeSettings, CastleKeysMouse, CastleXmlConfig, QuakeMapReport, QuakeGamepad, QuakeWeaponFrames, QuakeMonsterAttacks, QuakeTrace, QuakeTouch, QuakeRecord, QuakePlayer, QuakeParticles, QuakeWorld, QuakeTurret, QuakeMonsterMoves, QuakeQ1Monsters, QuakeLevel, QuakeBspBuilder, QuakeLevelGen, QuakeMap, QuakeBenchmark, QuakeTick, QuakeWebParams, QuakeInstalls, QuakeInsane, QuakeHud, QuakeNet, QuakeServer, QuakeClient, QuakeClientScene, QuakePMove, QuakeBot, QuakeNetLink, Zipper;
 
 var
   Passed, Failed: Integer;
@@ -3523,6 +3523,136 @@ begin
   DMFlags := 0;
 end;
 
+type
+  { The host bridge's events, counted }
+  TLinkEvents = class
+    Connected, Disconnected: Integer;
+    Room: Boolean;
+    LastPeer: String;
+    Channel: TNetLoopback;
+    function Connect(const Peer: String; const AChannel: TNetLoopback): TObject;
+    procedure Disconnect(const Peer: String; const Ref: TObject);
+  end;
+
+function TLinkEvents.Connect(const Peer: String; const AChannel: TNetLoopback): TObject;
+begin
+  if not Room then
+    Exit(nil);
+  Inc(Connected);
+  LastPeer := Peer;
+  Channel := AChannel;
+  Result := Self;
+end;
+
+procedure TLinkEvents.Disconnect(const Peer: String; const Ref: TObject);
+begin
+  Inc(Disconnected);
+end;
+
+procedure TestNetLink;
+var
+  HostLink, JoinLink: TNetMemoryLink;
+  Host: TNetHostBridge;
+  Join: TNetJoinBridge;
+  Events: TLinkEvents;
+  Msg: TNetMessage;
+  Data: TBytes;
+  H, Peer: String;
+  Port, I: Integer;
+  {$ifndef WASI}
+  A, B: TNetUdpLink;
+  Got: Boolean;
+  {$endif}
+begin
+  Check(SplitHostPort('127.0.0.1:27999', H, Port) and (H = '127.0.0.1') and (Port = 27999) and
+    SplitHostPort('localhost', H, Port) and (Port = DefaultNetPort) and not SplitHostPort('a:b', H, Port),
+    'net link: host:port addresses');
+  Events := TLinkEvents.Create;
+  Msg := TNetMessage.Create;
+  HostLink := TNetMemoryLink.Create('host');
+  JoinLink := TNetMemoryLink.Create('join');
+  HostLink.Connect(JoinLink);
+  Host := TNetHostBridge.Create(HostLink);
+  Host.OnConnect := @Events.Connect;
+  Host.OnDisconnect := @Events.Disconnect;
+  Join := TNetJoinBridge.Create(JoinLink, 'host');
+  try
+    { No room: refused, the joiner hears the goodbye }
+    Msg.Clear;
+    Msg.WriteByte(7);
+    Join.Channel.SendToServer(Msg);
+    Join.Pump(0.1);
+    Host.Pump(0.1);
+    Join.Pump(0.1);
+    Check((Events.Connected = 0) and (Host.PeerCount = 0) and (Join.Silence > PeerTimeout),
+      'net link: a host without room refuses a peer');
+    { With room: the joiner's packet makes it a client; packets both ways }
+    Events.Room := True;
+    Msg.Clear;
+    Msg.WriteByte(ClcMove);
+    Msg.WriteLong(1234);
+    Join.Channel.SendToServer(Msg);
+    Join.Pump(0.1);
+    Host.Pump(0.1);
+    Check((Events.Connected = 1) and (Host.PeerCount = 1) and (Events.LastPeer = 'join'),
+      'net link: a peer that sends becomes a client of the host');
+    Check((Events.Channel <> nil) and Events.Channel.ReceiveOnServer(Data) and (Length(Data) = 5) and
+      (Data[0] = ClcMove) and not Events.Channel.ReceiveOnServer(Data),
+      'net link: the joiner''s message reaches the server end of its channel');
+    Msg.Clear;
+    Msg.WriteByte(SvcPrint);
+    Msg.WriteString('hello');
+    Events.Channel.SendToClient(Msg);
+    Host.Pump(0.1);
+    Join.Pump(0.1);
+    Check(Join.Channel.ReceiveOnClient(Data) and (Length(Data) = Msg.Size) and (Data[0] = SvcPrint) and
+      (Join.Silence = 0), 'net link: the server''s message reaches the joiner''s client');
+    { Silence: the peer is dropped after PeerTimeout }
+    for I := 1 to 11 do
+      Host.Pump(1);
+    Check((Host.PeerCount = 0) and (Events.Disconnected = 1), 'net link: a silent peer times out');
+    { It comes back, then says goodbye (the joiner quits) }
+    Join.Channel.SendToServer(Msg);
+    Join.Pump(0.1);
+    Host.Pump(0.1);
+    FreeAndNil(Join);
+    Host.Pump(0.1);
+    Check((Events.Connected = 2) and (Events.Disconnected = 2) and (Host.PeerCount = 0),
+      'net link: a joiner that quits leaves at once');
+  finally
+    Join.Free;
+    Host.Free;
+    Msg.Free;
+    Events.Free;
+  end;
+  {$ifndef WASI}
+  { Real UDP on localhost }
+  A := TNetUdpLink.Create(0, '127.0.0.1');
+  B := TNetUdpLink.Create(0, '127.0.0.1');
+  try
+    Check(A.Opened and B.Opened and (A.Port > 0) and (A.Port <> B.Port), 'net link: UDP sockets open on free ports');
+    SetLength(Data, 3);
+    Data[0] := 1;
+    Data[1] := 2;
+    Data[2] := 3;
+    Got := False;
+    if A.Send('localhost:' + IntToStr(B.Port), Data) then
+      for I := 1 to 200 do
+      begin
+        Got := B.Receive(Peer, Data);
+        if Got then
+          Break;
+        Sleep(5);
+      end;
+    Check(Got and (Length(Data) = 3) and (Data[2] = 3) and (Peer = '127.0.0.1:' + IntToStr(A.Port)) and
+      (B.NormalizePeer('localhost:' + IntToStr(A.Port)) = Peer), 'net link: a UDP datagram on localhost, with its sender');
+  finally
+    A.Free;
+    B.Free;
+  end;
+  {$endif}
+end;
+
 procedure TestBots;
 var
   Stats: TQuakePlayerStats;
@@ -3611,6 +3741,8 @@ var
     begin
       Msg.WriteByte(SvcServerData);
       Msg.WriteString('demo1');
+      Msg.WriteByte(1);
+      Msg.WriteByte(2);
       Msg.WriteByte(SvcConfigString);
       Msg.WriteWord(1);
       Msg.WriteString('models/monsters/soldier/tris.md2');
@@ -3759,7 +3891,8 @@ begin
     Check(F.Valid and (F.ServerFrame = 2) and (Length(F.Entities) = 3) and
       EntityStatesEqual(F.Entities[1], New[1]) and PlayerStatesEqual(F.Player, P1),
       'Net: client snapshot after a delta');
-    Check((Client.MapName = 'demo1') and (Client.ModelNames[1] = 'models/monsters/soldier/tris.md2'),
+    Check((Client.MapName = 'demo1') and Client.Deathmatch and (Client.Skill = 2) and
+      (Client.ModelNames[1] = 'models/monsters/soldier/tris.md2'),
       'Net: client map and model table');
     SendFrame(9, 7, New, Old, P1, P1, False);
     Client.ReadPackets;
@@ -4141,6 +4274,7 @@ begin
   TestWebParams;
   TestDeathmatch;
   TestBots;
+  TestNetLink;
   TestNet;
   TestInstalls;
   TestInsane;

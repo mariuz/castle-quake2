@@ -22,7 +22,7 @@ What it offers instead:
 - **A readable Quake 2 to learn from.** Object Pascal on a general-purpose game engine, with [documentation](docs/ARCHITECTURE.md) that maps each Quake 2 system to the engine parts it uses. Quake 2 maps open in the Castle Game Engine's visual editor.
 - **Tested by machine**: about 410 unit checks and dozens of scripted play sessions run on every change, with screenshot comparisons.
 
-What it doesn't do (yet): multiplayer over a network (deathmatch rules work, with bots in the same process), the full retail game checked from start to finish, and measured performance on real graphics cards. The [roadmap](docs/ROADMAP.md) has the details.
+What it doesn't do (yet): multiplayer over a real network (deathmatch with bots works, and a second instance can join over UDP on the same machine), the full retail game checked from start to finish, and measured performance on real graphics cards. The [roadmap](docs/ROADMAP.md) has the details.
 
 ## Highlights
 

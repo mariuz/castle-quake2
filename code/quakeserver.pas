@@ -33,6 +33,9 @@ type
     Ack, LastSequence, PlacedSequence: Integer;
     { Placed since the last snapshot; map data and models still to send }
     PlayerChanged, SendServerData: Boolean;
+    { Player.ViewTurns acted on, and the first snapshot with that view
+      (commands' angles count once the client acknowledges it) }
+    SeenTurns, AimFrame: Integer;
     ModelsSent: Integer;
     Frames: array[0..UpdateBackup - 1] of TNetFrame;
     Commands, StringCommands, LastBytes, LastDelta: Integer;
@@ -141,7 +144,7 @@ implementation
 
 uses
   Math, CastleLog, CastleBoxes, CastleUtils, QuakeLight, QuakeEntities, QuakeGeometry, QuakeMd2,
-  QuakeHud, QuakeBsp;
+  QuakeHud, QuakeBsp, QuakeSettings;
 
 function NetAnglesToDir(const PitchDeg, YawDeg: Single): TVector3;
 begin
@@ -587,6 +590,9 @@ begin
   { Placed after the last command: the client's prediction for it is moot }
   if C.PlacedSequence = C.LastSequence then
     F.Player.PmFlags := F.Player.PmFlags or PmfTeleport;
+  { Turned by the world and not yet seen: the client takes these angles }
+  if (not C.Local) and (C.Ack < C.AimFrame) then
+    F.Player.PmFlags := F.Player.PmFlags or PmfTeleport;
   Angles := Vector3(-RadToDeg(ArcSin(EnsureRange(C.Player.Dir.Y, -1, 1))),
     RadToDeg(ArcTan2(-C.Player.Dir.Z, C.Player.Dir.X)), 0);
   F.Player.ViewAngles := Vector3(QuantizeAngle(Angles.X), QuantizeAngle(Angles.Y), 0);
@@ -647,7 +653,17 @@ begin
   Inc(C.Commands);
   C.LastCmd := Cmd;
   C.LastSequence := Sequence;
-  C.Player.Dir := NetAnglesToDir(ShortToAngle(Cmd.Angles[0]), ShortToAngle(Cmd.Angles[1])).Normalize;
+  { The world turned this player (spawn, respawn, teleport): its view is
+    kept until the client acknowledges a snapshot that shows it (a light
+    form of Quake 2's delta_angles); the view's own client is placed by
+    the view instead }
+  if C.Player.ViewTurns <> C.SeenTurns then
+  begin
+    C.SeenTurns := C.Player.ViewTurns;
+    C.AimFrame := FFrameNum + 1;
+  end;
+  if C.Local or (C.Ack >= C.AimFrame) then
+    C.Player.Dir := NetAnglesToDir(ShortToAngle(Cmd.Angles[0]), ShortToAngle(Cmd.Angles[1])).Normalize;
   { ClientThink's Pmove: movers push the player first (PlayerBeforeMove) }
   if (Cmd.Msec > 0) and not C.Player.Dead then
   begin
@@ -924,6 +940,10 @@ begin
   begin
     FMsg.WriteByte(SvcServerData);
     FMsg.WriteString(FMapName);
+    { What a joining client's map needs to spawn the same brush entities
+      (and its HUD the frags) }
+    FMsg.WriteByte(Ord(Deathmatch));
+    FMsg.WriteByte(GameSkill);
     C.SendServerData := False;
   end;
   { The models this client doesn't know yet }

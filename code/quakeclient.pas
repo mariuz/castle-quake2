@@ -39,6 +39,8 @@ type
       FFrame: TNetFrame;
       FModels: array[0..MaxNetModels - 1] of String;
       FMapName: String;
+      FDeathmatch: Boolean;
+      FSkill, FServerDataCount: Integer;
       FFramesReceived, FBadFrames: Integer;
       FCmds: array[0..CmdBackup - 1] of TSentCmd;
       FOutgoing: Integer;
@@ -72,6 +74,11 @@ type
     function FrameAt(const ServerFrame: Integer; out F: TNetFrame): Boolean;
     property ModelNames[const Index: Integer]: String read GetModelName;
     property MapName: String read FMapName;
+    { The server's game (svc_serverdata): deathmatch, skill; how many server
+      data messages came (a new one = a new map, or the same one again) }
+    property Deathmatch: Boolean read FDeathmatch;
+    property Skill: Integer read FSkill;
+    property ServerDataCount: Integer read FServerDataCount;
     property FramesReceived: Integer read FFramesReceived;
     { Snapshots that could not be read (missing delta base, short message) }
     property BadFrames: Integer read FBadFrames;
@@ -268,6 +275,9 @@ begin
           SvcServerData:
             begin
               FMapName := Msg.ReadString;
+              FDeathmatch := Msg.ReadByte <> 0;
+              FSkill := Msg.ReadByte;
+              Inc(FServerDataCount);
               for I := 0 to UpdateBackup - 1 do
                 FFrames[I] := Default(TNetFrame);
               FFrame := Default(TNetFrame);

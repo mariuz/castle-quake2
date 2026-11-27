@@ -16,7 +16,7 @@ uses
   QuakePak, QuakePalette, QuakeBsp, QuakeGeometry, QuakeLight, QuakeSound, QuakeMd2,
   QuakeHud, QuakeParticles, QuakeEntities, QuakeWorld, QuakeConsole, QuakeMenu, QuakeMap, QuakeGamepad, QuakeTouch, QuakeExitWatchdog, QuakeBenchmark, CastleTimeUtils,
   X3DNodes, X3DFields, CastleRenderOptions,
-  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevel, QuakeLevelGen, QuakeLevelEditor, QuakeBspBuilder, QuakeTrace, QuakeTick, QuakeNet, QuakeServer, QuakeClient, QuakeClientScene, QuakePMove, QuakeBot, fpjson, jsonparser, CastleDownload, CastleUriUtils;
+  QuakePlayer, QuakeSettings, QuakeMapReport, QuakeRecord, QuakeLevel, QuakeLevelGen, QuakeLevelEditor, QuakeBspBuilder, QuakeTrace, QuakeTick, QuakeNet, QuakeServer, QuakeClient, QuakeClientScene, QuakePMove, QuakeBot, QuakeNetLink, fpjson, jsonparser, CastleDownload, CastleUriUtils;
 
 type
   TCameraMode = (cmFirstPerson, cmNoclip);
@@ -95,6 +95,18 @@ type
     { Test clients (addclient): more players on the server, each with a
       loopback channel and a client of its own, held inputs (clientinput) }
     FTestClients: specialize TObjectList<TTestClient>;
+    { E.4: remote clients of this game over a packet link, or the link to
+      the host this view joined (then the world is ClientOnly and doesn't
+      tick: everything comes in snapshots) }
+    FHostBridge: TNetHostBridge;
+    FJoinBridge: TNetJoinBridge;
+    { The host's server data messages acted on (a new one: its map) }
+    FJoinServerData: Integer;
+    FJoinLost: Boolean;
+    { Take the host's view angles (a new map, a respawn, a teleport), once
+      per snapshot; the health before (a respawn: from <= 0 to above) }
+    FJoinAim: Boolean;
+    FJoinAimFrame, FJoinLastHealth: Integer;
     { A tapped shot (X, a recorded tap) for the next command }
     FNetAttackTap: Boolean;
     { Snapshots compared with the server's, and how many differed }
@@ -155,6 +167,16 @@ type
     procedure TestClientCommand(const Cmd, Args: String);
     { +set bots N }
     procedure AddStartBots;
+    { E.4: other instances join this game (+set port, host) or this one
+      joins another's (+connect, connect) }
+    procedure StartHosting(const Port: Integer);
+    procedure StartJoining(const Address: String);
+    function PeerConnect(const Peer: String; const Channel: TNetLoopback): TObject;
+    procedure PeerDisconnect(const Peer: String; const Ref: TObject);
+    { Join mode, each frame first: the link, the snapshots, the host's map }
+    procedure UpdateJoin(const SecondsPassed: Single);
+    { Join mode: the snapshot's stats into the world's player (HUD, gun) }
+    procedure ApplyClientStats;
     { Each test client reads its snapshots and sends its command }
     procedure UpdateTestClients(const SecondsPassed: Single);
     { The client's copy of the last snapshot must be the server's }
@@ -619,6 +641,18 @@ begin
       the main loop runs) was lost and the report never exited }
     FQuitPending := True;
   end else
+  if NetConnectTo <> '' then
+  begin
+    { +connect: the host's map comes with its server data (UpdateJoin); a
+      script runs meanwhile (the autotest's map is not loaded) }
+    if FAutoTestMap <> '' then
+    begin
+      FAutoTestActive := True;
+      ParseDemoScript(FAutoTestDemo);
+    end;
+    StartJoining(NetConnectTo);
+    NetConnectTo := '';
+  end else
   if FAutoTestMap <> '' then
   begin
     FAutoTestActive := True;
@@ -637,6 +671,165 @@ begin
       OpenEditorOnStart := False;
       OpenEditor;
     end;
+  end;
+  if (NetHostPort > 0) and (FJoinBridge = nil) then
+    StartHosting(NetHostPort);
+end;
+
+procedure TViewPlay.StartHosting(const Port: Integer);
+{$ifndef WASI}
+var
+  Link: TNetUdpLink;
+{$endif}
+begin
+  if FHostBridge <> nil then
+  begin
+    Console.Print('Already hosting');
+    Exit;
+  end;
+  if FJoinBridge <> nil then
+  begin
+    Console.Print('Joined to a host: no hosting');
+    Exit;
+  end;
+  {$ifdef WASI}
+  Console.Print('No UDP on the web');
+  {$else}
+  Link := TNetUdpLink.Create(Port, NetBindAddress);
+  if not Link.Opened then
+  begin
+    Console.Print('Cannot host: ' + Link.Error);
+    WritelnWarning('Net', 'Cannot host on UDP port %d: %s', [Port, Link.Error]);
+    Link.Free;
+    Exit;
+  end;
+  FHostBridge := TNetHostBridge.Create(Link);
+  FHostBridge.OnConnect := @PeerConnect;
+  FHostBridge.OnDisconnect := @PeerDisconnect;
+  Console.Print(Format('Hosting on UDP port %d', [Link.Port]));
+  WritelnLog('Net', 'Hosting on UDP port %d', [Link.Port]);
+  {$endif}
+end;
+
+procedure TViewPlay.StartJoining(const Address: String);
+{$ifndef WASI}
+var
+  Link: TNetUdpLink;
+{$endif}
+begin
+  if FHostBridge <> nil then
+  begin
+    Console.Print('Hosting: no joining');
+    Exit;
+  end;
+  {$ifdef WASI}
+  Console.Print('No UDP on the web');
+  {$else}
+  Link := TNetUdpLink.Create(0, NetBindAddress);
+  if not Link.Opened then
+  begin
+    Console.Print('Cannot connect: ' + Link.Error);
+    WritelnWarning('Net', 'Cannot open a UDP port: %s', [Link.Error]);
+    Link.Free;
+    Exit;
+  end;
+  FreeAndNil(FJoinBridge);
+  FJoinBridge := TNetJoinBridge.Create(Link, Address);
+  { The client talks to the host from now on; the local server idles }
+  FreeAndNil(FClient);
+  FClient := TQuakeClient.Create(FJoinBridge.Channel);
+  FClient.OnPrint := @ClientPrint;
+  FWorld.ClientOnly := True;
+  FClientScene.Enabled := True;
+  FJoinServerData := 0;
+  FJoinLost := False;
+  Console.Print('Connecting to ' + FJoinBridge.Host + '...');
+  WritelnLog('Net', 'Joining %s from UDP port %d', [FJoinBridge.Host, Link.Port]);
+  {$endif}
+end;
+
+function TViewPlay.PeerConnect(const Peer: String; const Channel: TNetLoopback): TObject;
+var
+  C: TServerClient;
+begin
+  C := FServer.AddClient(Channel);
+  Result := C;
+  if C = nil then
+    Exit;
+  WritelnLog('Net', 'Remote client %s is player %d', [Peer, C.Player.Number]);
+  FServer.BroadcastPrint(Format('%s entered the game.', [FWorld.PlayerName(C.Player)]));
+end;
+
+procedure TViewPlay.PeerDisconnect(const Peer: String; const Ref: TObject);
+begin
+  if (Ref = nil) or (FServer = nil) then
+    Exit;
+  FServer.BroadcastPrint(Format('%s left the game.', [FWorld.PlayerName(TServerClient(Ref).Player)]));
+  FServer.RemoveClient(TServerClient(Ref));
+end;
+
+procedure TViewPlay.UpdateJoin(const SecondsPassed: Single);
+begin
+  FJoinBridge.Pump(SecondsPassed);
+  FClient.ReadPackets;
+  if FClient.ServerDataCount <> FJoinServerData then
+  begin
+    { The host's map (first, or a new one): this world loads it with only
+      the brush entities, under the host's deathmatch and skill }
+    FJoinServerData := FClient.ServerDataCount;
+    Deathmatch := FClient.Deathmatch;
+    GameSkill := FClient.Skill;
+    WritelnLog('Net', 'Host map "%s" (deathmatch %d, skill %d)',
+      [FClient.MapName, Ord(Deathmatch), GameSkill]);
+    LoadLevel(FClient.MapName);
+    FJoinAim := True;
+  end;
+  if FJoinServerData = 0 then
+  begin
+    { Knocking: commands without a move until the host answers }
+    FClient.SendMove(False, Vector3(1, 0, 0));
+    FJoinBridge.Pump(0);
+  end;
+  if (FJoinBridge.Silence > PeerTimeout) and not FJoinLost then
+  begin
+    FJoinLost := True;
+    Hud.ShowMessage('No answer from ' + FJoinBridge.Host, 5);
+    WritelnWarning('Net', 'No answer from host %s', [FJoinBridge.Host]);
+  end;
+end;
+
+procedure TViewPlay.ApplyClientStats;
+var
+  P: TQuakePlayer;
+  S: TNetPlayerState;
+  Weapon: Integer;
+begin
+  if not FClient.Frame.Valid then
+    Exit;
+  P := FWorld.CurrentPlayer;
+  S := FClient.Frame.Player;
+  P.Stats.Health := S.Stats[StatHealth];
+  P.Stats.Armor := S.Stats[StatArmor];
+  P.Stats.ArmorType := S.Stats[StatArmorType];
+  P.Stats.WeaponMask := Cardinal(Word(S.Stats[StatWeaponsLow])) or (Cardinal(Word(S.Stats[StatWeaponsHigh])) shl 16);
+  P.Stats.Keys := Cardinal(Word(S.Stats[StatKeysLow])) or (Cardinal(Word(S.Stats[StatKeysHigh])) shl 16);
+  P.Stats.Kills := S.Stats[StatKills];
+  P.Stats.TotalKills := S.Stats[StatTotalKills];
+  P.Stats.Secrets := S.Stats[StatSecrets];
+  P.Stats.TotalSecrets := S.Stats[StatTotalSecrets];
+  P.Stats.Goals := S.Stats[StatGoals];
+  P.Stats.TotalGoals := S.Stats[StatTotalGoals];
+  P.Stats.QuadTime := S.Stats[StatQuad] / 10;
+  P.Stats.InvulnTime := S.Stats[StatInvulnerable] / 10;
+  P.Stats.LevelTime := S.Stats[StatLevelSeconds];
+  P.Frags := S.Stats[StatFrags];
+  Weapon := S.Stats[StatWeapon];
+  if (Weapon >= 1) and (Weapon <= WeaponSlots) then
+  begin
+    if S.Stats[StatAmmo] >= 0 then
+      P.Stats.Ammo[WeaponDefs[Weapon].AmmoType] := S.Stats[StatAmmo];
+    if Weapon <> P.Stats.CurrentWeapon then
+      FWorld.ShowClientWeapon(Weapon);
   end;
 end;
 
@@ -781,7 +974,11 @@ begin
   { Their server clients go with the server; their channels after it }
   if FTestClients <> nil then
     FTestClients.OwnsObjects := False;
+  { Remote clients leave the server before it goes (PeerDisconnect) }
+  FreeAndNil(FHostBridge);
   FreeAndNil(FClient);
+  { After its client: the client sends through the bridge's channel }
+  FreeAndNil(FJoinBridge);
   FreeAndNil(FServer);
   if FTestClients <> nil then
     while FTestClients.Count > 0 do
@@ -1426,6 +1623,12 @@ begin
   if Action = 'E' then { Fire entity targets, like a trigger would }
     FClient.AddCommand('fire ' + Param)
   else
+  if (Action = 'V') and (FWorld.Bsp = nil) then
+  begin
+    { No map (a join still waiting for the host's) }
+    WritelnLog('Demo', 'No map loaded');
+    LogClients;
+  end else
   if Action = 'V' then { Log mover states }
   begin
     WritelnLog('Demo', 'Player at %s (view offset %s, pitch %.1f roll %.1f, gun %s) ladder %s water level %d on ground %s velocity %s health %d', [
@@ -2148,6 +2351,14 @@ begin
   if FWorld = nil then
     Exit;
 
+  { Join mode: nothing to show until the host's map has come }
+  if FJoinBridge <> nil then
+  begin
+    UpdateJoin(SecondsPassed);
+    if FJoinServerData = 0 then
+      Exit;
+  end;
+
   if LabelFps.Exists then
     LabelFps.Caption := 'FPS: ' + Container.Fps.ToString;
 
@@ -2238,6 +2449,34 @@ procedure TViewPlay.MoveAndSend(const Attack: Boolean; const SecondsPassed: Sing
 var
   Alive: Boolean;
 begin
+  if FJoinBridge <> nil then
+  begin
+    { Join mode: the host runs the game; this view predicts its player
+      from the snapshots and sends its commands }
+    FClient.ReadPackets;
+    ApplyClientStats;
+    if FClient.Frame.Valid and (FClient.Frame.ServerFrame <> FJoinAimFrame) then
+    begin
+      if FJoinAim or ((FClient.Frame.Player.PmFlags and PmfTeleport) <> 0) or
+         ((FJoinLastHealth <= 0) and (FClient.Frame.Player.Stats[StatHealth] > 0)) then
+      begin
+        SetLook(FClient.Frame.Player.ViewAngles.Y, FClient.Frame.Player.ViewAngles.X);
+        FJoinAim := False;
+      end;
+      FJoinAimFrame := FClient.Frame.ServerFrame;
+      FJoinLastHealth := FClient.Frame.Player.Stats[StatHealth];
+    end;
+    FWorld.UpdateClientView(SecondsPassed, FClient.Frame.Player.GunFrame);
+    Alive := FClient.Frame.Valid and (FClient.Frame.Player.Stats[StatHealth] > 0) and
+      not PlayerMovement.Suspended;
+    FPredictValid := Alive and PlayerMovement.MoveNow(SecondsPassed);
+    FClient.SendMove(Attack, CgeToQuake(PlayerMovement.AimDirection));
+    FJoinBridge.Pump(0);
+    Exit;
+  end;
+  { Remote clients' commands in, this frame's snapshots out }
+  if FHostBridge <> nil then
+    FHostBridge.Pump(SecondsPassed);
   Alive := not FWorld.Dead and not PlayerMovement.Suspended;
   { Code moved the camera since the last prediction (demo actions, the
     console): the server's player goes there, keeping its velocity }
@@ -2397,8 +2636,32 @@ begin
   for S in FClient.Frame.Entities do
     if S.Number <= MaxNetClients then
       Inc(Seen);
+  if FJoinBridge <> nil then
+  begin
+    { Join mode: the local server is idle; what came from the host }
+    WritelnLog('Demo', 'Join: host %s map "%s", packets in %d out %d, silence %.1f s, frames %d (%d bad), ' +
+      'the view sees %d other players, health %d frags %d, prediction checked %d times, %d off by more than 1/8 (max %.2f), origin %s',
+      [FJoinBridge.Host, FClient.MapName, FJoinBridge.PacketsIn, FJoinBridge.PacketsOut, FJoinBridge.Silence,
+       FClient.FramesReceived, FClient.BadFrames, Seen, FClient.Frame.Player.Stats[StatHealth],
+       FClient.Frame.Player.Stats[StatFrags], FClient.PredictionChecks, FClient.PredictionErrors,
+       FClient.MaxPredictionError, FClient.Frame.Player.Origin.ToString]);
+    Exit;
+  end;
   WritelnLog('Demo', 'Clients: %d, players %d, the view sees %d other players',
     [FServer.ClientCount, FWorld.Players.Count, Seen]);
+  if FHostBridge <> nil then
+  begin
+    Frags := '';
+    for I := 0 to FHostBridge.PeerCount - 1 do
+      Frags := Frags + ' ' + FHostBridge.PeerName(I);
+    WritelnLog('Demo', 'Host: %d remote clients (%s), packets in %d out %d',
+      [FHostBridge.PeerCount, Trim(Frags), FHostBridge.PacketsIn, FHostBridge.PacketsOut]);
+    for I := 0 to FServer.ClientCount - 1 do
+      if not FServer.Clients[I].Local then
+        WritelnLog('Demo', 'Remote player %d at %s health %d',
+          [FServer.Clients[I].Player.Number, FServer.Clients[I].PM.Origin.ToString,
+           FServer.Clients[I].Player.Stats.Health]);
+  end;
   if Deathmatch then
   begin
     Frags := '';
@@ -2477,6 +2740,10 @@ var
   I, Count: Integer;
 begin
   Count := FTickClock.AddFrame(SecondsPassed);
+  { Join mode: no ticks here (the clock only places the snapshots' models
+    between the last two) }
+  if FJoinBridge <> nil then
+    Exit;
   for I := 1 to Count do
   begin
     FWorld.CollectMovingTransforms(FTickList);
@@ -2655,6 +2922,18 @@ begin
   if (Cmd = 'addclient') or (Cmd = 'addbot') or (Cmd = 'clientinput') or (Cmd = 'removeclient') or (Cmd = 'clientgoto') then
     TestClientCommand(Cmd, Args)
   else
+  if Cmd = 'host' then
+    { host [port]: other instances may join (UDP) }
+    StartHosting(StrToIntDef(Trim(Args), DefaultNetPort))
+  else
+  if Cmd = 'connect' then
+  begin
+    { connect <address[:port]>: join another instance's game }
+    if Trim(Args) = '' then
+      Console.Print('Usage: connect <address[:port]>')
+    else
+      StartJoining(Trim(Args));
+  end else
   if Cmd = 'clientdraw' then
   begin
     { clientdraw [0|1]: the client draws the models from the snapshots }

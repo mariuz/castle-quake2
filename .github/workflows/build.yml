@@ -312,6 +312,19 @@ jobs:
           L=test_output/botsp.log
           grep -E "Bot [0-9]|Kills:" $L
           grep -q "Bot 1 added" $L && grep -qE "Kills: [1-9][0-9]* / " $L && ! grep -q Exception $L || { echo "::error::A bot against monsters (see botsp.log)"; exit 1; }
+          # Join over UDP (E.4 step 1): a deathmatch host on a localhost port and a second process joining it; the joiner
+          # loads the host's map, sees the host's player, walks with the virtual stick (the host sees it move), predicts
+          # without errors and says goodbye when it quits
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 +set deathmatch 1 +set ip 127.0.0.1 +set port 27999 --autotest demo1 test_output/host --demo 'W:1,O:notarget,W:4,V,W:4,V,W:4,V,W:6,V,Q' > test_output/host.log 2>&1 &
+          HOSTPID=$!
+          sleep 2
+          timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 +set ip 127.0.0.1 +connect 127.0.0.1:27999 --autotest demo1 test_output/join --demo 'W:3,V,S,GP:0 1 0 0 0 0,W:1,GP:,W:0.5,V,S,Q' > test_output/join.log 2>&1
+          wait $HOSTPID
+          grep -hE "Net: (Hosting|Remote|Peer|Joining|Host map)|Join:|Host:|Remote player" test_output/host.log test_output/join.log
+          L=test_output/join.log
+          grep -q 'Host map "demo1" (deathmatch 1' $L && [ "$(grep -c 'Join: host 127.0.0.1:27999 map "demo1".*(0 bad), the view sees 1 other players.* 0 off by more than 1/8' $L)" = 2 ] && [ "$(grep 'Join:' $L | grep -o 'origin [-0-9. ]*' | sort -u | wc -l)" = 2 ] && ! grep -q Exception $L || { echo "::error::Joining a host over UDP (see join.log)"; exit 1; }
+          L=test_output/host.log
+          grep -q "Remote client 127.0.0.1:[0-9]* is player 2" $L && grep -q "Remote player 2 at" $L && grep -q "left (goodbye)" $L && grep -q "Host: 0 remote clients" $L && ! grep -q Exception $L || { echo "::error::Hosting a remote client over UDP (see host.log)"; exit 1; }
           # func_door_secret2 (the mission pack's, in the remaster): used by its targetname, it slides away in two moves; OPEN_ONCE stays open, the other closes after its wait (2 s)
           timeout 600 xvfb-run -a -s "-screen 0 1600x900x24" ./castle-quake2 --autotest demo1 test_output/sec2 --demo 'W:1,Y,O:notarget,O:spawn func_door_secret2 targetname sd2 spawnflags 1 angle 90 origin "60 -400 24" mins "-32 -8 -24" maxs "32 8 40",O:spawn func_door_secret2 targetname sd3 wait 2 angle 0 origin "200 -400 24" mins "-8 -32 -24" maxs "8 32 40",W:0.5,E:sd2,E:sd3,W:0.5,V,W:3.5,V,W:6,V,Q' > test_output/sec2.log 2>&1
           [ "$(grep -c 'func_door_secret2  tex frame [0-9]* state 2 progress 2.00' test_output/sec2.log)" = 3 ] && grep -q 'Mover 13 func_door_secret2  tex frame [0-9]* state 0 progress 0.00' test_output/sec2.log && ! grep -q Exception test_output/sec2.log || { echo "::error::func_door_secret2 (see sec2.log)"; exit 1; }

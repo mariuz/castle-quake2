@@ -109,6 +109,9 @@ type
     { Fire pressed while dead (Quake 2 latched_buttons: respawns in
       deathmatch) }
     LatchedAttack: Boolean;
+    { Times the world turned the player itself (spawn, respawn, teleport):
+      the server then keeps that view until the client has seen it }
+    ViewTurns: Integer;
     constructor Create(const ANumber: Integer);
     destructor Destroy; override;
   end;
@@ -203,6 +206,10 @@ type
       a player's gun fires and while a player's projectile moves); nil for
       monsters and the world. Deathmatch frags go to it. }
     FAttacker: TQuakePlayer;
+    { Join mode: only brush entities spawn (SpawnEntity); the view
+      weapon's frame from the host (UpdateClientView) }
+    FClientOnly: Boolean;
+    FClientGunFrame: Integer;
     { Death message instead of the generic one (target_changelevel in
       deathmatch: "found a way out") }
     FObituaryText: String;
@@ -301,6 +308,8 @@ type
     procedure SpawnEntities(const SpawnName: String);
     function ModelBox(const AModel: String; out Box: TBox3D): Boolean;
     procedure UpdateWeaponModel;
+    { The view weapon (frames, kick, light, shells) and the HUD }
+    procedure UpdateViewWeaponAndHud(const SecondsPassed: Single);
     procedure CheckPickups;
     procedure CheckTriggers(const SecondsPassed: Single);
     procedure CheckMovers;
@@ -624,6 +633,14 @@ type
     function ProjectileCount: Integer;
     function DelayedCount: Integer;
     property Pickups: TQuakePickupList read FPickups;
+    { A joining client's world: maps load only their brush entities (the
+      host runs the game); set before LoadMap }
+    property ClientOnly: Boolean read FClientOnly write FClientOnly;
+    { Join mode: the view weapon of the weapon the host's snapshots name }
+    procedure ShowClientWeapon(const Slot: Integer);
+    { Join mode, every frame instead of Update: light styles, the sky,
+      model lights, the view weapon on GunFrame and the HUD }
+    procedure UpdateClientView(const SecondsPassed: Single; const GunFrame: Integer);
     property Projectiles: TQuakeProjectileList read FProjectiles;
     property Props: TQuakePropList read FProps;
     property Lasers: TQuakeLaserList read FLasers;
@@ -995,6 +1012,7 @@ begin
   end else
     FCur.Pos := QuakeToCge(Org) + Vector3(0, PlayerEyeHeight - 24, 0);
   FCur.Dir := YawToCgeDir(Angle);
+  Inc(FCur.ViewTurns);
   if IsLocal then
   begin
     { The view places the camera (and the server's player), like a teleport }
@@ -1373,9 +1391,6 @@ var
   I: Integer;
   M: TQuakeMonster;
   D: TDelayedTarget;
-  Kick: Single;
-  Shell: TVector3;
-  A: TAmmoType;
   P, Local: TQuakePlayer;
 begin
   if FBsp = nil then
@@ -1523,11 +1538,25 @@ begin
   SetSurfaceLights;
   UpdateModelLights;
 
+  UpdateViewWeaponAndHud(SecondsPassed);
+end;
+
+procedure TQuakeWorld.UpdateViewWeaponAndHud(const SecondsPassed: Single);
+var
+  Shell: TVector3;
+  Kick: Single;
+  I: Integer;
+  A: TAmmoType;
+begin
   { View weapon: gun frames, kick and lighting }
   FWeaponKick := Max(0, FWeaponKick - SecondsPassed * 6);
   if FWeaponModel <> nil then
   begin
-    FWeaponModel.ShowFrames(FCur.Gun.OldFrame, FCur.Gun.Frame, FCur.Gun.FrameLerp);
+    { Join mode: the frame the host's snapshot named }
+    if FClientOnly and (FClientGunFrame >= 0) then
+      FWeaponModel.ShowFrames(FClientGunFrame, FClientGunFrame, 0)
+    else
+      FWeaponModel.ShowFrames(FCur.Gun.OldFrame, FCur.Gun.Frame, FCur.Gun.FrameLerp);
     FWeaponModel.SetTint(Lighting.SampleLight(FCur.Pos - Vector3(0, 20, 0)));
     { Powerup shells: quad RF_SHELL_BLUE, invulnerability RF_SHELL_RED;
       they blink in the last 3 seconds, like the Quake 2 HUD icons }
@@ -1557,6 +1586,20 @@ begin
     FHud.Frags := FCur.Frags;
     FHud.Update(SecondsPassed, FCur.Stats, WeaponDefs[FCur.Stats.CurrentWeapon].Icon, AmmoIcons[A], FKeyIcons);
   end;
+end;
+
+procedure TQuakeWorld.UpdateClientView(const SecondsPassed: Single; const GunFrame: Integer);
+begin
+  if FBsp = nil then
+    Exit;
+  { What Update does for the view, without the game: light styles, the
+    sky, model lights, the view weapon on the host's frame and the HUD }
+  FMap.UpdateSkyRotation(FCur.Stats.LevelTime);
+  Lighting.Update(SecondsPassed);
+  SetSurfaceLights;
+  UpdateModelLights;
+  FClientGunFrame := GunFrame;
+  UpdateViewWeaponAndHud(SecondsPassed);
 end;
 
 procedure TQuakeWorld.UpdateFrame(const SecondsPassed: Single);

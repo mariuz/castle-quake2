@@ -179,6 +179,12 @@ begin
   if (CName = 'info_player_start') or (CName = 'info_player_deathmatch') then
     Exit; { chosen by ChooseSpawnPoint }
 
+  { A joining client's world (TViewPlay's join mode): only the map's brush
+    entities (doors, lifts, glass) to draw and to trace against; the host's
+    server runs everything else and sends it in snapshots }
+  if FClientOnly and not ((Length(Ent.Model) > 1) and (Ent.Model[1] = '*')) then
+    Exit;
+
   { Doors spawned from the console with mins / maxs (no *N model): a box
     mover, like the turrets below }
   if ((CName = 'func_door') or (CName = 'func_door_secret') or (CName = 'func_door_secret2')) and (Ent.Model = '') and

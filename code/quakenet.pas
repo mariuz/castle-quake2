@@ -218,6 +218,10 @@ type
     procedure SendToClient(const Msg: TNetMessage);
     function ReceiveOnServer(out Data: TBytes): Boolean;
     function ReceiveOnClient(out Data: TBytes): Boolean;
+    { A packet that came from elsewhere (QuakeNetLink's bridges): for the
+      server end, or for the client end }
+    procedure PushToServer(const Data: TBytes);
+    procedure PushToClient(const Data: TBytes);
     procedure Clear;
   end;
 
@@ -471,6 +475,20 @@ procedure TNetLoopback.SendToClient(const Msg: TNetMessage);
 begin
   FToClient.Enqueue(Msg.ToBytes);
   Inc(BytesToClient, Msg.Size);
+  Inc(PacketsToClient);
+end;
+
+procedure TNetLoopback.PushToServer(const Data: TBytes);
+begin
+  FToServer.Enqueue(Data);
+  Inc(BytesToServer, Length(Data));
+  Inc(PacketsToServer);
+end;
+
+procedure TNetLoopback.PushToClient(const Data: TBytes);
+begin
+  FToClient.Enqueue(Data);
+  Inc(BytesToClient, Length(Data));
   Inc(PacketsToClient);
 end;
 

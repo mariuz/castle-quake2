@@ -1074,6 +1074,7 @@ begin
             FCur.PM.ResetState;
             FCur.Pos := QuakeToCge(FCur.PM.Origin + Vector3(0, 0, FCur.PM.ViewHeight));
             FCur.Dir := YawToCgeDir(Dest.Angle);
+            Inc(FCur.ViewTurns);
           end;
           Particles.SpawnTeleport(QuakeToCge(Dest.Origin) + Vector3(0, PlayerEyeHeight - 24 + 10, 0));
           Sounds.Play('sound/misc/tele1.wav');

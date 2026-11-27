@@ -43,6 +43,19 @@ begin
   end;
 end;
 
+procedure TQuakeWorld.ShowClientWeapon(const Slot: Integer);
+begin
+  if (Slot < 1) or (Slot > WeaponSlots) then
+    Exit;
+  FCur.Stats.CurrentWeapon := Slot;
+  { Its idle frame, not the put-away frames of the last one }
+  FCur.Gun.Reset(Slot, False);
+  { A map load left no model: make one even for the same slot }
+  if FWeaponModel = nil then
+    FWeaponModelSlot := -1;
+  UpdateWeaponModel;
+end;
+
 procedure TQuakeWorld.FireHitscan(const Origin, Dir: TVector3; const Damage: Integer;
   const HSpread, VSpread: Single; const Rail: Boolean);
 var
